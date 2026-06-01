@@ -76,11 +76,17 @@ setupDrop('c-drop3', 'c-file3', file => {
 });
 
 function cCheckReady() {
-  const btn = document.getElementById('c-btn');
-  const ready = _dim() && _dim().length > 0 && _base() && _base().length > 0;
+  const btn   = document.getElementById('c-btn');
+  const ready = !!(_dim()  && _dim().length  > 0) &&
+                !!(_base() && _base().length > 0);
   btn.disabled    = !ready;
   btn.textContent = 'Comparar';
+  return ready;
 }
+
+// Poll every 400ms — ensures button enables as soon as both datasets are ready,
+// regardless of load order or async parse timing.
+setInterval(cCheckReady, 400);
 
 // ══════════════════════════════════════════════════════
 // PARSERS
@@ -154,6 +160,8 @@ function cParseEscalaReal(wb) {
 
   // 4. Parse MATRIZ sheet
   const matrizSheet = wb.SheetNames.find(s => s.toUpperCase().includes('MATRIZ'));
+  console.log('[cParseEscalaReal] Sheets:', wb.SheetNames, '| Matriz found:', matrizSheet);
+  console.log('[cParseEscalaReal] Horario codes loaded:', Object.keys(horarioMap).length);
   if (!matrizSheet) return [];
 
   const ws   = wb.Sheets[matrizSheet];
@@ -184,6 +192,7 @@ function cParseEscalaReal(wb) {
       out.push({ matricula: mat, setor: cargo, funcao: cargo, entrada: hor.entrada, saida: hor.saida });
     }
   }
+  console.log('[cParseEscalaReal] Records parsed:', out.length, '| Sample:', out.slice(0,2));
   return out;
 }
 

@@ -66,7 +66,7 @@ function readXlsx(file, cb) {
   const r = new FileReader();
   r.onload = e => {
     try {
-      const wb = XLSX.read(e.target.result, { type: 'array', dense: false });
+      const wb = XLSX.read(e.target.result, { type: 'array' });
       cb(wb);
     } catch (err) {
       console.error('SheetJS parse error:', err);
