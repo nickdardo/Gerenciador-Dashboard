@@ -189,11 +189,57 @@ function cParseEscalaReal(wb) {
       const hor = horarioMap[code];
       if (!hor) continue;
 
-      out.push({ matricula: mat, setor: cargo, funcao: cargo, entrada: hor.entrada, saida: hor.saida });
+      out.push({ matricula: mat, setor: cargo, funcao: cargo, entrada: hor.entrada, saida: hor.saida, dayIdx: d });
     }
   }
-  console.log('[cParseEscalaReal] Records parsed:', out.length, '| Sample:', out.slice(0,2));
-  return out;
+  console.log('[cParseEscalaReal] Records parsed:', out.length, '| Days:', new Set(out.map(r=>r.dayIdx)).size);
+
+  // ── Average daily normalisation ──────────────────────
+  // The real schedule spans the full month. To compare fairly against
+  // the dimensionamento (one generic day), we compute coverage per hour
+  // for each calendar day, then return ONE synthetic record per
+  // (funcao, hour-slot) weighted by the average across all days.
+  // We encode this as virtual "1-hour" entries so the existing
+  // coverage() function produces the correct averaged values.
+
+  const uniqueDays = new Set(out.map(r => r.dayIdx));
+  const nDays      = uniqueDays.size || 1;
+
+  // Build per-funcao, per-hour average count
+  const funcoes = [...new Set(out.map(r => r.funcao))];
+  const avgRecords = [];
+
+  for (const funcao of funcoes) {
+    const recs = out.filter(r => r.funcao === funcao);
+
+    // For each day, compute hourly coverage
+    const hourlySums = new Array(24).fill(0);
+
+    for (const dayIdx of uniqueDays) {
+      const dayRecs = recs.filter(r => r.dayIdx === dayIdx);
+      for (let h = 0; h < 24; h++) {
+        const T = h * 60;
+        for (const r of dayRecs) {
+          const E = r.entrada, S = r.saida, mid = E > S;
+          if (mid ? (T >= E || T < S) : (T >= E && T < S)) hourlySums[h]++;
+        }
+      }
+    }
+
+    // Emit Math.round(avg) synthetic 1-hour records per hour slot
+    for (let h = 0; h < 24; h++) {
+      const avg = hourlySums[h] / nDays;
+      const count = Math.round(avg);
+      const entrada = h * 60;
+      const saida   = (h + 1) * 60 >= 1440 ? 0 : (h + 1) * 60;
+      for (let k = 0; k < count; k++) {
+        avgRecords.push({ setor: funcao, funcao, entrada, saida });
+      }
+    }
+  }
+
+  console.log('[cParseEscalaReal] Avg daily records (normalised):', avgRecords.length, '| Days averaged:', nDays);
+  return avgRecords;
 }
 
 /**
