@@ -2,14 +2,11 @@
 // PAGE 1 — GERADOR DE ESCALA
 // ══════════════════════════════════════════════════════
 // Reads any Dimensionamento_*.xlsx regardless of airport/operation.
-// Structure expected:
-//   - One or more sheets
-//   - Data rows start at row 100 (0-indexed: ri >= 99)
-//   - Each column pair from col 5 onward: [qty, "FuncaoNome,NHh"]
-//   - Optional setor override at col+6
+// Automatically detects BASE sigla from the file and shows it in the UI.
 
 let gFile = null;
 let gRows = [];
+let gBase = null;
 
 // ── Wire up drop zone ─────────────────────────────────
 setupDrop('g-drop', 'g-file', file => {
@@ -19,6 +16,18 @@ setupDrop('g-drop', 'g-file', file => {
   document.getElementById('g-btn').disabled = false;
   setStatus('g', null);
   document.getElementById('g-result').style.display = 'none';
+
+  // Quick pre-read to detect base before user clicks Generate
+  readXlsx(file, wb => {
+    gBase = detectBase(wb);
+    setBaseBadge(gBase);
+    if (gBase) {
+      document.getElementById('g-base-info').textContent = `Base detectada: ${gBase}`;
+      document.getElementById('g-base-info').style.display = 'block';
+    } else {
+      document.getElementById('g-base-info').style.display = 'none';
+    }
+  });
 });
 
 // ── Generate ──────────────────────────────────────────
@@ -28,6 +37,8 @@ function gGenerate() {
   setTimeout(() => {
     readXlsx(gFile, wb => {
       try {
+        gBase = detectBase(wb) || gBase;
+        setBaseBadge(gBase);
         gRows = gParse(wb);
         gRender(gRows);
       } catch (e) {
@@ -38,6 +49,11 @@ function gGenerate() {
 }
 
 // ── Parser ────────────────────────────────────────────
+// Expected structure:
+//   - One or more sheets (each = a setor/function group)
+//   - Data rows start at row 100 (0-indexed: ri >= 99)
+//   - Column pairs from col 5 onward: [qty, "FuncaoNome,NHh"]
+//   - Optional setor override at col+6
 function gParse(wb) {
   const rows = [];
 
@@ -99,7 +115,8 @@ function gRender(rows) {
   const counts = {};
   rows.forEach(r => { counts[r.sheetName] = (counts[r.sheetName] || 0) + 1; });
 
-  let statsHtml = `<div class="stat"><div class="num g">${rows.length}</div><div class="lbl">Total</div></div>`;
+  const baseLabel = gBase ? ` · ${gBase}` : '';
+  let statsHtml = `<div class="stat"><div class="num g">${rows.length}</div><div class="lbl">Total${baseLabel}</div></div>`;
   for (const [s, c] of Object.entries(counts)) {
     statsHtml += `<div class="stat"><div class="num g">${c}</div><div class="lbl">${s}</div></div>`;
   }
@@ -122,11 +139,11 @@ function gRender(rows) {
   });
 
   document.getElementById('g-note').textContent = rows.length > 200
-    ? `Exibindo 200 de ${rows.length} linhas. O Excel tera todos os registros.`
+    ? `Exibindo 200 de ${rows.length} linhas. O Excel terá todos os registros.`
     : `${rows.length} registros encontrados.`;
 
   document.getElementById('g-result').style.display = 'block';
-  setStatus('g', 'ok', `${rows.length} linhas geradas.`);
+  setStatus('g', 'ok', `${rows.length} linhas geradas${gBase ? ` · ${gBase}` : ''}.`);
 }
 
 // ── Chip colour by setor name ─────────────────────────
@@ -144,8 +161,9 @@ function gChipClass(s) {
 function gDownload() {
   if (!gRows.length) return;
 
-  const today   = new Date().toISOString().slice(0, 10);
-  const wsData  = [['SETOR', 'FUNCAO', 'ENTRADA', 'SAIDA', 'HORARIO', 'CARGA HORARIA']];
+  const today    = new Date().toISOString().slice(0, 10);
+  const basePart = gBase ? `_${gBase}` : '';
+  const wsData   = [['SETOR', 'FUNCAO', 'ENTRADA', 'SAIDA', 'HORARIO', 'CARGA HORARIA']];
   gRows.forEach(r => wsData.push([r.setor, r.funcao, r.entrada, r.saida, r.horario, r.carga]));
 
   const ws = XLSX.utils.aoa_to_sheet(wsData);
@@ -153,17 +171,20 @@ function gDownload() {
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'ESCALA');
-  XLSX.writeFile(wb, `Escala_${today}.xlsx`);
+  XLSX.writeFile(wb, `Escala${basePart}_${today}.xlsx`);
 }
 
 // ── Reset ─────────────────────────────────────────────
 function gReset() {
   gFile = null;
   gRows = [];
-  document.getElementById('g-fname').innerHTML    = '';
-  document.getElementById('g-btn').disabled       = true;
-  document.getElementById('g-drop').className     = 'drop';
+  gBase = null;
+  document.getElementById('g-fname').innerHTML      = '';
+  document.getElementById('g-base-info').style.display = 'none';
+  document.getElementById('g-btn').disabled         = true;
+  document.getElementById('g-drop').className       = 'drop';
   document.getElementById('g-result').style.display = 'none';
-  document.getElementById('g-file').value         = '';
+  document.getElementById('g-file').value           = '';
   setStatus('g', null);
+  setBaseBadge(null);
 }

@@ -7,12 +7,53 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
   <link rel="stylesheet" href="css/style.css">
+  <style>
+    /* Base badge in nav */
+    .nav-base-badge {
+      display: none;
+      align-items: center;
+      margin-left: 12px;
+      padding: 2px 10px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      background: var(--blue-l);
+      color: var(--blue);
+      border: 1px solid rgba(26,86,219,0.2);
+    }
+    /* Format badge next to filename */
+    .fmt-badge {
+      display: none;
+      font-size: 10px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      background: var(--orange-l);
+      color: var(--orange);
+      font-weight: 600;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+    /* Base info line in generator */
+    .base-info {
+      display: none;
+      font-size: 11px;
+      color: var(--blue);
+      font-weight: 600;
+      margin-top: 8px;
+      padding: 6px 10px;
+      background: var(--blue-l);
+      border-radius: 4px;
+    }
+  </style>
 </head>
 <body>
 
 <!-- Nav -->
 <nav>
   <div class="nav-brand">· <span>Escalas</span></div>
+  <span class="nav-base-badge" id="nav-base-badge"></span>
+  <div style="flex:1"></div>
   <div class="nav-tab active-gen" id="tab-gen"  onclick="showPage('gen')">Gerador</div>
   <div class="nav-tab"            id="tab-comp" onclick="showPage('comp')">Comparador</div>
 </nav>
@@ -28,13 +69,14 @@
   <div class="card card-top-g">
     <div class="card-label">Dimensionamento</div>
     <div class="drop" id="g-drop">
-      <input type="file" id="g-file" accept=".xlsx,.xls">
+      <input type="file" id="g-file" accept=".xlsx,.xls,.xlsb">
       <div class="drop-text">
         <b>Clique ou arraste o arquivo</b>
         Dimensionamento_*.xlsx
       </div>
     </div>
     <div id="g-fname"></div>
+    <div class="base-info" id="g-base-info"></div>
 
     <button class="btn btn-g" id="g-btn" disabled onclick="gGenerate()">Gerar Escala</button>
 
@@ -81,18 +123,24 @@
 <div class="page" id="page-comp">
 
   <div class="upload-3col">
+    <!-- Slot 1: aceita xlsx E xlsb -->
     <div class="card card-top-g" style="margin-bottom:0;padding:16px">
-      <div class="card-label" style="margin-bottom:10px"><span class="dot g"></span>Escala Base</div>
+      <div class="card-label" style="margin-bottom:10px">
+        <span class="dot g"></span>
+        <span id="c-base-label2">Escala Base</span>
+        <span class="fmt-badge" id="c-fmt1"></span>
+      </div>
       <div class="drop" id="c-drop1" style="padding:14px 16px">
-        <input type="file" id="c-file1" accept=".xlsx,.xls">
+        <input type="file" id="c-file1" accept=".xlsx,.xls,.xlsb">
         <div class="drop-text">
           <b>Clique ou arraste</b>
-          ESCALA-BASE-*.xlsx
+          ESCALA-BASE-*.xlsx <span style="opacity:.5">ou</span> *_ESCALA_*.xlsb
         </div>
       </div>
       <div id="c-fname1"></div>
     </div>
 
+    <!-- Slot 2: escala dimensionamento gerada -->
     <div class="card card-top-o" style="margin-bottom:0;padding:16px">
       <div class="card-label" style="margin-bottom:10px"><span class="dot o"></span>Escala Dimensionamento</div>
       <div class="drop" id="c-drop2" style="padding:14px 16px">
@@ -119,7 +167,7 @@
     <div class="card card-top-b">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
         <div class="filter-group" style="margin-bottom:0">
-          <div class="filter-title"><span class="dot g"></span>Funcoes — Base</div>
+          <div class="filter-title"><span class="dot g"></span>Funcoes — <span id="c-base-label">Base</span></div>
           <div class="tags" id="c-tags-base"></div>
         </div>
         <div class="filter-group" style="margin-bottom:0">
@@ -137,7 +185,7 @@
         <span class="drag-icon">⠿</span>
         <span>Pessoas trabalhando por hora</span>
         <div class="legend">
-          <div class="legend-item"><div class="legend-line" style="background:var(--blue)"></div>Base</div>
+          <div class="legend-item"><div class="legend-line" style="background:var(--blue)"></div><span id="c-leg-base-txt">Base</span></div>
           <div class="legend-item"><div class="legend-line" style="background:var(--green);height:0;border-top:2px dashed var(--green)"></div>Dimensionamento</div>
           <div class="legend-item" id="c-leg-demand" style="display:none">
             <div class="legend-line" style="background:#a78bfa;height:0;border-top:2px dotted #a78bfa"></div>
@@ -194,11 +242,11 @@
       <div class="drag-handle">
         <span class="drag-icon">⠿</span>
         <span>Momento Calor — Equipes em atendimento por dia</span>
-        <div style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace;font-weight:400;letter-spacing:0">resolucao de 10 min</div>
+        <div style="font-size:10px;color:var(--muted);font-weight:400">resolução de 10 min</div>
       </div>
 
       <div class="drop" id="c-drop3" style="padding:20px 16px;margin-bottom:0">
-        <input type="file" id="c-file3" accept=".xlsx,.xls">
+        <input type="file" id="c-file3" accept=".xlsx,.xls,.xlsb">
         <div class="drop-text">
           <b>Clique ou arraste o dimensionamento</b>
           Dimensionamento_*.xlsx
@@ -214,7 +262,7 @@
             padding:7px 16px;border-radius:6px;cursor:pointer;transition:all 0.15s;
             background:rgba(167,139,250,0.08);border:1px solid rgba(167,139,250,0.25);color:#a78bfa;
             white-space:nowrap;flex-shrink:0
-          ">Vincular ao grafico principal</button>
+          ">Vincular ao gráfico principal</button>
         </div>
         <div class="chart-wrap" style="height:320px">
           <canvas id="c-demand-chart"></canvas>
@@ -223,7 +271,6 @@
     </div>
 
     </div><!-- /c-cards -->
-
   </div><!-- /c-analysis -->
 
 </div><!-- /page-comp -->
