@@ -108,6 +108,7 @@
 
     <div class="btn-row">
       <button class="btn btn-dim" onclick="gDownload()">Baixar Excel</button>
+      <button class="btn btn-cmp" onclick="gSendToComparator()" style="background:var(--green);color:#fff;">Comparar agora →</button>
       <button class="btn btn-sec" onclick="gReset()">Novo arquivo</button>
     </div>
   </div>
@@ -123,11 +124,11 @@
 <div class="page" id="page-comp">
 
   <div class="upload-3col">
-    <!-- Slot 1: aceita xlsx E xlsb -->
+    <!-- Slot 1: Escala Real — upload pelo usuário (xlsx ou xlsb) -->
     <div class="card card-top-g" style="margin-bottom:0;padding:16px">
       <div class="card-label" style="margin-bottom:10px">
         <span class="dot g"></span>
-        <span id="c-base-label2">Escala Base</span>
+        <span id="c-base-label2">Escala Real</span>
         <span class="fmt-badge" id="c-fmt1"></span>
       </div>
       <div class="drop" id="c-drop1" style="padding:14px 16px">
@@ -140,14 +141,14 @@
       <div id="c-fname1"></div>
     </div>
 
-    <!-- Slot 2: escala dimensionamento gerada -->
+    <!-- Slot 2: Dimensionamento — pré-preenchido pelo Gerador ou upload manual -->
     <div class="card card-top-o" style="margin-bottom:0;padding:16px">
       <div class="card-label" style="margin-bottom:10px"><span class="dot o"></span>Escala Dimensionamento</div>
       <div class="drop" id="c-drop2" style="padding:14px 16px">
         <input type="file" id="c-file2" accept=".xlsx,.xls">
         <div class="drop-text">
           <b>Clique ou arraste</b>
-          ESCALA-CAPACITY-*.xlsx
+          <span style="color:var(--muted);font-size:11px">ou use "Comparar agora" no Gerador</span>
         </div>
       </div>
       <div id="c-fname2"></div>
