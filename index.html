@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Escalas · Dimensionamento</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- Nav -->
+<nav>
+  <div class="nav-brand">· <span>Escalas</span></div>
+  <div class="nav-tab active-gen" id="tab-gen"  onclick="showPage('gen')">Gerador</div>
+  <div class="nav-tab"            id="tab-comp" onclick="showPage('comp')">Comparador</div>
+</nav>
+
+<!-- ══════════════════════════════════════════════
+     PAGE 1 — GERADOR
+════════════════════════════════════════════════ -->
+<div class="page active" id="page-gen">
+<div class="gen-layout">
+
+  <!-- Left col: upload -->
+  <div>
+  <div class="card card-top-g">
+    <div class="card-label">Dimensionamento</div>
+    <div class="drop" id="g-drop">
+      <input type="file" id="g-file" accept=".xlsx,.xls">
+      <div class="drop-text">
+        <b>Clique ou arraste o arquivo</b>
+        Dimensionamento_*.xlsx
+      </div>
+    </div>
+    <div id="g-fname"></div>
+
+    <button class="btn btn-g" id="g-btn" disabled onclick="gGenerate()">Gerar Escala</button>
+
+    <div class="status s-load" id="g-load"><div class="spin"></div><span id="g-load-txt">Processando...</span></div>
+    <div class="status s-ok"   id="g-ok">  <span>✓</span><span id="g-ok-txt"></span></div>
+    <div class="status s-err"  id="g-err"> <span>Erro</span><span id="g-err-txt"></span></div>
+  </div>
+  </div>
+
+  <!-- Right col: result -->
+  <div>
+  <div class="card card-top-g" id="g-result" style="display:none">
+    <div class="card-label">Resultado</div>
+
+    <div class="stats" id="g-stats"></div>
+
+    <div class="table-wrap" style="margin-top:12px">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th><th>Setor</th><th>Funcao</th>
+            <th>Entrada</th><th>Saida</th><th>Horario</th><th>Carga</th>
+          </tr>
+        </thead>
+        <tbody id="g-tbody"></tbody>
+      </table>
+      <div class="preview-note" id="g-note"></div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-dim" onclick="gDownload()">Baixar Excel</button>
+      <button class="btn btn-sec" onclick="gReset()">Novo arquivo</button>
+    </div>
+  </div>
+  </div>
+
+</div>
+</div><!-- /page-gen -->
+
+
+<!-- ══════════════════════════════════════════════
+     PAGE 2 — COMPARADOR
+════════════════════════════════════════════════ -->
+<div class="page" id="page-comp">
+
+  <div class="upload-3col">
+    <div class="card card-top-g" style="margin-bottom:0;padding:16px">
+      <div class="card-label" style="margin-bottom:10px"><span class="dot g"></span>Escala Base</div>
+      <div class="drop" id="c-drop1" style="padding:14px 16px">
+        <input type="file" id="c-file1" accept=".xlsx,.xls">
+        <div class="drop-text">
+          <b>Clique ou arraste</b>
+          ESCALA-BASE-*.xlsx
+        </div>
+      </div>
+      <div id="c-fname1"></div>
+    </div>
+
+    <div class="card card-top-o" style="margin-bottom:0;padding:16px">
+      <div class="card-label" style="margin-bottom:10px"><span class="dot o"></span>Escala Dimensionamento</div>
+      <div class="drop" id="c-drop2" style="padding:14px 16px">
+        <input type="file" id="c-file2" accept=".xlsx,.xls">
+        <div class="drop-text">
+          <b>Clique ou arraste</b>
+          ESCALA-CAPACITY-*.xlsx
+        </div>
+      </div>
+      <div id="c-fname2"></div>
+    </div>
+
+    <div style="display:flex;align-items:center">
+      <button class="btn btn-o" id="c-btn" disabled onclick="cCompare()" style="margin-top:0;height:100%;font-size:14px;min-height:unset">
+        Comparar
+      </button>
+    </div>
+  </div>
+
+  <!-- Analysis -->
+  <div id="c-analysis" style="display:none">
+
+    <!-- Filters -->
+    <div class="card card-top-b">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
+        <div class="filter-group" style="margin-bottom:0">
+          <div class="filter-title"><span class="dot g"></span>Funcoes — Base</div>
+          <div class="tags" id="c-tags-base"></div>
+        </div>
+        <div class="filter-group" style="margin-bottom:0">
+          <div class="filter-title"><span class="dot o"></span>Funcoes — Dimensionamento</div>
+          <div class="tags" id="c-tags-dim"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="c-cards">
+
+    <!-- Chart 1: cobertura -->
+    <div class="card card-top-b draggable" data-id="cobertura">
+      <div class="drag-handle">
+        <span class="drag-icon">⠿</span>
+        <span>Pessoas trabalhando por hora</span>
+        <div class="legend">
+          <div class="legend-item"><div class="legend-line" style="background:var(--blue)"></div>Base</div>
+          <div class="legend-item"><div class="legend-line" style="background:var(--green);height:0;border-top:2px dashed var(--green)"></div>Dimensionamento</div>
+          <div class="legend-item" id="c-leg-demand" style="display:none">
+            <div class="legend-line" style="background:#a78bfa;height:0;border-top:2px dotted #a78bfa"></div>
+            <span id="c-leg-demand-txt">Demanda</span>
+          </div>
+        </div>
+      </div>
+      <div class="chart-wrap"><canvas id="c-chart"></canvas></div>
+    </div>
+
+    <!-- Stats -->
+    <div class="card card-top-b draggable" data-id="stats">
+      <div class="drag-handle">
+        <span class="drag-icon">⠿</span>
+        <span>Resumo</span>
+      </div>
+      <div class="stats" id="c-stats"></div>
+    </div>
+
+    <!-- Chart 2: entradas por hora -->
+    <div class="card card-top-b draggable" data-id="entradas">
+      <div class="drag-handle">
+        <span class="drag-icon">⠿</span>
+        <span>Entradas por hora</span>
+        <div class="legend">
+          <div class="legend-item"><div class="legend-line" style="background:var(--blue)"></div>Base</div>
+          <div class="legend-item"><div class="legend-line" style="background:var(--green)"></div>Dimensionamento</div>
+        </div>
+      </div>
+      <div class="chart-wrap"><canvas id="c-chart-entrada"></canvas></div>
+    </div>
+
+    <!-- Breakdown -->
+    <div class="card card-top-b draggable" data-id="quadro">
+      <div class="drag-handle">
+        <span class="drag-icon">⠿</span>
+        <span>Quadro por funcao</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Funcao</th><th>Arquivo</th>
+              <th class="r">Total</th><th class="r">Pico hora</th><th class="r">Pico qtd</th>
+            </tr>
+          </thead>
+          <tbody id="c-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Momento Calor -->
+    <div class="card card-top-b draggable" data-id="calor" id="c-demand-section">
+      <div class="drag-handle">
+        <span class="drag-icon">⠿</span>
+        <span>Momento Calor — Equipes em atendimento por dia</span>
+        <div style="font-size:10px;color:var(--muted);font-family:'DM Mono',monospace;font-weight:400;letter-spacing:0">resolucao de 10 min</div>
+      </div>
+
+      <div class="drop" id="c-drop3" style="padding:20px 16px;margin-bottom:0">
+        <input type="file" id="c-file3" accept=".xlsx,.xls">
+        <div class="drop-text">
+          <b>Clique ou arraste o dimensionamento</b>
+          Dimensionamento_*.xlsx
+        </div>
+      </div>
+      <div id="c-fname3"></div>
+
+      <div id="c-demand-wrap" style="display:none;margin-top:20px">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px">
+          <div class="tags" id="c-demand-tags"></div>
+          <button id="c-vincular-btn" onclick="cToggleVincular()" style="
+            font-family:'Inter',sans-serif;font-size:11px;font-weight:700;letter-spacing:0.08em;
+            padding:7px 16px;border-radius:6px;cursor:pointer;transition:all 0.15s;
+            background:rgba(167,139,250,0.08);border:1px solid rgba(167,139,250,0.25);color:#a78bfa;
+            white-space:nowrap;flex-shrink:0
+          ">Vincular ao grafico principal</button>
+        </div>
+        <div class="chart-wrap" style="height:320px">
+          <canvas id="c-demand-chart"></canvas>
+        </div>
+      </div>
+    </div>
+
+    </div><!-- /c-cards -->
+
+  </div><!-- /c-analysis -->
+
+</div><!-- /page-comp -->
+
+<script src="js/helpers.js"></script>
+<script src="js/generator.js"></script>
+<script src="js/comparator.js"></script>
+</body>
+</html>
