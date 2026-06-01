@@ -155,7 +155,7 @@ function gRender(rows) {
 function gSendToComparator() {
   if (!gRows.length) return;
 
-  // Convert: entrada/saida are "HH:MM" strings → need minutes for the comparator
+  // Convert HH:MM strings → minutes for the comparator
   const dimData = gRows.map(r => ({
     setor:   r.setor,
     funcao:  r.funcao,
@@ -163,19 +163,17 @@ function gSendToComparator() {
     saida:   toMinutes(r.saida),
   })).filter(r => r.entrada !== null && r.saida !== null);
 
-  // Inject into comparator state (comparator.js loads after generator.js,
-  // so we use window to safely reference its globals at call time)
-  window.cDataDim  = dimData;
-  if (gBase) window.cBaseName = gBase;
-  if (gBase) setBaseBadge(gBase);
+  // Inject into window — comparator.js reads from window.cDataDim
+  window.cDataDim = dimData;
+  if (gBase) { window.cBaseName = gBase; setBaseBadge(gBase); }
 
-  // Update slot 2 UI to show it's pre-filled
+  // Update slot 1 UI (Dimensionamento) to show it's pre-filled from the generator
   const fname = gFile ? gFile.name : 'Dimensionamento';
-  document.getElementById('c-fname2').innerHTML =
+  document.getElementById('c-fname1').innerHTML =
     `<div class="file-pill" style="background:var(--green-l);color:var(--green)">✓ ${fname}</div>`;
-  document.getElementById('c-drop2').classList.add('has-file-o');
+  document.getElementById('c-drop1').classList.add('has-file-o');
 
-  // Enable compare button if slot 1 already has data, otherwise just navigate
+  // Check if compare button can be enabled
   if (typeof cCheckReady === 'function') cCheckReady();
 
   // Navigate to comparador
