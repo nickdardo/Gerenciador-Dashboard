@@ -124,31 +124,31 @@
 <div class="page" id="page-comp">
 
   <div class="upload-3col">
-    <!-- Slot 1: Escala Real — upload pelo usuário (xlsx ou xlsb) -->
-    <div class="card card-top-g" style="margin-bottom:0;padding:16px">
-      <div class="card-label" style="margin-bottom:10px">
-        <span class="dot g"></span>
-        <span id="c-base-label2">Escala Real</span>
-        <span class="fmt-badge" id="c-fmt1"></span>
-      </div>
+    <!-- Slot 1: Dimensionamento — pré-preenchido pelo Gerador ou upload manual -->
+    <div class="card card-top-o" style="margin-bottom:0;padding:16px">
+      <div class="card-label" style="margin-bottom:10px"><span class="dot o"></span>Escala Dimensionamento</div>
       <div class="drop" id="c-drop1" style="padding:14px 16px">
-        <input type="file" id="c-file1" accept=".xlsx,.xls,.xlsb">
+        <input type="file" id="c-file1" accept=".xlsx,.xls">
         <div class="drop-text">
           <b>Clique ou arraste</b>
-          ESCALA-BASE-*.xlsx <span style="opacity:.5">ou</span> *_ESCALA_*.xlsb
+          <span style="color:var(--muted);font-size:11px">ou use "Comparar agora" no Gerador</span>
         </div>
       </div>
       <div id="c-fname1"></div>
     </div>
 
-    <!-- Slot 2: Dimensionamento — pré-preenchido pelo Gerador ou upload manual -->
-    <div class="card card-top-o" style="margin-bottom:0;padding:16px">
-      <div class="card-label" style="margin-bottom:10px"><span class="dot o"></span>Escala Dimensionamento</div>
+    <!-- Slot 2: Escala Real — upload pelo usuário (xlsx ou xlsb) -->
+    <div class="card card-top-g" style="margin-bottom:0;padding:16px">
+      <div class="card-label" style="margin-bottom:10px">
+        <span class="dot g"></span>
+        <span id="c-base-label2">Escala Real</span>
+        <span class="fmt-badge" id="c-fmt2"></span>
+      </div>
       <div class="drop" id="c-drop2" style="padding:14px 16px">
-        <input type="file" id="c-file2" accept=".xlsx,.xls">
+        <input type="file" id="c-file2" accept=".xlsx,.xls,.xlsb">
         <div class="drop-text">
           <b>Clique ou arraste</b>
-          <span style="color:var(--muted);font-size:11px">ou use "Comparar agora" no Gerador</span>
+          ESCALA-BASE-*.xlsx <span style="opacity:.5">ou</span> *_ESCALA_*.xlsb
         </div>
       </div>
       <div id="c-fname2"></div>
@@ -168,12 +168,12 @@
     <div class="card card-top-b">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
         <div class="filter-group" style="margin-bottom:0">
-          <div class="filter-title"><span class="dot g"></span>Funcoes — <span id="c-base-label">Base</span></div>
-          <div class="tags" id="c-tags-base"></div>
-        </div>
-        <div class="filter-group" style="margin-bottom:0">
           <div class="filter-title"><span class="dot o"></span>Funcoes — Dimensionamento</div>
           <div class="tags" id="c-tags-dim"></div>
+        </div>
+        <div class="filter-group" style="margin-bottom:0">
+          <div class="filter-title"><span class="dot g"></span>Funcoes — <span id="c-base-label">Escala Real</span></div>
+          <div class="tags" id="c-tags-base"></div>
         </div>
       </div>
     </div>
