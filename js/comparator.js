@@ -121,7 +121,7 @@ function cParseBase(wb) {
 function cParseEscalaReal(wb) {
   // 1. Horario map: code → { entrada, saida } in minutes
   const horarioMap = {};
-  const horSheet = wb.SheetNames.find(s => s.toUpperCase().includes('HORARIO'));
+  const horSheet = wb.SheetNames.find(s => s.toUpperCase().trim() === 'HORARIOS') || wb.SheetNames.find(s => s.toUpperCase().includes('HORARIOS'));
   if (horSheet) {
     const ws   = wb.Sheets[horSheet];
     const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: true });
@@ -137,7 +137,7 @@ function cParseEscalaReal(wb) {
 
   // 2. Cargo map: matricula → funcao from BANCO DE DADOS
   const cargoMap = {};
-  const dbSheet = wb.SheetNames.find(s => s.toUpperCase().includes('BANCO'));
+  const dbSheet = wb.SheetNames.find(s => s.toUpperCase().includes('BANCO DE DADOS')) || wb.SheetNames.find(s => s.toUpperCase().includes('BANCO'));
   if (dbSheet) {
     const ws   = wb.Sheets[dbSheet];
     const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: true });
@@ -159,7 +159,7 @@ function cParseEscalaReal(wb) {
   ]);
 
   // 4. Parse MATRIZ sheet
-  const matrizSheet = wb.SheetNames.find(s => s.toUpperCase().includes('MATRIZ'));
+  const matrizSheet = wb.SheetNames.find(s => s.toUpperCase().includes('ESCALA MATRIZ')) || wb.SheetNames.find(s => s.toUpperCase().includes('MATRIZ'));
   console.log('[cParseEscalaReal] Sheets:', wb.SheetNames, '| Matriz found:', matrizSheet);
   console.log('[cParseEscalaReal] Horario codes loaded:', Object.keys(horarioMap).length);
   if (!matrizSheet) return [];
