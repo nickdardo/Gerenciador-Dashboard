@@ -146,6 +146,42 @@ function gRender(rows) {
   setStatus('g', 'ok', `${rows.length} linhas geradas${gBase ? ` · ${gBase}` : ''}.`);
 }
 
+// ── Send generated schedule to Comparador ────────────
+/**
+ * Converts gRows → cDataDim format and navigates to the Comparador tab.
+ * The Comparador slot 2 (Dimensionamento) is pre-filled — user only needs
+ * to upload the real schedule in slot 1.
+ */
+function gSendToComparator() {
+  if (!gRows.length) return;
+
+  // Convert: entrada/saida are "HH:MM" strings → need minutes for the comparator
+  const dimData = gRows.map(r => ({
+    setor:   r.setor,
+    funcao:  r.funcao,
+    entrada: toMinutes(r.entrada),
+    saida:   toMinutes(r.saida),
+  })).filter(r => r.entrada !== null && r.saida !== null);
+
+  // Inject into comparator state (comparator.js loads after generator.js,
+  // so we use window to safely reference its globals at call time)
+  window.cDataDim  = dimData;
+  if (gBase) window.cBaseName = gBase;
+  if (gBase) setBaseBadge(gBase);
+
+  // Update slot 2 UI to show it's pre-filled
+  const fname = gFile ? gFile.name : 'Dimensionamento';
+  document.getElementById('c-fname2').innerHTML =
+    `<div class="file-pill" style="background:var(--green-l);color:var(--green)">✓ ${fname}</div>`;
+  document.getElementById('c-drop2').classList.add('has-file-o');
+
+  // Enable compare button if slot 1 already has data, otherwise just navigate
+  if (typeof cCheckReady === 'function') cCheckReady();
+
+  // Navigate to comparador
+  showPage('comp');
+}
+
 // ── Chip colour by setor name ─────────────────────────
 function gChipClass(s) {
   s = s.toUpperCase();

@@ -302,7 +302,7 @@ function cCompare() {
   // Label the base escala by format
   const baseLabel = cBaseFormat === 'B'
     ? `Escala Real${cBaseName ? ' · ' + cBaseName : ''}`
-    : 'Escala Base';
+    : 'Escala Real';
 
   buildTags('c-tags-base', funcsBase, cSelBase, 'tg', () => { cUpdateChart(); cUpdateChartEntrada(); });
   buildTags('c-tags-dim',  funcsDim,  cSelDim,  'to', () => { cUpdateChart(); cUpdateChartEntrada(); });
