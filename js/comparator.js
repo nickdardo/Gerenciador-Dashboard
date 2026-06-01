@@ -239,6 +239,9 @@ function cParseEscalaReal(wb) {
   }
 
   console.log('[cParseEscalaReal] Avg daily records (normalised):', avgRecords.length, '| Days averaged:', nDays);
+  // Attach metadata for the stats card — avgDailyWorkers is the true daily headcount
+  avgRecords._avgDailyWorkers = Math.round(out.length / nDays);
+  avgRecords._nDays           = nDays;
   return avgRecords;
 }
 
@@ -465,18 +468,49 @@ function cUpdateChart() {
     }
   });
 
+  // For real schedule (xlsb), use the true daily headcount stored as metadata
   const totDim  = dim.filter(r  => cSelDim.has(r.funcao)).length;
-  const totBase = base.filter(r => cSelBase.has(r.funcao)).length;
+  const totBase = (window.cBaseFormat === 'B' && _base()._avgDailyWorkers)
+    ? _base()._avgDailyWorkers
+    : base.filter(r => cSelBase.has(r.funcao)).length;
   const diff    = totBase - totDim;
   const pkD     = Math.max(...covDim);
   const pkB     = Math.max(...covBase);
 
+    // Coverage % and gap
+  const coveragePct = totDim > 0 ? Math.round((totBase / totDim) * 100) : 0;
+  const gap         = totBase - totDim;  // negative = deficit
+  const gapCls      = gap >= 0 ? 'pos' : 'neg';
+  const covCls      = coveragePct >= 90 ? 'pos' : coveragePct >= 70 ? 'orange' : 'neg';
+
   document.getElementById('c-stats').innerHTML = `
-    <div class="stat"><div class="num o">${totDim}</div><div class="lbl">Dimensionamento</div></div>
-    <div class="stat"><div class="num g">${totBase}</div><div class="lbl">${realLabel}</div></div>
-    <div class="stat"><div class="num ${diff>0?'pos':diff<0?'neg':'neu'}">${diff>=0?'+':''}${diff}</div><div class="lbl">Diferença</div></div>
-    <div class="stat"><div class="num o">${pkD}</div><div class="lbl">Pico Dimensionamento</div></div>
-    <div class="stat"><div class="num g">${pkB}</div><div class="lbl">Pico ${realLabel}</div></div>
+    <div class="stat">
+      <div class="num o">${totDim}</div>
+      <div class="lbl">Planejado</div>
+    </div>
+    <div class="stat">
+      <div class="num g">${totBase}</div>
+      <div class="lbl">${realLabel}</div>
+    </div>
+    <div class="stat stat-highlight">
+      <div class="num ${covCls}" style="font-size:28px">${coveragePct}%</div>
+      <div class="lbl">Cobertura</div>
+      <div class="coverage-bar">
+        <div class="coverage-fill" style="width:${Math.min(coveragePct,100)}%;background:${coveragePct>=90?'var(--green)':coveragePct>=70?'#d97706':'var(--red)'}"></div>
+      </div>
+    </div>
+    <div class="stat">
+      <div class="num ${gapCls}" style="font-size:20px">${gap >= 0 ? '+' : ''}${gap}</div>
+      <div class="lbl">Gap de quadro</div>
+    </div>
+    <div class="stat">
+      <div class="num o">${pkD}</div>
+      <div class="lbl">Pico planejado</div>
+    </div>
+    <div class="stat">
+      <div class="num g">${pkB}</div>
+      <div class="lbl">Pico ${realLabel}</div>
+    </div>
   `;
 }
 
@@ -557,10 +591,13 @@ function cUpdateTable() {
       const cov  = coverage(recs, new Set([f]));
       const peak = Math.max(...cov);
       const peakH = `${String(cov.indexOf(peak)).padStart(2,'0')}:00`;
+      // For xlsb real schedule: total = peak coverage (max people at any hour)
+      // which reflects the true daily headcount per function better than recs.length
+      const total = (cls === 'g' && window.cBaseFormat === 'B') ? peak : recs.length;
       tbody.innerHTML += `<tr>
         <td>${f}</td>
         <td><span class="chip" style="background:rgba(${cls==='o'?'14,159,110':'26,86,219'},.1);color:var(--${cls==='o'?'green':'blue'})">${label}</span></td>
-        <td class="r">${recs.length}</td>
+        <td class="r">${total}</td>
         <td class="r" style="color:var(--muted)">${peakH}</td>
         <td class="r">${peak}</td>
       </tr>`;
