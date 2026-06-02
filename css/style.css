@@ -917,3 +917,18 @@ tbody td.r { text-align: right; }
 .eo-mat-input.eo-mat-warn::after {
   content: '!';
 }
+
+/* Wrong base error state on matricula field */
+.eo-mat-input.eo-mat-err {
+  border-color: var(--red) !important;
+  background: var(--red-l) !important;
+  color: var(--red) !important;
+  font-weight: 700;
+  animation: eo-shake 0.3s ease;
+}
+
+@keyframes eo-shake {
+  0%,100% { transform: translateX(0); }
+  25%      { transform: translateX(-4px); }
+  75%      { transform: translateX(4px); }
+}
