@@ -362,18 +362,19 @@ function eoLoadColabs(input) {
     // Detect header row — skip rows where col A is not numeric
     let count = 0;
     rows.forEach((row, i) => {
-      if (!row || !row[0]) return;
-      const rawMat = String(row[0]).trim();
-      // Skip header row (col A = 'enrollmentnumber' or non-numeric)
-      if (isNaN(rawMat.replace(/[^0-9]/g, '')) || rawMat.replace(/[^0-9]/g, '') === '') return;
+      if (!row || !row[1]) return;
+      const rawMat = String(row[1]).trim();
+      // Skip header row — col B must be numeric (matricula)
+      if (!rawMat || rawMat.replace(/[^0-9]/g, '') === '') return;
 
-      const mat    = rawMat;
-      const nome   = String(row[1] || '').trim();
-      const funcao = String(row[2] || '').trim();
-      const ch     = String(row[3] || '').trim();
+      const station = String(row[0] || '').trim().toUpperCase();
+      const mat     = rawMat;
+      const nome    = String(row[2] || '').trim();
+      const funcao  = String(row[3] || '').trim();
+      const ch      = String(row[4] || '').trim();
 
       if (mat && nome) {
-        eoColabs[mat] = { nome, funcao, ch };
+        eoColabs[mat] = { station, nome, funcao, ch };
         count++;
       }
     });
@@ -408,7 +409,30 @@ function eoAutoFillName(rowIdx, matValue) {
   const matEl  = document.getElementById(`eo-mat-${rowIdx}`);
   if (!nameEl) return;
 
-  // Auto-fill name if empty or previously auto-filled
+  // ── Station validation ──────────────────────────────
+  if (matEl) {
+    const colabStation = (colab.station || '').toUpperCase();
+    const pageBase     = (eoBase || '').toUpperCase();
+
+    if (pageBase && colabStation && colabStation !== pageBase) {
+      // Wrong base — block and warn
+      matEl.classList.add('eo-mat-err');
+      matEl.classList.remove('eo-mat-warn');
+      matEl.title = `⚠ Matrícula pertence à base ${colabStation}, não ${pageBase}`;
+      // Clear name if it was auto-filled from wrong base
+      if (nameEl.dataset.autofilled === '1') {
+        nameEl.value = '';
+        nameEl.dataset.autofilled = '';
+        delete eoNames[rowIdx];
+        nameEl.dispatchEvent(new Event('input'));
+      }
+      return; // stop here — don't fill name
+    } else {
+      matEl.classList.remove('eo-mat-err');
+    }
+  }
+
+  // ── Auto-fill name ────────────────────────────────────
   if (!nameEl.value || nameEl.dataset.autofilled === '1') {
     nameEl.value              = colab.nome;
     nameEl.dataset.autofilled = '1';
@@ -416,7 +440,7 @@ function eoAutoFillName(rowIdx, matValue) {
     nameEl.dispatchEvent(new Event('input'));
   }
 
-  // CH compatibility check — warn if workload doesn't match slot
+  // ── CH compatibility check ────────────────────────────
   if (colab.ch && matEl) {
     const slot    = eoSlotForRow(rowIdx);
     const slotCH  = slot ? parseInt(slot.carga) : null;
@@ -426,7 +450,9 @@ function eoAutoFillName(rowIdx, matValue) {
       matEl.title = `Atenção: CH do colaborador (${colabCH}h) difere do turno (${slotCH}h)`;
     } else {
       matEl.classList.remove('eo-mat-warn');
-      matEl.title = colab.funcao ? `${colab.nome} · ${colab.funcao} · ${colabCH}h` : '';
+      matEl.title = colab.funcao
+        ? `${colab.nome} · ${colab.funcao} · ${colabCH}h · ${colab.station}`
+        : '';
     }
   }
 }
