@@ -2,10 +2,12 @@
 // NAVIGATION
 // ══════════════════════════════════════════════════════
 function showPage(p) {
-  document.getElementById('page-gen').classList.toggle('active', p === 'gen');
-  document.getElementById('page-comp').classList.toggle('active', p === 'comp');
+  ['gen','comp','eo'].forEach(id => {
+    document.getElementById('page-' + id).classList.toggle('active', p === id);
+  });
   document.getElementById('tab-gen').className  = 'nav-tab' + (p === 'gen'  ? ' active-gen'  : '');
   document.getElementById('tab-comp').className = 'nav-tab' + (p === 'comp' ? ' active-comp' : '');
+  document.getElementById('tab-eo').className   = 'nav-tab' + (p === 'eo'   ? ' active-eo'   : '');
 }
 
 // ══════════════════════════════════════════════════════

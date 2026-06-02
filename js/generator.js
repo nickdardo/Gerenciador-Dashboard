@@ -208,6 +208,16 @@ function gDownload() {
   XLSX.writeFile(wb, `Escala${basePart}_${today}.xlsx`);
 }
 
+
+// ── Open Escala Online ────────────────────────────────
+function gOpenEscalaOnline() {
+  if (!gRows.length) return;
+  // eoInit is defined in escala-online.js (loaded after this file)
+  if (typeof eoInit === 'function') {
+    eoInit(gRows, gBase);
+  }
+}
+
 // ── Reset ─────────────────────────────────────────────
 function gReset() {
   gFile = null;
