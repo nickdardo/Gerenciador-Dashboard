@@ -415,15 +415,14 @@ tbody td.r { text-align: right; }
    ESCALA ONLINE — PAGE 3
 ════════════════════════════════════════════════════════ */
 
-/* Nav tab */
 .nav-tab.active-eo { color: var(--blue); border-bottom-color: var(--blue); font-weight: 600; }
 
-/* Header */
+/* ── Header ── */
 .eo-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 24px 10px;
+  padding: 12px 20px;
   gap: 12px;
   flex-wrap: wrap;
   border-bottom: 1px solid var(--border);
@@ -431,10 +430,11 @@ tbody td.r { text-align: right; }
   position: sticky;
   top: var(--nav-h);
   z-index: 10;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
 }
 
 .eo-title {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--text);
   display: flex;
@@ -458,92 +458,149 @@ tbody td.r { text-align: right; }
   margin-top: 2px;
 }
 
-.eo-header-right {
+.eo-header-right { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* ── Legend ── */
+.eo-legend {
   display: flex;
-  gap: 8px;
+  align-items: center;
+  gap: 14px;
   flex-wrap: wrap;
+  padding: 8px 20px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
 }
 
+.eo-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.eo-legend-hint {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--border2);
+  font-style: italic;
+}
+
+/* ── Buttons ── */
 .eo-btn {
   font-family: 'Inter', sans-serif;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
-  padding: 7px 14px;
-  border-radius: 6px;
+  padding: 6px 12px;
+  border-radius: 5px;
   border: none;
   cursor: pointer;
   transition: all 0.15s;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .eo-btn-sec   { background: var(--bg); border: 1px solid var(--border2); color: var(--muted); }
 .eo-btn-xls   { background: var(--green); color: #fff; }
 .eo-btn-print { background: var(--blue); color: #fff; }
 .eo-btn:hover { filter: brightness(0.92); }
+.eo-btn svg   { flex-shrink: 0; }
 
-/* Table wrapper */
+/* ── Table wrapper ── */
 .eo-wrap {
   overflow-x: auto;
-  padding: 16px 24px 48px;
+  padding: 0 0 48px;
 }
 
 .eo-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
-  min-width: 900px;
+  font-size: 11px;
 }
 
-/* Column widths */
-.eo-col-func    { width: 200px; min-width: 160px; }
-.eo-col-horario { width: 110px; min-width: 100px; }
-.eo-col-carga   { width: 60px;  min-width: 52px; text-align: center; }
-.eo-col-nome    { width: 220px; min-width: 180px; }
-.eo-col-day     { width: 90px;  min-width: 80px; text-align: center; }
+/* ── Column widths ── */
+.eo-col-func    { width: 160px; min-width: 130px; position: sticky; left: 0; z-index: 2; background: inherit; }
+.eo-col-horario { width: 95px;  min-width: 85px;  position: sticky; left: 160px; z-index: 2; background: inherit; }
+.eo-col-carga   { width: 40px;  min-width: 38px;  text-align: center; position: sticky; left: 255px; z-index: 2; background: inherit; }
+.eo-col-nome    { width: 180px; min-width: 150px; position: sticky; left: 295px; z-index: 2; background: inherit; }
+.eo-col-day     { width: 68px;  min-width: 62px;  text-align: center; }
 
-/* Header cells */
+/* ── Header cells ── */
 .eo-th {
-  position: sticky;
-  top: 0;
   background: var(--bg);
-  padding: 8px 10px;
-  font-size: 10px;
+  padding: 6px 8px;
+  font-size: 9px;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--muted);
   border-bottom: 2px solid var(--border);
   white-space: nowrap;
+  position: sticky;
+  top: 0;
   z-index: 3;
 }
 
-/* Today column highlight */
-.eo-today { background: var(--blue-l) !important; color: var(--blue) !important; }
-.eo-today-col { background: rgba(26,86,219,0.03); }
+.eo-th.eo-col-func,
+.eo-th.eo-col-horario,
+.eo-th.eo-col-carga,
+.eo-th.eo-col-nome { z-index: 5; }
 
-.eo-day-name { display: block; font-size: 11px; font-weight: 700; color: var(--text); }
-.eo-day-date { display: block; font-size: 10px; color: var(--muted); font-weight: 400; }
+/* Today & weekend column headers */
+.eo-today   { background: var(--blue-l) !important; color: var(--blue) !important; }
+.eo-weekend { background: #f8f4ff !important; color: #7c3aed !important; }
 
-/* Body cells */
+.eo-day-name { display: block; font-size: 9px;  font-weight: 700; }
+.eo-day-num  { display: block; font-size: 12px; font-weight: 800; color: var(--text); line-height: 1.2; }
+.eo-today .eo-day-num  { color: var(--blue); }
+.eo-weekend .eo-day-num { color: #7c3aed; }
+
+/* ── Body rows ── */
 .eo-td {
-  padding: 6px 10px;
+  padding: 4px 8px;
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
   color: var(--text);
+  white-space: nowrap;
 }
 
-.eo-row:hover td { background: #f8fafc; }
-.eo-row-alt td   { background: #fafbfc; }
-.eo-row-alt:hover td { background: #f1f5f9; }
+.eo-row:hover .eo-td     { background: #f0f5ff !important; }
+.eo-row-alt .eo-td       { background: #fafbfc; }
+.eo-row-alt:hover .eo-td { background: #f0f5ff !important; }
 
-/* Funcao section header */
+/* Sticky columns background fix */
+.eo-row     .eo-col-func,
+.eo-row     .eo-col-horario,
+.eo-row     .eo-col-carga,
+.eo-row     .eo-col-nome    { background: #fff; }
+.eo-row-alt .eo-col-func,
+.eo-row-alt .eo-col-horario,
+.eo-row-alt .eo-col-carga,
+.eo-row-alt .eo-col-nome    { background: #fafbfc; }
+
+/* Today & weekend body cols */
+.eo-today-col   { background: rgba(26,86,219,0.04) !important; }
+.eo-weekend-col { background: rgba(124,58,237,0.03) !important; }
+
+/* Clickable cells */
+.eo-clickable {
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.eo-clickable:hover { background: #e0eaff !important; }
+
+/* ── Funcao section header ── */
+.eo-funcao-row .eo-td,
 .eo-funcao-row td {
-  background: var(--navy, #1a1f2e) !important;
-  color: #fff;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  padding: 7px 12px;
+  background: #1a1f2e !important;
+  color: #fff !important;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 6px 10px;
   text-transform: uppercase;
   border-bottom: none;
 }
@@ -555,61 +612,79 @@ tbody td.r { text-align: right; }
 }
 
 .eo-funcao-count {
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 400;
-  opacity: 0.55;
+  opacity: 0.5;
   letter-spacing: 0;
   text-transform: none;
 }
 
-/* Name input */
+/* ── Name input ── */
 .eo-name-input {
   width: 100%;
   font-family: 'Inter', sans-serif;
-  font-size: 12px;
-  padding: 5px 8px;
+  font-size: 11px;
+  padding: 4px 7px;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: #fff;
   color: var(--text);
   outline: none;
   transition: border-color 0.15s, box-shadow 0.15s;
+  min-width: 120px;
 }
 
 .eo-name-input:focus {
   border-color: var(--blue);
-  box-shadow: 0 0 0 3px rgba(26,86,219,0.1);
+  box-shadow: 0 0 0 2px rgba(26,86,219,0.1);
 }
 
-.eo-name-input::placeholder { color: #c0cad8; }
+.eo-name-input::placeholder { color: #c0cad8; font-style: italic; }
+
 .eo-name-input:not(:placeholder-shown) {
   border-color: var(--green);
-  background: var(--green-l);
+  background: #f0fdf4;
   color: #065f46;
   font-weight: 500;
 }
 
-/* Turno pill */
+/* ── Turno pill ── */
 .eo-turno-pill {
   display: inline-block;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
-  padding: 3px 7px;
-  border-radius: 4px;
+  padding: 2px 5px;
+  border-radius: 3px;
   white-space: nowrap;
+  letter-spacing: 0.02em;
 }
 
-/* Carga badge */
+/* ── Folga badges ── */
+.eo-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.04em;
+  min-width: 24px;
+}
+
+.eo-badge-f  { background: #fef2f2; color: #b91c1c; border: 1px solid #fca5a5; }
+.eo-badge-fa { background: #fefce8; color: #854d0e; border: 1px solid #fde047; }
+
+/* ── Misc ── */
 .eo-carga {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   color: var(--green);
 }
 
-/* Chip colours per funcao */
 .eo-chip {
-  font-size: 10px;
-  padding: 2px 6px;
+  font-size: 9px;
+  padding: 2px 5px;
   border-radius: 3px;
   font-weight: 600;
   background: var(--blue-l);
@@ -617,29 +692,24 @@ tbody td.r { text-align: right; }
   white-space: nowrap;
 }
 
-/* Print styles */
+/* ── Print ── */
 @media print {
-  nav, .eo-header-right, .btn-row { display: none !important; }
-  .eo-header { position: static; border: none; padding: 0 0 8px; }
-  .eo-wrap   { padding: 0; overflow: visible; }
-  .eo-table  { font-size: 10px; }
-  .eo-name-input {
-    border: none;
-    background: transparent !important;
-    box-shadow: none;
-    padding: 0;
-  }
-  .eo-funcao-row td { background: #222 !important; -webkit-print-color-adjust: exact; }
+  nav, .eo-header-right, .eo-legend-hint, .btn-row { display: none !important; }
+  .eo-header   { position: static; padding: 0 0 8px; }
+  .eo-legend   { padding: 4px 0; }
+  .eo-wrap     { overflow: visible; }
+  .eo-table    { font-size: 8px; }
+  .eo-col-func, .eo-col-horario, .eo-col-carga, .eo-col-nome { position: static; }
+  .eo-name-input { border:none; background:transparent !important; box-shadow:none; padding:0; font-size:9px; }
+  .eo-funcao-row td { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .eo-turno-pill, .eo-badge { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
 
-/* SVG icon alignment inside buttons */
-.eo-btn svg {
+/* ── btn svg alignment (global) ── */
+.btn svg, .eo-btn svg {
   display: inline-block;
   vertical-align: middle;
-  margin-right: 5px;
   position: relative;
   top: -1px;
   flex-shrink: 0;
 }
-
-.btn svg { display:inline-block; vertical-align:middle; margin-right:4px; position:relative; top:-1px; }
