@@ -97,7 +97,7 @@ function eoPaintCell(rowIdx, day) {
   } else if (state === 'FA') {
     td.innerHTML = `<span class="eo-badge eo-badge-fa">FA</span>`;
   } else {
-    td.innerHTML = `<span class="eo-turno-pill" style="${eoTurnoStyle(slot.entrada)}">${slot.horario}</span>`;
+    td.innerHTML = `<span class="eo-day-block" style="${eoTurnoStyle(slot.entrada)}"></span>`;
   }
 }
 
@@ -133,10 +133,10 @@ function eoRender() {
     <div class="eo-legend">
       <span class="eo-legend-item"><span class="eo-badge eo-badge-f">F</span> Folga regulamentar</span>
       <span class="eo-legend-item"><span class="eo-badge eo-badge-fa">FA</span> Folga agrupada</span>
-      <span class="eo-legend-item"><span class="eo-turno-pill" style="background:#dbeafe;color:#1e40af;">manhã</span> Manhã</span>
-      <span class="eo-legend-item"><span class="eo-turno-pill" style="background:#dcfce7;color:#166534;">tarde</span> Tarde</span>
-      <span class="eo-legend-item"><span class="eo-turno-pill" style="background:#fef3c7;color:#92400e;">noite</span> Noite</span>
-      <span class="eo-legend-item"><span class="eo-turno-pill" style="background:#1e293b;color:#94a3b8;">madrugada</span> Madrugada</span>
+      <span class="eo-legend-item"><span class="eo-day-block" style="background:#dbeafe;width:20px;height:14px;display:inline-block;border-radius:2px;vertical-align:middle;"></span> Manhã</span>
+      <span class="eo-legend-item"><span class="eo-day-block" style="background:#dcfce7;width:20px;height:14px;display:inline-block;border-radius:2px;vertical-align:middle;"></span> Tarde</span>
+      <span class="eo-legend-item"><span class="eo-day-block" style="background:#fef3c7;width:20px;height:14px;display:inline-block;border-radius:2px;vertical-align:middle;"></span> Noite</span>
+      <span class="eo-legend-item"><span class="eo-day-block" style="background:#1e293b;width:20px;height:14px;display:inline-block;border-radius:2px;vertical-align:middle;"></span> Madrugada</span>
       <span class="eo-legend-hint">Clique em qualquer célula para marcar/desmarcar folga</span>
     </div>`;
 
@@ -211,14 +211,14 @@ function eoRender() {
             const key   = `${rid}_${d.num}`;
             const state = eoCells[key] || '';
             let inner;
-            if (state === 'F')  inner = `<span class="eo-badge eo-badge-f">F</span>`;
+            if (state === 'F')       inner = `<span class="eo-badge eo-badge-f">F</span>`;
             else if (state === 'FA') inner = `<span class="eo-badge eo-badge-fa">FA</span>`;
-            else inner = `<span class="eo-turno-pill" style="${eoTurnoStyle(slot.entrada)}">${slot.horario}</span>`;
+            else                     inner = `<span class="eo-day-block" style="${eoTurnoStyle(slot.entrada)}"></span>`;
             return `<td
               id="eocell-${rid}-${d.num}"
               class="eo-td eo-col-day eo-clickable${d.isToday?' eo-today-col':''}${d.isSun||d.isSat?' eo-weekend-col':''}"
               onclick="eoCellClick(${rid},${d.num})"
-              title="Clique para marcar folga"
+              title="Clique: F = Folga · FA = Folga Agrupada"
             >${inner}</td>`;
           }).join('')}
         </tr>`;
