@@ -61,6 +61,7 @@
   <div style="flex:1"></div>
   <div class="nav-tab active-gen" id="tab-gen"  onclick="showPage('gen')">Gerador</div>
   <div class="nav-tab"            id="tab-comp" onclick="showPage('comp')">Comparador</div>
+  <div class="nav-tab"            id="tab-eo"   onclick="showPage('eo')">Escala Online</div>
 </nav>
 
 <!-- ══════════════════════════════════════════════
@@ -112,8 +113,9 @@
     </div>
 
     <div class="btn-row">
-      <button class="btn btn-dim" onclick="gDownload()">Baixar Excel</button>
+      <button class="btn btn-eo"  onclick="gOpenEscalaOnline()" style="background:var(--blue);color:#fff;">Escala Online</button>
       <button class="btn btn-cmp" onclick="gSendToComparator()" style="background:var(--green);color:#fff;">Comparar agora →</button>
+      <button class="btn btn-sec" onclick="gDownload()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Excel</button>
       <button class="btn btn-sec" onclick="gReset()">Novo arquivo</button>
     </div>
   </div>
@@ -281,8 +283,23 @@
 
 </div><!-- /page-comp -->
 
+<!-- ══════════════════════════════════════════════
+     PAGE 3 — ESCALA ONLINE
+════════════════════════════════════════════════ -->
+<div class="page" id="page-eo">
+  <div id="eo-content">
+    <!-- Filled dynamically by escala-online.js -->
+    <div style="padding:48px 24px;text-align:center;color:var(--muted)">
+      <div style="margin-bottom:12px;color:var(--border2)"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/></svg></div>
+      <div style="font-size:14px;font-weight:600;margin-bottom:6px">Nenhuma escala gerada ainda</div>
+      <div style="font-size:12px">Use o Gerador para carregar um dimensionamento e clique em <b>Escala Online</b>.</div>
+    </div>
+  </div>
+</div><!-- /page-eo -->
+
 <script src="js/helpers.js"></script>
 <script src="js/generator.js"></script>
 <script src="js/comparator.js"></script>
+<script src="js/escala-online.js"></script>
 </body>
 </html>
