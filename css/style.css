@@ -737,3 +737,183 @@ tbody td.r { text-align: right; }
   height: 18px;
   font-size: 10px;
 }
+
+/* ── Filter bar ── */
+.eo-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+  padding: 7px 20px;
+  background: #fff;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: calc(var(--nav-h) + 49px);
+  z-index: 9;
+}
+
+.eo-filter-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-right: 4px;
+  white-space: nowrap;
+}
+
+.eo-filter-btn {
+  font-family: 'Inter', sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.12s;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+
+.eo-filter-btn:hover {
+  border-color: var(--blue);
+  color: var(--blue);
+  background: var(--blue-l);
+}
+
+.eo-filter-btn.active {
+  background: var(--blue);
+  color: #fff;
+  border-color: var(--blue);
+}
+
+.eo-filter-all.active {
+  background: var(--text);
+  border-color: var(--text);
+}
+
+/* ── Matricula column ── */
+.eo-col-mat {
+  width: 80px;
+  min-width: 70px;
+  position: sticky;
+  left: 295px;
+  z-index: 2;
+  background: inherit;
+}
+
+/* Shift nome column sticky left */
+.eo-col-nome {
+  position: sticky;
+  left: 375px;
+  z-index: 2;
+  background: inherit;
+}
+
+.eo-mat-input {
+  width: 100%;
+  font-family: 'Inter', sans-serif;
+  font-size: 11px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  text-align: center;
+  letter-spacing: 0.04em;
+}
+
+.eo-mat-input:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 2px rgba(26,86,219,0.1);
+}
+
+.eo-mat-input::placeholder { color: #c8d0dc; font-style: italic; font-size: 10px; }
+
+.eo-mat-input:not(:placeholder-shown) {
+  border-color: var(--orange);
+  background: var(--orange-l);
+  color: var(--orange);
+  font-weight: 700;
+}
+
+/* ── Narrower day columns ── */
+.eo-col-day {
+  width: 46px !important;
+  min-width: 42px !important;
+  text-align: center;
+}
+
+.eo-day-block {
+  display: block;
+  width: 100%;
+  height: 16px;
+  border-radius: 2px;
+  margin: 0 auto;
+}
+
+.eo-col-day.eo-td {
+  padding: 3px 2px !important;
+}
+
+.eo-col-day .eo-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 16px;
+  font-size: 9px;
+  padding: 0;
+  min-width: unset;
+}
+
+/* ── Colaboradores upload button ── */
+.eo-btn-upload {
+  background: var(--navy, #1a1f2e);
+  color: #fff;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.eo-btn-upload:hover { filter: brightness(1.15); }
+
+/* Status badge after upload */
+.eo-colab-status {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.eo-colab-loading {
+  background: var(--orange-l);
+  color: var(--orange);
+}
+
+.eo-colab-ok {
+  background: var(--green-l);
+  color: var(--green);
+}
+
+.eo-colab-err {
+  background: var(--red-l);
+  color: var(--red);
+}
+
+/* CH mismatch warning on matricula field */
+.eo-mat-input.eo-mat-warn {
+  border-color: var(--orange) !important;
+  background: var(--orange-l) !important;
+  color: var(--orange) !important;
+}
+
+.eo-mat-input.eo-mat-warn::after {
+  content: '!';
+}
