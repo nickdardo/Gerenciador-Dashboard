@@ -410,3 +410,236 @@ tbody td.r { text-align: right; }
   border-radius: 2px;
   transition: width 0.6s ease;
 }
+
+/* ══════════════════════════════════════════════════════
+   ESCALA ONLINE — PAGE 3
+════════════════════════════════════════════════════════ */
+
+/* Nav tab */
+.nav-tab.active-eo { color: var(--blue); border-bottom-color: var(--blue); font-weight: 600; }
+
+/* Header */
+.eo-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 24px 10px;
+  gap: 12px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+  background: #fff;
+  position: sticky;
+  top: var(--nav-h);
+  z-index: 10;
+}
+
+.eo-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.eo-base-tag {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--blue-l);
+  color: var(--blue);
+  letter-spacing: 0.06em;
+}
+
+.eo-subtitle {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.eo-header-right {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.eo-btn {
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 14px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.eo-btn-sec   { background: var(--bg); border: 1px solid var(--border2); color: var(--muted); }
+.eo-btn-xls   { background: var(--green); color: #fff; }
+.eo-btn-print { background: var(--blue); color: #fff; }
+.eo-btn:hover { filter: brightness(0.92); }
+
+/* Table wrapper */
+.eo-wrap {
+  overflow-x: auto;
+  padding: 16px 24px 48px;
+}
+
+.eo-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  min-width: 900px;
+}
+
+/* Column widths */
+.eo-col-func    { width: 200px; min-width: 160px; }
+.eo-col-horario { width: 110px; min-width: 100px; }
+.eo-col-carga   { width: 60px;  min-width: 52px; text-align: center; }
+.eo-col-nome    { width: 220px; min-width: 180px; }
+.eo-col-day     { width: 90px;  min-width: 80px; text-align: center; }
+
+/* Header cells */
+.eo-th {
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  padding: 8px 10px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 2px solid var(--border);
+  white-space: nowrap;
+  z-index: 3;
+}
+
+/* Today column highlight */
+.eo-today { background: var(--blue-l) !important; color: var(--blue) !important; }
+.eo-today-col { background: rgba(26,86,219,0.03); }
+
+.eo-day-name { display: block; font-size: 11px; font-weight: 700; color: var(--text); }
+.eo-day-date { display: block; font-size: 10px; color: var(--muted); font-weight: 400; }
+
+/* Body cells */
+.eo-td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+  color: var(--text);
+}
+
+.eo-row:hover td { background: #f8fafc; }
+.eo-row-alt td   { background: #fafbfc; }
+.eo-row-alt:hover td { background: #f1f5f9; }
+
+/* Funcao section header */
+.eo-funcao-row td {
+  background: var(--navy, #1a1f2e) !important;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  padding: 7px 12px;
+  text-transform: uppercase;
+  border-bottom: none;
+}
+
+.eo-funcao-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.eo-funcao-count {
+  font-size: 10px;
+  font-weight: 400;
+  opacity: 0.55;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* Name input */
+.eo-name-input {
+  width: 100%;
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.eo-name-input:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(26,86,219,0.1);
+}
+
+.eo-name-input::placeholder { color: #c0cad8; }
+.eo-name-input:not(:placeholder-shown) {
+  border-color: var(--green);
+  background: var(--green-l);
+  color: #065f46;
+  font-weight: 500;
+}
+
+/* Turno pill */
+.eo-turno-pill {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 7px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+/* Carga badge */
+.eo-carga {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--green);
+}
+
+/* Chip colours per funcao */
+.eo-chip {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-weight: 600;
+  background: var(--blue-l);
+  color: var(--blue);
+  white-space: nowrap;
+}
+
+/* Print styles */
+@media print {
+  nav, .eo-header-right, .btn-row { display: none !important; }
+  .eo-header { position: static; border: none; padding: 0 0 8px; }
+  .eo-wrap   { padding: 0; overflow: visible; }
+  .eo-table  { font-size: 10px; }
+  .eo-name-input {
+    border: none;
+    background: transparent !important;
+    box-shadow: none;
+    padding: 0;
+  }
+  .eo-funcao-row td { background: #222 !important; -webkit-print-color-adjust: exact; }
+}
+
+/* SVG icon alignment inside buttons */
+.eo-btn svg {
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 5px;
+  position: relative;
+  top: -1px;
+  flex-shrink: 0;
+}
+
+.btn svg { display:inline-block; vertical-align:middle; margin-right:4px; position:relative; top:-1px; }
