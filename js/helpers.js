@@ -2,12 +2,13 @@
 // NAVIGATION
 // ══════════════════════════════════════════════════════
 function showPage(p) {
-  ['gen','comp','eo'].forEach(id => {
+  ['gen','comp','eo','ad'].forEach(id => {
     document.getElementById('page-' + id).classList.toggle('active', p === id);
   });
   document.getElementById('tab-gen').className  = 'nav-tab' + (p === 'gen'  ? ' active-gen'  : '');
   document.getElementById('tab-comp').className = 'nav-tab' + (p === 'comp' ? ' active-comp' : '');
   document.getElementById('tab-eo').className   = 'nav-tab' + (p === 'eo'   ? ' active-eo'   : '');
+  document.getElementById('tab-ad').className   = 'nav-tab' + (p === 'ad'   ? ' active-ad'   : '');
 }
 
 // ══════════════════════════════════════════════════════
