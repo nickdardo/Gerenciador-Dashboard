@@ -54,5 +54,15 @@
 <script src="js/app.js"></script>
 <script src="js/pages.js"></script>
 
+<script>
+  // Fallback: if onAuthStateChange doesn't fire within 1.5s, show login
+  setTimeout(() => {
+    const authShell = document.getElementById('auth-shell');
+    const appShell  = document.getElementById('app-shell');
+    if (authShell.style.display === 'none' && appShell.style.display === 'none') {
+      showAuth();
+    }
+  }, 1500);
+</script>
 </body>
 </html>
