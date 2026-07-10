@@ -31,11 +31,23 @@ async function authGetUser() {
   return user;
 }
 
-// ── Session listener ──────────────────────────────────
-db.auth.onAuthStateChange((event, session) => {
-  if (event === 'SIGNED_OUT' || !session) {
-    showAuth();
-  } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-    showApp(session.user);
+// ── Session listener — initialized by initAuth() in auth.js ──
+// Do not call showAuth/showApp here — scripts may not be loaded yet.
+
+// ── Deferred session listener ─────────────────────────
+// Supabase fires onAuthStateChange before other scripts load.
+// We poll until showAuth/showApp are defined, then register.
+function _waitForAuth() {
+  if (typeof showAuth === 'function' && typeof showApp === 'function') {
+    db.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT' || !session) {
+        showAuth();
+      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        showApp(session.user);
+      }
+    });
+  } else {
+    setTimeout(_waitForAuth, 50);
   }
-});
+}
+_waitForAuth();

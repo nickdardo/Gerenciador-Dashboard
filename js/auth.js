@@ -168,16 +168,7 @@ function friendlyError(msg) {
 // INIT — called after all scripts are loaded
 // ══════════════════════════════════════════════════════
 async function initAuth() {
-  // 1. Set up auth state listener
-  db.auth.onAuthStateChange((event, session) => {
-    if (event === 'SIGNED_OUT' || !session) {
-      showAuth();
-    } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-      showApp(session.user);
-    }
-  });
-
-  // 2. Check if already logged in
+  // Check existing session on page load
   const { data: { session } } = await db.auth.getSession();
   if (session?.user) {
     showApp(session.user);
