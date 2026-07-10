@@ -5,11 +5,13 @@
 let currentUser = null;
 let currentPage = 'escala';
 
+const ALL_ROLES = ['admin','gerente','coordenador','supervisor','lideranca','operador'];
+
 const NAV_ITEMS = [
-  { id: 'escala',     icon: 'calendar',   label: 'Escala Online',  roles: ['admin','gerente','operador'] },
-  { id: 'gerador',    icon: 'settings',   label: 'Gerador',        roles: ['admin','gerente','operador'] },
-  { id: 'comparador', icon: 'bar-chart',  label: 'Comparador',     roles: ['admin','gerente','operador'] },
-  { id: 'aderencia',  icon: 'clock',      label: 'Aderência',      roles: ['admin','gerente','operador'] },
+  { id: 'escala',     icon: 'calendar',   label: 'Escala Online',  roles: ALL_ROLES },
+  { id: 'gerador',    icon: 'settings',   label: 'Gerador',        roles: ['admin','gerente','coordenador','supervisor','lideranca'] },
+  { id: 'comparador', icon: 'bar-chart',  label: 'Comparador',     roles: ['admin','gerente','coordenador','supervisor'] },
+  { id: 'aderencia',  icon: 'clock',      label: 'Aderência',      roles: ['admin','gerente','coordenador','supervisor'] },
   { id: 'admin',      icon: 'shield',     label: 'Admin',          roles: ['admin'] },
 ];
 
