@@ -56,8 +56,11 @@
 <script src="js/admin.js"></script>
 
 <script>
-  // Init after all scripts loaded
-  initAuth();
+  window.addEventListener('load', function() {
+    if (typeof initAuth === 'function') {
+      initAuth();
+    }
+  });
 </script>
 </body>
 </html>

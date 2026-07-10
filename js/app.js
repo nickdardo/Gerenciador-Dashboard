@@ -23,13 +23,15 @@ async function appInit(user) {
   const { data: profile } = await db.from('profiles').select('*').eq('id', user.id).single();
   currentUserProfile = profile;
 
-  // Log login
-  await db.from('access_log').insert({
-    user_id: user.id,
-    email:   user.email,
-    base:    profile?.bases?.[0] || null,
-    action:  'login'
-  }).catch(() => {});
+  // Log login (non-blocking)
+  try {
+    await db.from('access_log').insert({
+      user_id: user.id,
+      email:   user.email,
+      base:    profile?.bases?.[0] || null,
+      action:  'login'
+    });
+  } catch (_) {}
 
   renderSidebar();
   renderTopbar();
