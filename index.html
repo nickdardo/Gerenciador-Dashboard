@@ -20,8 +20,8 @@
 
     <!-- Brand -->
     <div class="auth-brand">
-      <img src="assets/dnata-logo.png" alt="dnata" class="auth-logo">
-      <span class="auth-brand-title">Gerenciador de Escalas</span>
+      <img src="assets/dnata-logo.svg" alt="dnata" class="auth-logo">
+      <span class="auth-brand-title">Painel de Escala</span>
     </div>
 
     <!-- Card — filled by auth.js -->
@@ -55,14 +55,8 @@
 <script src="js/pages.js"></script>
 
 <script>
-  // Fallback: if onAuthStateChange doesn't fire within 1.5s, show login
-  setTimeout(() => {
-    const authShell = document.getElementById('auth-shell');
-    const appShell  = document.getElementById('app-shell');
-    if (authShell.style.display === 'none' && appShell.style.display === 'none') {
-      showAuth();
-    }
-  }, 1500);
+  // Init after all scripts loaded
+  initAuth();
 </script>
 </body>
 </html>

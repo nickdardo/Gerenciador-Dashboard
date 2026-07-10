@@ -23,9 +23,17 @@ function renderLogin() {
       <button class="auth-tab" onclick="renderSignup()">Criar acesso</button>
     </div>
 
+    <div class="auth-idioma">
+      <div class="auth-idioma-label">Idioma</div>
+      <div class="auth-idioma-btns">
+        <button class="auth-idioma-btn active">PT-BR</button>
+        <button class="auth-idioma-btn">English</button>
+      </div>
+    </div>
+
     <div class="auth-field-group">
       <label class="auth-label">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
         Email corporativo
       </label>
       <input id="auth-email" class="auth-input" type="email"
@@ -34,7 +42,7 @@ function renderLogin() {
 
     <div class="auth-field-group">
       <label class="auth-label">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
         Senha
       </label>
       <input id="auth-pass" class="auth-input" type="password"
@@ -48,7 +56,6 @@ function renderLogin() {
     <p class="auth-hint">Use seu email @dnata.com.br para acesso autorizado.</p>
   `;
 
-  // Enter key support
   document.getElementById('auth-pass').addEventListener('keydown', e => {
     if (e.key === 'Enter') doLogin();
   });
@@ -155,4 +162,26 @@ function friendlyError(msg) {
   if (msg.includes('Email not confirmed')) return 'Confirme seu email antes de entrar.';
   if (msg.includes('already registered')) return 'Este email já está cadastrado.';
   return msg;
+}
+
+// ══════════════════════════════════════════════════════
+// INIT — called after all scripts are loaded
+// ══════════════════════════════════════════════════════
+async function initAuth() {
+  // 1. Set up auth state listener
+  db.auth.onAuthStateChange((event, session) => {
+    if (event === 'SIGNED_OUT' || !session) {
+      showAuth();
+    } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+      showApp(session.user);
+    }
+  });
+
+  // 2. Check if already logged in
+  const { data: { session } } = await db.auth.getSession();
+  if (session?.user) {
+    showApp(session.user);
+  } else {
+    showAuth();
+  }
 }
