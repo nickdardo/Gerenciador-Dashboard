@@ -897,3 +897,30 @@ a      { color: inherit; text-decoration: none; }
 }
 
 .admin-base-check input { accent-color: var(--dnata-blue); }
+
+/* ── Password field with eye toggle ── */
+.auth-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.auth-input-pw {
+  padding-right: 40px;
+}
+
+.auth-eye {
+  position: absolute;
+  right: 12px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  transition: color var(--transition);
+  flex-shrink: 0;
+}
+
+.auth-eye:hover { color: var(--text-primary); }
