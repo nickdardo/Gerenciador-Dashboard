@@ -1,13 +1,25 @@
 // ══════════════════════════════════════════════════════
-// ADMIN PANEL
+// ADMIN PANEL — Modelo 1
+// Abas: Usuários | Arquivos | Aderência | Malha | Log
 // ══════════════════════════════════════════════════════
 
-const BASES_DISPONIVEIS = ['BEL','GRU','GIG','CGH','REC','FOR','SSA','CWB','POA','BSB','MAO','NAT'];
+const BASES_DISPONIVEIS = ['BEL','GRU','GIG','CGH','REC','FOR','SSA','CWB','POA','BSB','MAO','NAT','AJU','FLN','MCZ','SLZ','BVB','STM','JPA','CPV'];
 
 const ROLES = {
-  admin:    { label: 'Admin Master', color: '#ef4444' },
-  gerente:  { label: 'Gerente',      color: '#f59e0b' },
-  operador: { label: 'Operador',     color: '#00a0d2' },
+  admin:       { label: 'Admin Master', color: '#ef4444' },
+  gerente:     { label: 'Gerente',      color: '#f59e0b' },
+  coordenador: { label: 'Coordenador',  color: '#a78bfa' },
+  supervisor:  { label: 'Supervisor',   color: '#34d399' },
+  lideranca:   { label: 'Liderança',    color: '#60a5fa' },
+  operador:    { label: 'Operador',     color: '#94a3b8' },
+};
+
+// In-memory store for uploaded files (session only)
+const adminFiles = {
+  colaboradores: null,  // { count, bases, date, data: Map<mat, {nome,filial,funcao,ch,situacao}> }
+  horarios:      null,  // { count, period, date }
+  marcacao:      null,  // { count, period, date }
+  malha:         null,  // { count, bases, period, date }
 };
 
 // ── Entry point ───────────────────────────────────────
@@ -16,20 +28,20 @@ async function pageAdmin(el) {
     <div class="page-header">
       <div>
         <h1 class="page-title">Admin Master</h1>
-        <p class="page-sub">Controle de usuários, bases e status das escalas</p>
+        <p class="page-sub">Controle de usuários, dados e aderência</p>
       </div>
     </div>
-    <div id="admin-body" style="padding:16px 24px">
+    <div id="admin-body" style="padding:0 24px 32px">
       <div class="admin-loading">Carregando...</div>
     </div>`;
 
-  // Check if current user is admin
-  const { data: profile } = await db.from('profiles').select('*').eq('id', (await db.auth.getUser()).data.user?.id).single();
+  const { data: { user } } = await db.auth.getUser();
+  const { data: profile }  = await db.from('profiles').select('*').eq('id', user?.id).single();
 
   if (!profile || profile.role !== 'admin') {
     document.getElementById('admin-body').innerHTML = `
       <div class="admin-denied">
-        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+        <i class="ti ti-shield-off" style="font-size:36px;opacity:.3" aria-hidden="true"></i>
         <p>Acesso restrito ao Admin Master.</p>
       </div>`;
     return;
@@ -43,7 +55,6 @@ async function adminRender() {
   const body = document.getElementById('admin-body');
   body.innerHTML = `<div class="admin-loading">Carregando dados...</div>`;
 
-  // Fetch all data in parallel
   const [
     { data: users },
     { data: escalas },
@@ -54,213 +65,589 @@ async function adminRender() {
     db.from('access_log').select('*').order('created_at', { ascending: false }).limit(200),
   ]);
 
-  const totalUsers   = users?.length || 0;
-  const ativos       = users?.filter(u => u.ativo).length || 0;
-  const basesCom     = [...new Set(escalas?.map(e => e.base) || [])].length;
-  const publicadas   = escalas?.filter(e => e.status === 'publicado').length || 0;
-  const loginsHoje   = logs?.filter(l => {
-    const d = new Date(l.created_at);
-    const t = new Date();
-    return d.toDateString() === t.toDateString() && l.action === 'login';
+  const totalUsers = users?.length || 0;
+  const ativos     = users?.filter(u => u.ativo).length || 0;
+  const publicadas = escalas?.filter(e => e.status === 'publicado').length || 0;
+  const loginsHoje = logs?.filter(l => {
+    return new Date(l.created_at).toDateString() === new Date().toDateString() && l.action === 'login';
   }).length || 0;
+
+  // Count loaded files
+  const filesOk = Object.values(adminFiles).filter(f => f !== null).length;
 
   body.innerHTML = `
     <!-- KPIs -->
-    <div class="admin-kpis">
-      ${adminKpi('Usuários cadastrados', totalUsers,  '#00a0d2', userIcon())}
-      ${adminKpi('Usuários ativos',      ativos,      '#72c02c', checkIcon())}
-      ${adminKpi('Bases com escala',     basesCom,    '#f59e0b', mapIcon())}
-      ${adminKpi('Escalas publicadas',   publicadas,  '#72c02c', calIcon())}
-      ${adminKpi('Logins hoje',          loginsHoje,  '#a78bfa', clockIcon())}
+    <div class="adm-kpi-row">
+      ${adminKpi('Usuários',         totalUsers,        '#00a0d2', 'ti-users')}
+      ${adminKpi('Ativos',           ativos,            '#72c02c', 'ti-user-check')}
+      ${adminKpi('Colaboradores',    adminFiles.colaboradores?.count || '—', '#a78bfa', 'ti-id-badge')}
+      ${adminKpi('Arquivos carregados', filesOk+'/4',   filesOk===4?'#72c02c':'#f59e0b', 'ti-files')}
+      ${adminKpi('Logins hoje',      loginsHoje,        '#f472b6', 'ti-login')}
     </div>
 
     <!-- Tabs -->
-    <div class="admin-tabs">
-      <button class="admin-tab active" onclick="adminTabSwitch('users', this)">Usuários</button>
-      <button class="admin-tab" onclick="adminTabSwitch('bases', this)">Status por base</button>
-      <button class="admin-tab" onclick="adminTabSwitch('logs',  this)">Log de acessos</button>
+    <div class="adm-tabs-bar" id="adm-tabs-bar">
+      <button class="adm-tab-btn active" onclick="adminTabSwitch('users',this)">
+        <i class="ti ti-users" aria-hidden="true"></i> Usuários
+      </button>
+      <button class="adm-tab-btn" onclick="adminTabSwitch('files',this)">
+        <i class="ti ti-files" aria-hidden="true"></i> Arquivos
+      </button>
+      <button class="adm-tab-btn" onclick="adminTabSwitch('aderencia',this)">
+        <i class="ti ti-chart-bar" aria-hidden="true"></i> Aderência
+      </button>
+      <button class="adm-tab-btn" onclick="adminTabSwitch('malha',this)">
+        <i class="ti ti-plane" aria-hidden="true"></i> Malha aérea
+      </button>
+      <button class="adm-tab-btn" onclick="adminTabSwitch('logs',this)">
+        <i class="ti ti-list" aria-hidden="true"></i> Log de acessos
+      </button>
     </div>
 
-    <!-- Tab content -->
-    <div id="admin-tab-content">
-      ${adminUsersTab(users || [])}
-    </div>
-
-    <!-- Store data for tab switching -->
-    <script>
-      window._adminData = ${JSON.stringify({ users: users||[], escalas: escalas||[], logs: logs||[] })};
-    </script>
+    <div id="adm-tab-content"></div>
   `;
+
+  window._adminData = { users: users||[], escalas: escalas||[], logs: logs||[] };
+  adminTabSwitch('users', document.querySelector('.adm-tab-btn'));
 }
 
 // ── Tab switcher ──────────────────────────────────────
 function adminTabSwitch(tab, btn) {
-  document.querySelectorAll('.admin-tab').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
+  document.querySelectorAll('.adm-tab-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
   const { users, escalas, logs } = window._adminData || {};
-  const el = document.getElementById('admin-tab-content');
-  if (tab === 'users')  el.innerHTML = adminUsersTab(users || []);
-  if (tab === 'bases')  el.innerHTML = adminBasesTab(escalas || []);
-  if (tab === 'logs')   el.innerHTML = adminLogsTab(logs || []);
+  const el = document.getElementById('adm-tab-content');
+  if (!el) return;
+  switch(tab) {
+    case 'users':    el.innerHTML = adminUsersTab(users||[]);   break;
+    case 'files':    el.innerHTML = adminFilesTab();            break;
+    case 'aderencia':adminAderenciaTab(el);                    break;
+    case 'malha':    el.innerHTML = adminMalhaTab();            break;
+    case 'logs':     el.innerHTML = adminLogsTab(logs||[]);     break;
+  }
 }
 
-// ── Users tab ─────────────────────────────────────────
+// ── KPI helper ────────────────────────────────────────
+function adminKpi(label, value, color, icon) {
+  return `
+    <div class="adm-kpi">
+      <i class="ti ${icon}" style="font-size:18px;color:${color};opacity:.8;margin-bottom:6px" aria-hidden="true"></i>
+      <div class="adm-kpi-v" style="color:${color}">${value}</div>
+      <div class="adm-kpi-l">${label}</div>
+    </div>`;
+}
+
+// ══════════════════════════════════════════════════════
+// TAB: USUÁRIOS
+// ══════════════════════════════════════════════════════
 function adminUsersTab(users) {
   return `
-    <div class="admin-section-header">
-      <span>${users.length} usuários</span>
-      <button class="admin-btn-primary" onclick="adminNewUser()">+ Novo usuário</button>
+    <div class="adm-section-header">
+      <span>${users.length} usuários cadastrados</span>
+      <button class="adm-btn-primary" onclick="adminNewUser()">+ Novo usuário</button>
     </div>
-    <div class="admin-table-wrap">
-      <table class="admin-table">
+    <div class="adm-table-wrap">
+      <table class="adm-table">
         <thead>
-          <tr>
-            <th>Nome</th>
-            <th>Email</th>
-            <th>Perfil</th>
-            <th>Bases</th>
-            <th>Status</th>
-            <th>Cadastro</th>
-            <th></th>
-          </tr>
+          <tr><th>Nome</th><th>Email</th><th>Perfil</th><th>Bases</th><th>Status</th><th>Cadastro</th><th></th></tr>
         </thead>
         <tbody>
           ${users.map(u => `
             <tr>
-              <td style="font-weight:500">${u.nome || '—'}</td>
-              <td style="color:var(--text-secondary)">${u.email}</td>
-              <td>
-                <span class="admin-role-badge" style="background:${ROLES[u.role]?.color}22;color:${ROLES[u.role]?.color}">
-                  ${ROLES[u.role]?.label || u.role}
-                </span>
-              </td>
+              <td style="font-weight:500">${u.nome||'—'}</td>
+              <td style="color:var(--text-muted)">${u.email}</td>
+              <td><span class="adm-role-badge" style="background:${ROLES[u.role]?.color||'#666'}22;color:${ROLES[u.role]?.color||'#666'}">${ROLES[u.role]?.label||u.role}</span></td>
               <td>
                 ${u.bases?.includes('*')
-                  ? '<span class="admin-bases-all">Todas</span>'
-                  : (u.bases?.length ? u.bases.map(b => `<span class="admin-base-tag">${b}</span>`).join('') : '<span style="color:var(--text-muted);font-size:11px">Nenhuma</span>')}
+                  ? '<span style="color:#ef4444;font-size:11px;font-weight:600">Todas</span>'
+                  : (u.bases?.length
+                    ? u.bases.map(b=>`<span class="adm-base-tag">${b}</span>`).join('')
+                    : '<span style="color:var(--text-muted);font-size:11px">Nenhuma</span>')}
               </td>
               <td>
-                <span class="admin-status-dot ${u.ativo ? 'on' : 'off'}"></span>
-                ${u.ativo ? 'Ativo' : 'Inativo'}
+                <span class="adm-status-dot ${u.ativo?'on':'off'}"></span>
+                <span style="font-size:11px">${u.ativo?'Ativo':'Inativo'}</span>
               </td>
-              <td style="color:var(--text-muted);font-size:11px">
-                ${new Date(u.created_at).toLocaleDateString('pt-BR')}
-              </td>
-              <td>
-                <button class="admin-btn-edit" onclick="adminEditUser('${u.id}')">Editar</button>
-              </td>
+              <td style="color:var(--text-muted);font-size:11px">${new Date(u.created_at).toLocaleDateString('pt-BR')}</td>
+              <td><button class="adm-btn-edit" onclick="adminEditUser('${u.id}')">Editar</button></td>
             </tr>`).join('')}
         </tbody>
       </table>
     </div>`;
 }
 
-// ── Bases tab ─────────────────────────────────────────
-function adminBasesTab(escalas) {
-  const byBase = {};
-  BASES_DISPONIVEIS.forEach(b => byBase[b] = { status: '—', updated: null });
-  escalas.forEach(e => {
-    if (!byBase[e.base]) byBase[e.base] = {};
-    byBase[e.base].status  = e.status;
-    byBase[e.base].updated = e.updated_at;
-  });
-
-  const STATUS_COLOR = { publicado: '#72c02c', rascunho: '#f59e0b', arquivado: '#5a6a82', '—': '#3a4a5c' };
+// ══════════════════════════════════════════════════════
+// TAB: ARQUIVOS
+// ══════════════════════════════════════════════════════
+function adminFilesTab() {
+  const files = [
+    {
+      key: 'colaboradores',
+      icon: 'ti-users',
+      color: '#00a0d2',
+      name: 'Colaboradores',
+      desc: 'HRCL204.xlsx · base de colaboradores',
+      accept: '.xlsx,.xls',
+      fn: 'adminLoadColabs',
+      info: adminFiles.colaboradores
+        ? `${adminFiles.colaboradores.count.toLocaleString()} pessoas · ${adminFiles.colaboradores.bases} bases`
+        : null,
+    },
+    {
+      key: 'horarios',
+      icon: 'ti-calendar',
+      color: '#72c02c',
+      name: 'Ponto planejado',
+      desc: 'Horarios.xlsx · escala programada',
+      accept: '.xlsx,.xls',
+      fn: 'adminLoadHorarios',
+      info: adminFiles.horarios
+        ? `${adminFiles.horarios.count.toLocaleString()} registros · ${adminFiles.horarios.period}`
+        : null,
+    },
+    {
+      key: 'marcacao',
+      icon: 'ti-clock',
+      color: '#f59e0b',
+      name: 'Marcação de ponto',
+      desc: 'Marcacao.xlsx · ponto realizado',
+      accept: '.xlsx,.xls',
+      fn: 'adminLoadMarcacao',
+      info: adminFiles.marcacao
+        ? `${adminFiles.marcacao.count.toLocaleString()} registros · ${adminFiles.marcacao.period}`
+        : null,
+    },
+    {
+      key: 'malha',
+      icon: 'ti-plane',
+      color: '#a78bfa',
+      name: 'Malha aérea',
+      desc: 'RVPE127_*.CSV · voos por base',
+      accept: '.csv,.CSV',
+      fn: 'adminLoadMalha',
+      info: adminFiles.malha
+        ? `${adminFiles.malha.count.toLocaleString()} voos · ${adminFiles.malha.bases} bases · ${adminFiles.malha.period}`
+        : null,
+    },
+  ];
 
   return `
-    <div class="admin-section-header"><span>Status das escalas por base</span></div>
-    <div class="admin-bases-grid">
-      ${BASES_DISPONIVEIS.map(base => {
-        const info = byBase[base] || {};
-        const clr  = STATUS_COLOR[info.status] || STATUS_COLOR['—'];
-        return `
-          <div class="admin-base-card">
-            <div class="admin-base-card-top">
-              <span class="admin-base-sigla">${base}</span>
-              <span class="admin-base-status" style="color:${clr}">● ${info.status || '—'}</span>
+    <div class="adm-section-header">
+      <span>Hub de dados operacionais</span>
+      <span style="font-size:11px;color:var(--text-muted)">Arquivos ficam em memória durante a sessão</span>
+    </div>
+    <div class="adm-files-grid">
+      ${files.map(f => `
+        <div class="adm-file-card">
+          <div class="adm-file-header">
+            <div class="adm-file-icon" style="background:${f.color}18;color:${f.color}">
+              <i class="ti ${f.icon}" style="font-size:18px" aria-hidden="true"></i>
             </div>
-            ${info.updated
-              ? `<div class="admin-base-updated">Atualizado ${new Date(info.updated).toLocaleDateString('pt-BR')}</div>`
-              : `<div class="admin-base-updated" style="color:var(--text-muted)">Sem escala</div>`}
+            <div class="adm-file-meta">
+              <div class="adm-file-name">${f.name}</div>
+              <div class="adm-file-desc">${f.desc}</div>
+            </div>
+          </div>
+
+          <div class="adm-file-progress">
+            <div class="adm-file-progress-fill" style="width:${f.info?'100%':'0%'};background:${f.color}"></div>
+          </div>
+
+          <div class="adm-file-footer">
+            <span id="adm-status-${f.key}" class="${f.info?'adm-file-badge-ok':'adm-file-badge-no'}">
+              ${f.info || 'Não carregado'}
+            </span>
+            <label class="adm-upload-btn">
+              <i class="ti ti-upload" style="font-size:11px" aria-hidden="true"></i>
+              ${f.info ? 'Atualizar' : 'Carregar'}
+              <input type="file" accept="${f.accept}" style="display:none"
+                onchange="${f.fn}(this)">
+            </label>
+          </div>
+        </div>
+      `).join('')}
+    </div>`;
+}
+
+// ── File loaders ──────────────────────────────────────
+async function adminLoadColabs(input) {
+  const file = input.files[0];
+  if (!file) return;
+  adminSetFileStatus('colaboradores', 'Lendo arquivo...', 'load');
+
+  const r = new FileReader();
+  r.onload = async e => {
+    try {
+      const wb   = XLSX.read(e.target.result, { type:'array' });
+      const ws   = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:false });
+
+      const records = [];
+      const basesSet = new Set();
+
+      rows.forEach((row, i) => {
+        if (i===0 || !row || !row[0]) return;
+        const mat = String(row[0]).trim();
+        if (!mat || isNaN(parseInt(mat))) return;
+        const nome    = String(row[1]||'').trim();
+        const station = String(row[2]||'').trim().toUpperCase();
+        const hmês    = String(row[4]||'').trim();
+        const situacao= String(row[10]||'').trim();
+        const funcao  = String(row[12]||'').trim();
+        const ch      = parseInt(hmês) || 0;
+        if (station) basesSet.add(station);
+        records.push({ matricula: mat, nome, station, funcao, ch, situacao, ativo: true, updated_at: new Date() });
+      });
+
+      const total = records.length;
+      adminSetFileStatus('colaboradores', `Gravando ${total.toLocaleString()} no banco...`, 'load');
+
+      // Upsert in batches of 500
+      const BATCH = 500;
+      let saved = 0;
+      for (let i = 0; i < records.length; i += BATCH) {
+        const batch = records.slice(i, i + BATCH);
+        const { error } = await db.from('colaboradores')
+          .upsert(batch, { onConflict: 'matricula' });
+        if (error) throw new Error(error.message);
+        saved += batch.length;
+        adminSetFileStatus('colaboradores', `Gravando... ${saved}/${total}`, 'load');
+      }
+
+      adminFiles.colaboradores = {
+        count: total,
+        bases: basesSet.size,
+        date: new Date().toLocaleDateString('pt-BR'),
+        data: new Map(records.map(r => [r.matricula, r]))
+      };
+
+      adminSetFileStatus('colaboradores', `✓ ${total.toLocaleString()} pessoas · ${basesSet.size} bases`, 'ok');
+      input.value = '';
+
+    } catch(err) {
+      adminSetFileStatus('colaboradores', 'Erro: ' + err.message, 'err');
+      console.error('[adminLoadColabs]', err);
+    }
+  };
+  r.readAsArrayBuffer(file);
+}
+
+async function adminLoadHorarios(input) {
+  const file = input.files[0];
+  if (!file) return;
+  adminSetFileStatus('horarios', 'Enviando ao Storage...', 'load');
+  try {
+    const path = `horarios/Horarios_${new Date().toISOString().slice(0,10)}.xlsx`;
+    const { error } = await db.storage
+      .from('arquivos-operacionais')
+      .upload(path, file, { upsert: true, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    if (error) throw new Error(error.message);
+
+    // Quick read for stats
+    const r = new FileReader();
+    r.onload = e => {
+      try {
+        const wb   = XLSX.read(e.target.result, { type:'array' });
+        const ws   = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:false });
+        let count=0; const datas=new Set();
+        rows.forEach(row => {
+          if (!row||!row[1]) return;
+          if (row[5]) datas.add(String(row[5]).slice(0,7));
+          count++;
+        });
+        const period = [...datas].sort().join(', ');
+        adminFiles.horarios = { count, period, path, date: new Date().toLocaleDateString('pt-BR') };
+        adminSetFileStatus('horarios', `✓ ${count.toLocaleString()} registros · ${period}`, 'ok');
+        if (typeof pontoParseHorarios === 'function') pontoParseHorarios(wb, null);
+      } catch(err) { adminSetFileStatus('horarios', 'Erro: '+err.message, 'err'); }
+    };
+    r.readAsArrayBuffer(file);
+    input.value='';
+  } catch(err) { adminSetFileStatus('horarios', 'Erro: '+err.message, 'err'); }
+}
+
+async function adminLoadMarcacao(input) {
+  const file = input.files[0];
+  if (!file) return;
+  adminSetFileStatus('marcacao', 'Enviando ao Storage...', 'load');
+  try {
+    const path = `marcacao/Marcacao_${new Date().toISOString().slice(0,10)}.xlsx`;
+    const { error } = await db.storage
+      .from('arquivos-operacionais')
+      .upload(path, file, { upsert: true, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    if (error) throw new Error(error.message);
+
+    const r = new FileReader();
+    r.onload = e => {
+      try {
+        const wb   = XLSX.read(e.target.result, { type:'array' });
+        const ws   = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:false });
+        let count=0; const datas=new Set();
+        rows.forEach(row => {
+          if (!row||!row[1]) return;
+          if (row[3]) datas.add(String(row[3]).slice(0,7));
+          count++;
+        });
+        const period = [...datas].sort().join(', ');
+        adminFiles.marcacao = { count, period, path, date: new Date().toLocaleDateString('pt-BR') };
+        adminSetFileStatus('marcacao', `✓ ${count.toLocaleString()} registros · ${period}`, 'ok');
+        if (typeof pontoParseMarcacao === 'function') pontoParseMarcacao(wb, null);
+      } catch(err) { adminSetFileStatus('marcacao', 'Erro: '+err.message, 'err'); }
+    };
+    r.readAsArrayBuffer(file);
+    input.value='';
+  } catch(err) { adminSetFileStatus('marcacao', 'Erro: '+err.message, 'err'); }
+}
+
+async function adminLoadMalha(input) {
+  const file = input.files[0];
+  if (!file) return;
+  adminSetFileStatus('malha', 'Enviando ao Storage...', 'load');
+  try {
+    const path = `malha/${file.name}`;
+    const { error } = await db.storage
+      .from('arquivos-operacionais')
+      .upload(path, file, { upsert: true, contentType: 'text/csv' });
+    if (error) throw new Error(error.message);
+
+    const r = new FileReader();
+    r.onload = e => {
+      try {
+        const text  = e.target.result;
+        const lines = text.split(/\r?\n/);
+        let dataStart=0;
+        for (let i=0;i<6;i++) { if (lines[i]?.startsWith('Base,')) { dataStart=i+1; break; } }
+        const basesSet=new Set(); const meses=new Set(); let count=0;
+        for (let i=dataStart;i<lines.length;i++) {
+          const parts=lines[i].split(',');
+          if (parts.length<4) continue;
+          const base=parts[0].trim(); const data=parts[3].trim();
+          if (!base||!data) continue;
+          basesSet.add(base);
+          if (data.includes('/')) meses.add(data.split('/').slice(1).join('/'));
+          count++;
+        }
+        const period = [...meses].slice(0,2).join(', ');
+        adminFiles.malha = { count, bases: basesSet.size, period, path, date: new Date().toLocaleDateString('pt-BR') };
+        adminSetFileStatus('malha', `✓ ${count.toLocaleString()} voos · ${basesSet.size} bases`, 'ok');
+        if (typeof malhaParseCSV === 'function') malhaParseCSV(text);
+      } catch(err) { adminSetFileStatus('malha', 'Erro: '+err.message, 'err'); }
+    };
+    r.readAsText(file, 'ISO-8859-1');
+    input.value='';
+  } catch(err) { adminSetFileStatus('malha', 'Erro: '+err.message, 'err'); }
+}
+
+function adminSetFileStatus(key, msg, type) {
+  const el = document.getElementById(`adm-status-${key}`);
+  if (!el) return;
+  el.textContent = msg;
+  el.className = type==='ok' ? 'adm-file-badge-ok'
+               : type==='load' ? 'adm-file-badge-load'
+               : type==='err'  ? 'adm-file-badge-err'
+               : 'adm-file-badge-no';
+}
+
+// ══════════════════════════════════════════════════════
+// TAB: ADERÊNCIA
+// ══════════════════════════════════════════════════════
+function adminAderenciaTab(el) {
+  if (!adminFiles.horarios || !adminFiles.marcacao) {
+    el.innerHTML = `
+      <div class="adm-section-header"><span>Aderência ao Ponto</span></div>
+      <div class="adm-empty-state">
+        <i class="ti ti-clock-off" style="font-size:32px;opacity:.2" aria-hidden="true"></i>
+        <p>Carregue os arquivos <strong>Ponto planejado</strong> e <strong>Marcação de ponto</strong> na aba Arquivos para ver a aderência.</p>
+        <button class="adm-btn-primary" onclick="adminTabSwitch('files', document.querySelectorAll('.adm-tab-btn')[1])">
+          Ir para Arquivos
+        </button>
+      </div>`;
+    return;
+  }
+
+  // Build comparison using ponto.js engine
+  const results = typeof pontoBuildComparison === 'function'
+    ? pontoBuildComparison(null, null, null)
+    : [];
+
+  const stats = typeof pontoBuildStats === 'function' ? pontoBuildStats(results) : null;
+
+  // Group by base
+  const byBase = {};
+  results.forEach(r => {
+    const b = r.filial || '?';
+    if (!byBase[b]) byBase[b] = { ok:0, desvio:0, atraso:0, saida_antecipada:0, falta:0, total:0 };
+    byBase[b][r.status] = (byBase[b][r.status]||0) + 1;
+    byBase[b].total++;
+  });
+
+  const pct = b => b.total ? Math.round((b.ok/b.total)*100) : 0;
+  const pctColor = p => p>=90?'#72c02c':p>=70?'#f59e0b':'#ef4444';
+
+  el.innerHTML = `
+    <div class="adm-section-header">
+      <span>Aderência ao Ponto · ${results.length.toLocaleString()} registros</span>
+      <div style="display:flex;gap:8px">
+        <span class="adm-legend-item"><span class="adm-dot" style="background:#72c02c"></span>≥90% ótimo</span>
+        <span class="adm-legend-item"><span class="adm-dot" style="background:#f59e0b"></span>70–89% atenção</span>
+        <span class="adm-legend-item"><span class="adm-dot" style="background:#ef4444"></span>&lt;70% crítico</span>
+      </div>
+    </div>
+
+    ${stats ? `
+    <div class="adm-kpi-row" style="margin-bottom:0">
+      ${adminKpi('Aderência geral', stats.adherencePct+'%', pctColor(stats.adherencePct), 'ti-chart-bar')}
+      ${adminKpi('No horário',      stats.ok,               '#72c02c',  'ti-check')}
+      ${adminKpi('Atrasos',         stats.atraso+stats.desvio, '#f59e0b','ti-clock-exclamation')}
+      ${adminKpi('Saída antecipada',stats.saida_antecipada, '#f59e0b',  'ti-clock-minus')}
+      ${adminKpi('Faltas',          stats.falta,            '#ef4444',  'ti-x')}
+    </div>` : ''}
+
+    <div class="adm-adh-grid">
+      ${Object.entries(byBase).sort((a,b)=>pct(b[1])-pct(a[1])).map(([base, b]) => {
+        const p = pct(b);
+        const c = pctColor(p);
+        return `
+          <div class="adm-adh-card">
+            <div class="adm-adh-top">
+              <span class="adm-adh-base">${base}</span>
+              <span class="adm-adh-pct" style="color:${c}">${p}%</span>
+            </div>
+            <div class="adm-adh-bar"><div style="width:${p}%;background:${c};height:100%;border-radius:2px"></div></div>
+            <div class="adm-adh-rows">
+              <div class="adm-adh-row"><span>No horário</span><span style="color:#72c02c">${b.ok}</span></div>
+              <div class="adm-adh-row"><span>Atrasos</span><span style="color:#f59e0b">${b.atraso+b.desvio}</span></div>
+              <div class="adm-adh-row"><span>Faltas</span><span style="color:#ef4444">${b.falta}</span></div>
+              <div class="adm-adh-row"><span>Total</span><span>${b.total}</span></div>
+            </div>
           </div>`;
       }).join('')}
     </div>`;
 }
 
-// ── Logs tab ──────────────────────────────────────────
-function adminLogsTab(logs) {
-  const ACTION_LABEL = {
-    login:           '🔑 Login',
-    logout:          '🚪 Logout',
-    view_escala:     '👁 Ver escala',
-    edit_escala:     '✏️ Editar escala',
-    publish_escala:  '✅ Publicar escala',
-  };
+// ══════════════════════════════════════════════════════
+// TAB: MALHA AÉREA
+// ══════════════════════════════════════════════════════
+function adminMalhaTab() {
+  if (!adminFiles.malha) {
+    return `
+      <div class="adm-section-header"><span>Malha aérea</span></div>
+      <div class="adm-empty-state">
+        <i class="ti ti-plane-off" style="font-size:32px;opacity:.2" aria-hidden="true"></i>
+        <p>Carregue o arquivo <strong>Malha aérea</strong> (RVPE127_*.CSV) na aba Arquivos.</p>
+        <button class="adm-btn-primary" onclick="adminTabSwitch('files', document.querySelectorAll('.adm-tab-btn')[1])">
+          Ir para Arquivos
+        </button>
+      </div>`;
+  }
+
+  // Build ranking from malhaVoos if available
+  const rows = [];
+  if (typeof malhaVoos !== 'undefined' && malhaVoos.size) {
+    for (const [base, dayMap] of malhaVoos) {
+      const total = [...dayMap.values()].reduce((a,b)=>a+b,0);
+      const avg   = Math.round(total / dayMap.size);
+      const max   = Math.max(...dayMap.values());
+      const min   = Math.min(...dayMap.values());
+      rows.push({ base, total, avg, max, min });
+    }
+    rows.sort((a,b)=>b.total-a.total);
+  }
 
   return `
-    <div class="admin-section-header"><span>${logs.length} registros recentes</span></div>
-    <div class="admin-table-wrap">
-      <table class="admin-table">
+    <div class="adm-section-header">
+      <span>Malha aérea · ${adminFiles.malha.count.toLocaleString()} voos · ${adminFiles.malha.bases} bases</span>
+      <span style="font-size:11px;color:var(--text-muted)">${adminFiles.malha.period}</span>
+    </div>
+    ${rows.length ? `
+    <div class="adm-table-wrap">
+      <table class="adm-table">
         <thead>
-          <tr><th>Data/Hora</th><th>Email</th><th>Base</th><th>Ação</th></tr>
+          <tr><th>Base</th><th class="r">Total voos</th><th class="r">Média/dia</th><th class="r">Dia mais tranquilo</th><th class="r">Dia mais intenso</th></tr>
         </thead>
         <tbody>
-          ${logs.slice(0,100).map(l => `
+          ${rows.map(r => `
+            <tr>
+              <td style="font-weight:600"><span class="adm-base-tag">${r.base}</span></td>
+              <td class="r">${r.total.toLocaleString()}</td>
+              <td class="r">${r.avg}</td>
+              <td class="r" style="color:#72c02c">${r.min} voos</td>
+              <td class="r" style="color:#ef4444">${r.max} voos</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>` : `<div class="adm-empty-state"><p>Dados da malha carregados. Processe para ver o ranking.</p></div>`}`;
+}
+
+// ══════════════════════════════════════════════════════
+// TAB: LOG
+// ══════════════════════════════════════════════════════
+function adminLogsTab(logs) {
+  const ACTION = {
+    login: 'Login', logout: 'Logout',
+    view_escala:'Ver escala', edit_escala:'Editar escala', publish_escala:'Publicar escala',
+  };
+  return `
+    <div class="adm-section-header"><span>${logs.length} registros recentes</span></div>
+    <div class="adm-table-wrap">
+      <table class="adm-table">
+        <thead><tr><th>Data / Hora</th><th>Email</th><th>Base</th><th>Ação</th></tr></thead>
+        <tbody>
+          ${logs.slice(0,100).map(l=>`
             <tr>
               <td style="font-size:11px;color:var(--text-muted)">${new Date(l.created_at).toLocaleString('pt-BR')}</td>
-              <td>${l.email || '—'}</td>
-              <td>${l.base ? `<span class="admin-base-tag">${l.base}</span>` : '—'}</td>
-              <td style="font-size:11px">${ACTION_LABEL[l.action] || l.action}</td>
+              <td>${l.email||'—'}</td>
+              <td>${l.base?`<span class="adm-base-tag">${l.base}</span>`:'—'}</td>
+              <td style="font-size:11px">${ACTION[l.action]||l.action}</td>
             </tr>`).join('')}
         </tbody>
       </table>
     </div>`;
 }
 
-// ── Edit user modal ───────────────────────────────────
+// ══════════════════════════════════════════════════════
+// EDIT USER MODAL
+// ══════════════════════════════════════════════════════
 async function adminEditUser(userId) {
   const { data: u } = await db.from('profiles').select('*').eq('id', userId).single();
   if (!u) return;
 
   const overlay = document.createElement('div');
-  overlay.className = 'admin-modal-overlay';
+  overlay.className = 'adm-overlay';
   overlay.innerHTML = `
-    <div class="admin-modal">
-      <div class="admin-modal-header">
+    <div class="adm-modal">
+      <div class="adm-modal-header">
         <span>Editar usuário</span>
-        <button onclick="this.closest('.admin-modal-overlay').remove()">✕</button>
+        <button onclick="this.closest('.adm-overlay').remove()">
+          <i class="ti ti-x" aria-hidden="true"></i>
+        </button>
       </div>
-
-      <div class="admin-modal-body">
-        <div class="admin-field">
-          <label>Nome</label>
-          <input id="edit-nome" class="admin-input" value="${u.nome || ''}">
-        </div>
-
-        <div class="admin-field">
-          <label>Email</label>
-          <input class="admin-input" value="${u.email}" disabled style="opacity:.5">
-        </div>
-
-        <div class="admin-field">
-          <label>Perfil de acesso</label>
-          <select id="edit-role" class="admin-input">
-            <option value="admin"   ${u.role==='admin'   ?'selected':''}>Admin Master</option>
-            <option value="gerente" ${u.role==='gerente' ?'selected':''}>Gerente</option>
-            <option value="operador"${u.role==='operador'?'selected':''}>Operador</option>
+      <div class="adm-modal-body">
+        <div class="adm-field"><label>Nome</label>
+          <input id="edit-nome" class="adm-input" value="${u.nome||''}"></div>
+        <div class="adm-field"><label>Email</label>
+          <input class="adm-input" value="${u.email}" disabled style="opacity:.5"></div>
+        <div class="adm-field"><label>Perfil de acesso</label>
+          <select id="edit-role" class="adm-input">
+            <option value="admin"       ${u.role==='admin'       ?'selected':''}>Admin Master</option>
+            <option value="gerente"     ${u.role==='gerente'     ?'selected':''}>Gerente</option>
+            <option value="coordenador" ${u.role==='coordenador' ?'selected':''}>Coordenador</option>
+            <option value="supervisor"  ${u.role==='supervisor'  ?'selected':''}>Supervisor</option>
+            <option value="lideranca"   ${u.role==='lideranca'   ?'selected':''}>Liderança</option>
+            <option value="operador"    ${u.role==='operador'    ?'selected':''}>Operador (padrão)</option>
           </select>
         </div>
-
-        <div class="admin-field">
-          <label>Bases autorizadas</label>
-          <div class="admin-bases-picker">
-            <label class="admin-base-check" style="color:#ef4444">
+        <div class="adm-field"><label>Bases autorizadas</label>
+          <div class="adm-bases-picker">
+            <label class="adm-base-chk" style="color:#ef4444;font-weight:600">
               <input type="checkbox" id="edit-base-all" ${u.bases?.includes('*')?'checked':''}
                 onchange="adminToggleAllBases(this)"> Todas as bases
             </label>
-            <div class="admin-bases-picker-grid" id="edit-bases-grid">
-              ${BASES_DISPONIVEIS.map(b => `
-                <label class="admin-base-check">
+            <div class="adm-bases-grid" id="edit-bases-grid">
+              ${BASES_DISPONIVEIS.map(b=>`
+                <label class="adm-base-chk">
                   <input type="checkbox" name="edit-base" value="${b}"
                     ${u.bases?.includes('*')||u.bases?.includes(b)?'checked':''}
                     ${u.bases?.includes('*')?'disabled':''}>
@@ -269,26 +656,22 @@ async function adminEditUser(userId) {
             </div>
           </div>
         </div>
-
-        <div class="admin-field" style="flex-direction:row;align-items:center;gap:10px">
+        <div class="adm-field" style="flex-direction:row;align-items:center;gap:10px">
           <label style="margin:0">Usuário ativo</label>
-          <input type="checkbox" id="edit-ativo" ${u.ativo?'checked':''} style="width:16px;height:16px;accent-color:var(--dnata-blue)">
+          <input type="checkbox" id="edit-ativo" ${u.ativo?'checked':''} style="width:16px;height:16px;accent-color:#00a0d2">
         </div>
       </div>
-
-      <div class="admin-modal-footer">
-        <button class="admin-btn-sec" onclick="this.closest('.admin-modal-overlay').remove()">Cancelar</button>
-        <button class="admin-btn-primary" onclick="adminSaveUser('${userId}')">Salvar</button>
+      <div class="adm-modal-footer">
+        <button class="adm-btn-sec" onclick="this.closest('.adm-overlay').remove()">Cancelar</button>
+        <button class="adm-btn-primary" onclick="adminSaveUser('${userId}')">Salvar</button>
       </div>
     </div>`;
-
   document.body.appendChild(overlay);
 }
 
 function adminToggleAllBases(chk) {
-  const grid   = document.getElementById('edit-bases-grid');
-  const checks = grid.querySelectorAll('input[type=checkbox]');
-  checks.forEach(c => { c.checked = chk.checked; c.disabled = chk.checked; });
+  const grid = document.getElementById('edit-bases-grid');
+  grid.querySelectorAll('input').forEach(c => { c.checked=chk.checked; c.disabled=chk.checked; });
 }
 
 async function adminSaveUser(userId) {
@@ -296,42 +679,77 @@ async function adminSaveUser(userId) {
   const role  = document.getElementById('edit-role').value;
   const ativo = document.getElementById('edit-ativo').checked;
   const allBases = document.getElementById('edit-base-all').checked;
-
-  let bases;
-  if (allBases) {
-    bases = ['*'];
-  } else {
-    bases = [...document.querySelectorAll('input[name="edit-base"]:checked')].map(c => c.value);
-  }
+  const bases = allBases
+    ? ['*']
+    : [...document.querySelectorAll('input[name="edit-base"]:checked')].map(c=>c.value);
 
   const { error } = await db.from('profiles').update({ nome, role, bases, ativo, updated_at: new Date() }).eq('id', userId);
-
-  if (error) {
-    alert('Erro ao salvar: ' + error.message);
-    return;
-  }
-
-  document.querySelector('.admin-modal-overlay')?.remove();
+  if (error) { alert('Erro: '+error.message); return; }
+  document.querySelector('.adm-overlay')?.remove();
   adminRender();
 }
 
-async function adminNewUser() {
-  alert('Para criar um novo usuário, peça que ele faça o cadastro na tela de login com um email @dnata.com.br. Após o cadastro, configure o perfil e as bases aqui no Admin.');
+function adminNewUser() {
+  alert('Para adicionar um usuário, peça que ele crie a conta na tela de login com um email @dnata.com.br. Após o cadastro, configure o perfil aqui.');
 }
 
-// ── KPI helper ────────────────────────────────────────
-function adminKpi(label, value, color, icon) {
-  return `
-    <div class="admin-kpi">
-      <div class="admin-kpi-icon" style="color:${color}">${icon}</div>
-      <div class="admin-kpi-value" style="color:${color}">${value}</div>
-      <div class="admin-kpi-label">${label}</div>
-    </div>`;
-}
+// ══════════════════════════════════════════════════════
+// AUTO-LOAD FILES FROM STORAGE (for non-admin users)
+// ══════════════════════════════════════════════════════
 
-// ── Icons ─────────────────────────────────────────────
-function userIcon()  { return `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`; }
-function checkIcon() { return `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`; }
-function mapIcon()   { return `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>`; }
-function calIcon()   { return `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>`; }
-function clockIcon() { return `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`; }
+/**
+ * Called on appInit — downloads latest files from Storage
+ * so every user has fresh data without manual upload.
+ */
+async function adminAutoLoadFiles() {
+  try {
+    // List latest files in each folder
+    const folders = ['horarios', 'marcacao', 'malha'];
+    for (const folder of folders) {
+      const { data: files } = await db.storage
+        .from('arquivos-operacionais')
+        .list(folder, { sortBy: { column: 'created_at', order: 'desc' } });
+
+      if (!files || files.length === 0) continue;
+      const latest = files[0];
+      const path   = `${folder}/${latest.name}`;
+
+      const { data: blob, error } = await db.storage
+        .from('arquivos-operacionais')
+        .download(path);
+
+      if (error || !blob) continue;
+
+      if (folder === 'malha') {
+        const text = await blob.text();
+        if (typeof malhaParseCSV === 'function') malhaParseCSV(text);
+        console.log('[storage] Malha loaded from Storage');
+      } else {
+        const ab = await blob.arrayBuffer();
+        const wb = XLSX.read(ab, { type: 'array' });
+        if (folder === 'horarios' && typeof pontoParseHorarios === 'function') {
+          pontoParseHorarios(wb, null);
+          console.log('[storage] Horarios loaded from Storage');
+        }
+        if (folder === 'marcacao' && typeof pontoParseMarcacao === 'function') {
+          pontoParseMarcacao(wb, null);
+          console.log('[storage] Marcacao loaded from Storage');
+        }
+      }
+    }
+
+    // Load colaboradores from Supabase DB into memory map
+    const { data: colabs } = await db.from('colaboradores').select('*');
+    if (colabs?.length) {
+      if (!adminFiles.colaboradores) adminFiles.colaboradores = { data: new Map() };
+      adminFiles.colaboradores.count  = colabs.length;
+      adminFiles.colaboradores.bases  = new Set(colabs.map(c=>c.station)).size;
+      adminFiles.colaboradores.data   = new Map(colabs.map(c=>[c.matricula, c]));
+      // Expose globally for escala-online.js lookup
+      window.eoColabs = adminFiles.colaboradores.data;
+      console.log(`[storage] ${colabs.length} colaboradores loaded from DB`);
+    }
+  } catch(err) {
+    console.warn('[adminAutoLoadFiles]', err.message);
+  }
+}

@@ -46,6 +46,11 @@ async function appInit(user) {
   // Navigate to default page only on FIRST load
   // On tab re-focus, Supabase fires onAuthStateChange again —
   // we skip navigation so the user stays on their current page
+  // Auto-load files from Storage/DB for all users (non-blocking)
+  if (typeof adminAutoLoadFiles === 'function') {
+    adminAutoLoadFiles().catch(e => console.warn('[autoLoad]', e.message));
+  }
+
   if (!_appInitialized) {
     _appInitialized = true;
     navigateTo('escala');
