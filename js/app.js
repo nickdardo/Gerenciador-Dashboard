@@ -18,6 +18,8 @@ const NAV_ITEMS = [
 let currentUserProfile = null;
 
 // ── Init app after login ──────────────────────────────
+let _appInitialized = false;
+
 async function appInit(user) {
   currentUser = user;
 
@@ -25,19 +27,29 @@ async function appInit(user) {
   const { data: profile } = await db.from('profiles').select('*').eq('id', user.id).single();
   currentUserProfile = profile;
 
-  // Log login (non-blocking)
-  try {
-    await db.from('access_log').insert({
-      user_id: user.id,
-      email:   user.email,
-      base:    profile?.bases?.[0] || null,
-      action:  'login'
-    });
-  } catch (_) {}
+  // Log login only on first load
+  if (!_appInitialized) {
+    try {
+      await db.from('access_log').insert({
+        user_id: user.id,
+        email:   user.email,
+        base:    profile?.bases?.[0] || null,
+        action:  'login'
+      });
+    } catch (_) {}
+  }
 
+  // Rebuild sidebar/topbar (keeps nav active state)
   renderSidebar();
   renderTopbar();
-  navigateTo('escala');
+
+  // Navigate to default page only on FIRST load
+  // On tab re-focus, Supabase fires onAuthStateChange again —
+  // we skip navigation so the user stays on their current page
+  if (!_appInitialized) {
+    _appInitialized = true;
+    navigateTo('escala');
+  }
 }
 
 // ── Sidebar ───────────────────────────────────────────
