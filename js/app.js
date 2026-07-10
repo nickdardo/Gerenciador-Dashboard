@@ -6,15 +6,31 @@ let currentUser = null;
 let currentPage = 'escala';
 
 const NAV_ITEMS = [
-  { id: 'escala',     icon: 'calendar',   label: 'Escala Online'   },
-  { id: 'gerador',    icon: 'settings',   label: 'Gerador'         },
-  { id: 'comparador', icon: 'bar-chart',  label: 'Comparador'      },
-  { id: 'aderencia',  icon: 'clock',      label: 'Aderência'       },
+  { id: 'escala',     icon: 'calendar',   label: 'Escala Online',  roles: ['admin','gerente','operador'] },
+  { id: 'gerador',    icon: 'settings',   label: 'Gerador',        roles: ['admin','gerente','operador'] },
+  { id: 'comparador', icon: 'bar-chart',  label: 'Comparador',     roles: ['admin','gerente','operador'] },
+  { id: 'aderencia',  icon: 'clock',      label: 'Aderência',      roles: ['admin','gerente','operador'] },
+  { id: 'admin',      icon: 'shield',     label: 'Admin',          roles: ['admin'] },
 ];
+
+let currentUserProfile = null;
 
 // ── Init app after login ──────────────────────────────
 async function appInit(user) {
   currentUser = user;
+
+  // Load user profile (role + bases)
+  const { data: profile } = await db.from('profiles').select('*').eq('id', user.id).single();
+  currentUserProfile = profile;
+
+  // Log login
+  await db.from('access_log').insert({
+    user_id: user.id,
+    email:   user.email,
+    base:    profile?.bases?.[0] || null,
+    action:  'login'
+  }).catch(() => {});
+
   renderSidebar();
   renderTopbar();
   navigateTo('escala');
@@ -41,18 +57,20 @@ function renderSidebar() {
       </button>
     </div>
 
-    <!-- Nav items -->
+    <!-- Nav items — filtered by role -->
     <nav class="sb-nav">
-      ${NAV_ITEMS.map(item => `
-        <button
-          class="sb-item${currentPage === item.id ? ' active' : ''}"
-          id="nav-${item.id}"
-          onclick="navigateTo('${item.id}')"
-        >
-          ${sbIcon(item.icon)}
-          <span class="sb-label">${item.label}</span>
-        </button>
-      `).join('')}
+      ${NAV_ITEMS
+        .filter(item => !item.roles || item.roles.includes(currentUserProfile?.role || 'operador'))
+        .map(item => `
+          <button
+            class="sb-item${currentPage === item.id ? ' active' : ''}"
+            id="nav-${item.id}"
+            onclick="navigateTo('${item.id}')"
+          >
+            ${sbIcon(item.icon)}
+            <span class="sb-label">${item.label}</span>
+          </button>
+        `).join('')}
     </nav>
 
     <!-- Footer -->
@@ -119,6 +137,7 @@ function navigateTo(pageId) {
     case 'gerador':    pageGerador(content);    break;
     case 'comparador': pageComparador(content); break;
     case 'aderencia':  pageAderencia(content);  break;
+    case 'admin':      pageAdmin(content);      break;
     default: content.innerHTML = '<div class="page-empty">Em breve</div>';
   }
 }
@@ -137,6 +156,7 @@ function sbIcon(name) {
     settings:  `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`,
     'bar-chart':`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/><line x1="2" y1="20" x2="22" y2="20"/></svg>`,
     clock:     `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`,
+    shield:    `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`,
   };
   return `<span class="sb-icon">${icons[name] || ''}</span>`;
 }
