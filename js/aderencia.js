@@ -342,12 +342,10 @@ function adhRenderMultiBase(el) {
   const global  = adhGlobalPct();
   const gColor  = adhPctColor(global);
 
-  // Sort bases by pct desc
   const sorted = [...adhBaseKPI.entries()]
     .filter(([,d]) => d.min_prog > 0)
     .sort((a,b) => b[1].pct - a[1].pct);
 
-  // Global totals
   let totHE = 0, totFalta = 0, totColabs = 0, totProg = 0;
   for (const [,d] of adhBaseKPI) {
     totHE     += d.he_h;
@@ -357,62 +355,68 @@ function adhRenderMultiBase(el) {
   }
 
   el.innerHTML = `
-    <div class="page-header">
-      <div><h1 class="page-title">Aderência ao Ponto</h1>
-        <p class="page-sub">Todas as bases · clique em uma base para detalhar</p>
-      </div>
-      <span class="adh-global-pct" style="color:${gColor}">${global}% escala realizada</span>
-    </div>
+    <div class="adh-full-wrap">
 
-    <div class="adh-kpi-row">
-      <div class="adh-kpi">
-        <div class="adh-kpi-v" style="color:${gColor}">${global}%</div>
-        <div class="adh-kpi-l">% Escala realizada</div>
-        <div class="adh-mini-bar"><div style="width:${global}%;background:${gColor}"></div></div>
+      <!-- Header -->
+      <div class="adh-full-header">
+        <div>
+          <h1 class="adh-full-title">Aderência ao Ponto</h1>
+          <p class="adh-full-sub">Todas as bases · clique em uma base para detalhar</p>
+        </div>
+        <span class="adh-global-badge" style="color:${gColor}">${global}% escala realizada</span>
       </div>
-      <div class="adh-kpi">
-        <div class="adh-kpi-v" style="color:#f59e0b">${adhFmtH(totHE)}</div>
-        <div class="adh-kpi-l">Total horas extras</div>
-      </div>
-      <div class="adh-kpi">
-        <div class="adh-kpi-v" style="color:#ef4444">${adhFmtH(totFalta)}</div>
-        <div class="adh-kpi-l">Total horas a menos</div>
-      </div>
-      <div class="adh-kpi">
-        <div class="adh-kpi-v" style="color:#94a3b8">${totColabs.toLocaleString()}</div>
-        <div class="adh-kpi-l">Colaboradores</div>
-      </div>
-      <div class="adh-kpi">
-        <div class="adh-kpi-v" style="color:#a78bfa">${adhFmtH(totProg)}</div>
-        <div class="adh-kpi-l">Horas programadas</div>
-      </div>
-    </div>
 
-    <div style="padding:0 24px 32px">
-      <div style="font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted);margin-bottom:10px">
-        % Escala realizada por base
+      <!-- KPI strip -->
+      <div class="adh-full-kpis">
+        <div class="adh-full-kpi" style="border-top:3px solid ${gColor}">
+          <div class="adh-full-kpi-v" style="color:${gColor}">${global}%</div>
+          <div class="adh-full-kpi-l">% Escala realizada</div>
+          <div class="adh-full-kpi-bar"><div style="width:${global}%;background:${gColor}"></div></div>
+        </div>
+        <div class="adh-full-kpi" style="border-top:3px solid #f6ad55">
+          <div class="adh-full-kpi-v" style="color:#f6ad55">${adhFmtH(totHE)}</div>
+          <div class="adh-full-kpi-l">Total horas extras</div>
+        </div>
+        <div class="adh-full-kpi" style="border-top:3px solid #fc8181">
+          <div class="adh-full-kpi-v" style="color:#fc8181">${adhFmtH(totFalta)}</div>
+          <div class="adh-full-kpi-l">Total horas a menos</div>
+        </div>
+        <div class="adh-full-kpi" style="border-top:3px solid #8896aa">
+          <div class="adh-full-kpi-v" style="color:#8896aa">${totColabs.toLocaleString()}</div>
+          <div class="adh-full-kpi-l">Colaboradores</div>
+        </div>
+        <div class="adh-full-kpi" style="border-top:3px solid #9f7aea">
+          <div class="adh-full-kpi-v" style="color:#9f7aea">${adhFmtH(totProg)}</div>
+          <div class="adh-full-kpi-l">Horas programadas</div>
+        </div>
       </div>
-      <div class="adh-base-grid">
+
+      <!-- Base grid label -->
+      <div class="adh-full-grid-label">% Escala realizada por base</div>
+
+      <!-- Base cards grid — 4 columns, full width -->
+      <div class="adh-full-grid">
         ${sorted.map(([base, d]) => {
           const c = adhPctColor(d.pct);
           return `
-            <div class="adh-base-card" onclick="adhOpenBase('${base}')">
-              <div class="adh-base-top">
-                <span class="adh-base-name">${base}</span>
-                <span class="adh-base-pct" style="color:${c}">${d.pct}%</span>
+            <div class="adh-full-card" onclick="adhOpenBase('${base}')">
+              <div class="adh-full-card-top">
+                <span class="adh-full-card-name">${base}</span>
+                <span class="adh-full-card-pct" style="color:${c}">${d.pct}%</span>
               </div>
-              <div class="adh-base-bar">
-                <div style="width:${d.pct}%;background:${c};height:100%;border-radius:2px"></div>
+              <div class="adh-full-card-bar">
+                <div style="width:${d.pct}%;background:${c};height:100%;border-radius:2px;transition:width .3s"></div>
               </div>
-              <div class="adh-base-stats">
-                <span title="Horas Extras"><span style="color:#f59e0b">+</span> ${adhFmtH(d.he_h)}</span>
-                <span title="Horas a Menos"><span style="color:#ef4444">−</span> ${adhFmtH(d.falta_h)}</span>
-                <span title="Colaboradores"><span style="color:#94a3b8">👤</span> ${d.colabs}</span>
+              <div class="adh-full-card-stats">
+                <span title="Horas Extras"><span style="color:#f6ad55">+</span>${adhFmtH(d.he_h)}</span>
+                <span title="Horas a Menos"><span style="color:#fc8181">−</span>${adhFmtH(d.falta_h)}</span>
+                <span title="Colaboradores"><span style="color:#8896aa">▲</span>${d.colabs}</span>
               </div>
             </div>`;
         }).join('')}
       </div>
-    </div>`;
+    </div>
+  `;
 }
 
 function adhOpenBase(base) {
