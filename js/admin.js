@@ -640,15 +640,19 @@ function adminSetFileStatus(key, msg, type) {
 // ══════════════════════════════════════════════════════
 async function adminTriggerPrecompute() {
   const btn = document.getElementById('adm-recalc-btn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Calculando...'; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Carregando... 0%'; }
+  const onProg = (label) => (loaded, total) => {
+    if (btn) btn.textContent = `${label} ${total ? Math.min(100, Math.round(loaded/total*100)) : 0}%`;
+  };
   try {
     // Load from DB if not in memory
-    if (!pontoHorarios?.size) await adminLoadFileOnDemand('horarios');
-    if (!pontoMarcacao?.size) await adminLoadFileOnDemand('marcacao');
+    if (!pontoHorarios?.size) await adminLoadFileOnDemand('horarios', onProg('Horários'));
+    if (!pontoMarcacao?.size) await adminLoadFileOnDemand('marcacao', onProg('Marcação'));
     if (!pontoHorarios?.size || !pontoMarcacao?.size) {
       alert('Carregue os arquivos Horários e Marcação primeiro.');
       return;
     }
+    if (btn) btn.textContent = 'Calculando...';
     await adminPrecomputeAderencia();
     // Invalidate localStorage cache
     try { localStorage.removeItem('adh_kpi_cache'); localStorage.removeItem('adh_kpi_ts'); } catch(_){}
@@ -657,6 +661,27 @@ async function adminTriggerPrecompute() {
     alert('Erro: '+e.message);
     if (btn) { btn.disabled=false; btn.textContent='↺ Recalcular Aderência'; }
   }
+}
+
+// ── Reusable progress bar (for long DB loads) ─────────
+function adminProgressHTML(id, label) {
+  return `
+    <div class="adm-progress-wrap" id="${id}">
+      <i class="ti ti-loader-2" style="font-size:26px;opacity:.5;animation:spin 1s linear infinite" aria-hidden="true"></i>
+      <div class="adm-progress-label" id="${id}-label">${label}</div>
+      <div class="adm-progress-track"><div class="adm-progress-fill" id="${id}-fill" style="width:0%"></div></div>
+      <div class="adm-progress-count" id="${id}-count">0%</div>
+    </div>`;
+}
+
+function adminUpdateProgress(id, loaded, total, label) {
+  const fill  = document.getElementById(id+'-fill');
+  const count = document.getElementById(id+'-count');
+  const lbl   = document.getElementById(id+'-label');
+  const pct = total ? Math.min(100, Math.round(loaded/total*100)) : 0;
+  if (fill)  fill.style.width = pct + '%';
+  if (count) count.textContent = `${loaded.toLocaleString('pt-BR')} / ${total.toLocaleString('pt-BR')} registros · ${pct}%`;
+  if (lbl && label) lbl.textContent = label;
 }
 
 async function adminAderenciaTab(el) {
@@ -688,10 +713,19 @@ async function adminAderenciaTab(el) {
   }
 
   // Load on demand if not yet processed
-  el.querySelector('p').textContent = 'Carregando Horários...';
-  await adminLoadFileOnDemand('horarios');
-  el.querySelector('p').textContent = 'Carregando Marcação...';
-  await adminLoadFileOnDemand('marcacao');
+  el.innerHTML = `
+    <div class="adm-section-header"><span>Aderência ao Ponto</span></div>
+    ${adminProgressHTML('adm-adh-progress', 'Carregando Horários...')}`;
+
+  await adminLoadFileOnDemand('horarios', (loaded, total) =>
+    adminUpdateProgress('adm-adh-progress', loaded, total, 'Carregando Horários...'));
+
+  adminUpdateProgress('adm-adh-progress', 0, 1, 'Carregando Marcação...');
+  const fillReset = document.getElementById('adm-adh-progress-fill');
+  if (fillReset) fillReset.style.width = '0%';
+
+  await adminLoadFileOnDemand('marcacao', (loaded, total) =>
+    adminUpdateProgress('adm-adh-progress', loaded, total, 'Carregando Marcação...'));
 
   // Build comparison using ponto.js engine
   const results = typeof pontoBuildComparison === 'function'
@@ -978,21 +1012,53 @@ async function adminAutoLoadFiles() {
   }
 }
 
-async function adminLoadFileOnDemand(folder) {
+// Prevents duplicate concurrent fetches of the same table (e.g. user clicking
+// "Recalcular" while the tab's own loader is already fetching in the background)
+const _adminLoadInFlight = {};
+
+// Fetch every row of a table using parallel paginated requests, reporting
+// progress as it goes. Cuts load time drastically vs one-page-at-a-time.
+async function _adminFetchAllPaged(table, total, onProgress) {
+  const PAGE = 1000, CONCURRENCY = 6;
+  const starts = [];
+  for (let from = 0; from < total; from += PAGE) starts.push(from);
+
+  const out = [];
+  let loaded = 0;
+  for (let i = 0; i < starts.length; i += CONCURRENCY) {
+    const chunk = starts.slice(i, i + CONCURRENCY);
+    const results = await Promise.all(chunk.map(from =>
+      db.from(table).select('*').range(from, from + PAGE - 1)
+    ));
+    for (const { data, error } of results) {
+      if (error) throw new Error(error.message);
+      if (data) { out.push(...data); loaded += data.length; }
+    }
+    if (onProgress) { try { onProgress(Math.min(loaded, total), total); } catch(_){} }
+  }
+  return out;
+}
+
+async function adminLoadFileOnDemand(folder, onProgress) {
+  if (_adminLoadInFlight[folder]) return _adminLoadInFlight[folder];
+  const p = _adminLoadFileOnDemandRun(folder, onProgress);
+  _adminLoadInFlight[folder] = p;
+  try {
+    return await p;
+  } finally {
+    delete _adminLoadInFlight[folder];
+  }
+}
+
+async function _adminLoadFileOnDemandRun(folder, onProgress) {
   // For DB-backed data: build in-memory Maps for aderencia engine
   if (folder === 'horarios') {
     if (typeof pontoHorarios !== 'undefined' && pontoHorarios.size > 0) return true;
     try {
       console.log('[onDemand] Loading horarios from DB...');
-      // Paginate to get all rows (Supabase default limit is 1000)
-      const allHor = [];
       const { count: horCount } = await db.from('horarios').select('*', { count:'exact', head:true });
-      for (let from = 0; from < horCount; from += 1000) {
-        const { data: page, error } = await db.from('horarios').select('*').range(from, from+999);
-        if (error) throw new Error(error.message);
-        if (page) allHor.push(...page);
-      }
-      const data = allHor;
+      if (!horCount) return false;
+      const data = await _adminFetchAllPaged('horarios', horCount, onProgress);
       if (!data.length) return false;
       pontoHorarios = new Map();
       data.forEach(r => {
@@ -1017,14 +1083,9 @@ async function adminLoadFileOnDemand(folder) {
     if (typeof pontoMarcacao !== 'undefined' && pontoMarcacao.size > 0) return true;
     try {
       console.log('[onDemand] Loading marcacao from DB...');
-      const allMar = [];
       const { count: marCount } = await db.from('marcacao').select('*', { count:'exact', head:true });
-      for (let from = 0; from < marCount; from += 1000) {
-        const { data: page, error } = await db.from('marcacao').select('*').range(from, from+999);
-        if (error) throw new Error(error.message);
-        if (page) allMar.push(...page);
-      }
-      const data = allMar;
+      if (!marCount) return false;
+      const data = await _adminFetchAllPaged('marcacao', marCount, onProgress);
       if (!data.length) return false;
       pontoMarcacao = new Map();
       data.forEach(r => {

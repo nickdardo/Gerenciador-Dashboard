@@ -294,12 +294,21 @@ async function pageAderencia(el) {
         <p class="page-sub">Planejado vs realizado · fórmula: MAX(0, 100 - Desvio/Programado × 100)</p>
       </div>
     </div>
-    <div class="adh-loading">
-      <i class="ti ti-loader-2" style="font-size:28px;animation:spin 1s linear infinite;opacity:.5" aria-hidden="true"></i>
-      <span id="adh-load-msg">Carregando dados...</span>
+    <div class="adm-progress-wrap" id="adh-load-progress">
+      <i class="ti ti-loader-2" style="font-size:26px;opacity:.5;animation:spin 1s linear infinite" aria-hidden="true"></i>
+      <div class="adm-progress-label" id="adh-load-msg">Carregando dados...</div>
+      <div class="adm-progress-track"><div class="adm-progress-fill" id="adh-load-fill" style="width:0%"></div></div>
+      <div class="adm-progress-count" id="adh-load-count"></div>
     </div>`;
 
   const setMsg = m => { const e = document.getElementById('adh-load-msg'); if(e) e.textContent = m; };
+  const setProg = (loaded, total) => {
+    const fill  = document.getElementById('adh-load-fill');
+    const count = document.getElementById('adh-load-count');
+    const pct = total ? Math.min(100, Math.round(loaded/total*100)) : 0;
+    if (fill)  fill.style.width = pct + '%';
+    if (count) count.textContent = `${loaded.toLocaleString('pt-BR')} / ${total.toLocaleString('pt-BR')} registros · ${pct}%`;
+  };
 
   // ── LAYER 1: localStorage cache (instantâneo) ──────
   const CACHE_KEY = 'adh_kpi_cache';
@@ -371,11 +380,11 @@ async function pageAderencia(el) {
   setMsg('Primeira vez: baixando dados para calcular...');
   if (!pontoHorarios?.size) {
     setMsg('Baixando Horários...');
-    await adminLoadFileOnDemand('horarios');
+    await adminLoadFileOnDemand('horarios', setProg);
   }
   if (!pontoMarcacao?.size) {
     setMsg('Baixando Marcação...');
-    await adminLoadFileOnDemand('marcacao');
+    await adminLoadFileOnDemand('marcacao', setProg);
   }
 
   if (!pontoHorarios?.size || !pontoMarcacao?.size) {
