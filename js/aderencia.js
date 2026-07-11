@@ -314,7 +314,7 @@ async function pageAderencia(el) {
       if (raw) {
         const cached = JSON.parse(raw);
         adhBaseKPI  = new Map(cached.baseKPI.map(r => [r.filial, r]));
-        adhColabKPI = new Map(cached.colabKPI.map(r => [r.filial+'|'+r.matricula, r]));
+        adhColabKPI = new Map(cached.colabKPI.map(r => [r.filial+'|'+r.matricula, {...r, mat: r.matricula}]));
         console.log('[aderencia] Loaded from localStorage cache');
         // Skip loading, go straight to render
         if (role === 'admin') { adhRenderMultiBase(el); return; }
@@ -328,10 +328,11 @@ async function pageAderencia(el) {
   // ── LAYER 2: banco aderencia_kpi (rápido ~30 rows) ──
   setMsg('Carregando KPI do banco...');
   try {
-    const [{ data: kpiRows }, { data: colabRows }] = await Promise.all([
+    const [{ data: kpiRows, error: e1 }, { data: colabRows, error: e2 }] = await Promise.all([
       db.from('aderencia_kpi').select('*'),
-      db.from('aderencia_colab').select('*'),
+      db.from('aderencia_colab').select('*').limit(50000),
     ]);
+    if (e1||e2) console.warn('[aderencia] DB KPI query error', e1||e2);
 
     if (kpiRows?.length && colabRows?.length) {
       adhBaseKPI  = new Map(kpiRows.map(r => [r.filial, {
@@ -341,7 +342,7 @@ async function pageAderencia(el) {
         he: r.he, falta: r.falta
       }]));
       adhColabKPI = new Map(colabRows.map(r => [r.filial+'|'+r.matricula, {
-        filial: r.filial, mat: r.matricula, nome: r.nome,
+        filial: r.filial, mat: r.matricula, matricula: r.matricula, nome: r.nome,
         pct: parseFloat(r.pct), he_h: parseFloat(r.he_h),
         falta_h: parseFloat(r.falta_h), min_prog: r.min_prog,
         he: r.he, falta: r.falta
@@ -683,14 +684,15 @@ function adhRenderColabRows(list, base) {
   return list.map(c => {
     const cc = adhPctColor(c.pct);
     const cargo = window.eoColabs?.get(c.mat)?.funcao || '';
+    const mat = c.mat || c.matricula || '';
     return `<tr class="adh-colab-row"
-      data-mat="${c.mat}"
+      data-mat="${mat}"
       data-filial="${c.filial||base||''}"
       data-nome="${c.nome}"
       data-cargo="${cargo}"
       onmouseenter="adhShowTooltip(event,this)"
       onmouseleave="adhHideTooltip()">
-      <td style="font-family:monospace;font-size:11px">${c.mat}</td>
+      <td style="font-family:monospace;font-size:11px">${mat}</td>
       <td style="font-weight:500">${c.nome}</td>
       <td style="color:var(--text-muted);font-size:11px">${cargo}</td>
       <td class="r">${(c.min_prog/60).toFixed(1)}h</td>

@@ -624,10 +624,36 @@ function adminSetFileStatus(key, msg, type) {
 // ══════════════════════════════════════════════════════
 // TAB: ADERÊNCIA
 // ══════════════════════════════════════════════════════
+async function adminTriggerPrecompute() {
+  const btn = document.getElementById('adm-recalc-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Calculando...'; }
+  try {
+    // Load from DB if not in memory
+    if (!pontoHorarios?.size) await adminLoadFileOnDemand('horarios');
+    if (!pontoMarcacao?.size) await adminLoadFileOnDemand('marcacao');
+    if (!pontoHorarios?.size || !pontoMarcacao?.size) {
+      alert('Carregue os arquivos Horários e Marcação primeiro.');
+      return;
+    }
+    await adminPrecomputeAderencia();
+    // Invalidate localStorage cache
+    try { localStorage.removeItem('adh_kpi_cache'); localStorage.removeItem('adh_kpi_ts'); } catch(_){}
+    if (btn) { btn.textContent = '✓ Recalculado!'; setTimeout(()=>{ btn.disabled=false; btn.textContent='↺ Recalcular Aderência'; },3000); }
+  } catch(e) {
+    alert('Erro: '+e.message);
+    if (btn) { btn.disabled=false; btn.textContent='↺ Recalcular Aderência'; }
+  }
+}
+
 async function adminAderenciaTab(el) {
   // Show loading state
   el.innerHTML = `
-    <div class="adm-section-header"><span>Aderência ao Ponto</span></div>
+    <div class="adm-section-header">
+      <span>Aderência ao Ponto</span>
+      <button id="adm-recalc-btn" class="adm-btn-primary" onclick="adminTriggerPrecompute()" style="font-size:11px;padding:6px 12px">
+        ↺ Recalcular
+      </button>
+    </div>
     <div class="adm-empty-state">
       <i class="ti ti-loader-2" style="font-size:32px;opacity:.4;animation:spin 1s linear infinite" aria-hidden="true"></i>
       <p>Verificando dados...</p>
