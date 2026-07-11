@@ -360,112 +360,174 @@ async function adminLoadColabs(input) {
 async function adminLoadHorarios(input) {
   const file = input.files[0];
   if (!file) return;
-  adminSetFileStatus('horarios', 'Enviando ao Storage...', 'load');
-  try {
-    const path = `horarios/Horarios_${new Date().toISOString().slice(0,10)}.xlsx`;
-    const { error } = await db.storage
-      .from('arquivos-operacionais')
-      .upload(path, file, { upsert: true, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    if (error) throw new Error(error.message);
-
-    // Quick read for stats
-    const r = new FileReader();
-    r.onload = e => {
-      try {
-        const wb   = XLSX.read(e.target.result, { type:'array' });
-        const ws   = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:false });
-        let count=0; const datas=new Set();
-        rows.forEach(row => {
-          if (!row||!row[1]) return;
-          if (row[5]) datas.add(String(row[5]).slice(0,7));
-          count++;
+  adminSetFileStatus('horarios', 'Lendo arquivo...', 'load');
+  const reader = new FileReader();
+  reader.onload = async e => {
+    try {
+      const wb   = XLSX.read(e.target.result, { type:'array' });
+      const ws   = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:false });
+      const records = []; const datas = new Set();
+      const EXCL = new Set(['HQ2','SEDE','GSE']);
+      function fmtD(v) {
+        if (!v) return null;
+        if (typeof v==='string'&&v.includes('/')) { const [d,m,y]=v.split('/'); return y+'-'+m.padStart(2,'0')+'-'+d.padStart(2,'0'); }
+        if (typeof v==='string'&&v.includes('-')) return v.slice(0,10);
+        if (v instanceof Date) return v.toISOString().slice(0,10);
+        const s=String(v); if(s.match(/^\d{4}-\d{2}-\d{2}/)) return s.slice(0,10);
+        return null;
+      }
+      function fmtT(v) {
+        if (!v) return null;
+        const s=String(v).trim();
+        if (s.includes(':')) return s.slice(0,5);
+        const f=parseFloat(s); if(!isNaN(f)){const m=Math.round(f*1440);return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');}
+        return null;
+      }
+      function mp(e1,s1,e2,s2) {
+        let m=0;
+        [[e1,s1],[e2,s2]].forEach(([a,b])=>{
+          if(a&&b){const am=typeof adhTimeToMin==='function'?adhTimeToMin(a):0,bm=typeof adhTimeToMin==='function'?adhTimeToMin(b):0;if(am&&bm){const d=bm-am;m+=d<0?d+1440:d;}}
         });
-        const period = [...datas].sort().join(', ');
-        adminFiles.horarios = { count, period, path, date: new Date().toLocaleDateString('pt-BR') };
-        adminAddHistory('horarios', file.name);
-        adminSetFileStatus('horarios', `✓ ${count.toLocaleString()} registros · ${period}`, 'ok');
-        if (typeof pontoParseHorarios === 'function') pontoParseHorarios(wb, null);
-      } catch(err) { adminSetFileStatus('horarios', 'Erro: '+err.message, 'err'); }
-    };
-    r.readAsArrayBuffer(file);
-    input.value='';
-  } catch(err) { adminSetFileStatus('horarios', 'Erro: '+err.message, 'err'); }
+        return m;
+      }
+      rows.forEach((row,i) => {
+        if (i===0||!row||!row[1]) return;
+        const filial=String(row[0]||'').trim().toUpperCase();
+        if (EXCL.has(filial)) return;
+        const mat=String(row[1]).trim().padStart(6,'0');
+        const nome=String(row[2]||'').trim();
+        const data=fmtD(row[5]||row[3]);
+        if (!data) return;
+        datas.add(data.slice(0,7));
+        const e1=fmtT(row[6]),s1=fmtT(row[7]),e2=fmtT(row[8]),s2=fmtT(row[9]);
+        records.push({filial,matricula:mat,nome,data,ent1:e1,sai1:s1,ent2:e2,sai2:s2,min_prog:mp(e1,s1,e2,s2),updated_at:new Date()});
+      });
+      const period=[...datas].sort().join(', ');
+      const total=records.length;
+      adminSetFileStatus('horarios',`Gravando ${total.toLocaleString()}...`,'load');
+      const BATCH=500; let saved=0;
+      for (let i=0;i<records.length;i+=BATCH) {
+        const {error}=await db.from('horarios').upsert(records.slice(i,i+BATCH),{onConflict:'filial,matricula,data'});
+        if (error) throw new Error(error.message);
+        saved+=Math.min(BATCH,records.length-i);
+        adminSetFileStatus('horarios',`Gravando... ${saved.toLocaleString()}/${total.toLocaleString()}`,'load');
+      }
+      adminFiles.horarios={count:total,period,date:new Date().toLocaleDateString('pt-BR')};
+      adminAddHistory('horarios',file.name);
+      adminSetFileStatus('horarios',`✓ ${total.toLocaleString()} registros · ${period}`,'ok');
+      if (typeof pontoParseHorarios==='function') pontoParseHorarios(wb,null);
+      input.value='';
+    } catch(err) { adminSetFileStatus('horarios','Erro: '+err.message,'err'); console.error(err); }
+  };
+  reader.readAsArrayBuffer(file);
 }
 
 async function adminLoadMarcacao(input) {
   const file = input.files[0];
   if (!file) return;
-  adminSetFileStatus('marcacao', 'Enviando ao Storage...', 'load');
-  try {
-    const path = `marcacao/Marcacao_${new Date().toISOString().slice(0,10)}.xlsx`;
-    const { error } = await db.storage
-      .from('arquivos-operacionais')
-      .upload(path, file, { upsert: true, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    if (error) throw new Error(error.message);
-
-    const r = new FileReader();
-    r.onload = e => {
-      try {
-        const wb   = XLSX.read(e.target.result, { type:'array' });
-        const ws   = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:false });
-        let count=0; const datas=new Set();
-        rows.forEach(row => {
-          if (!row||!row[1]) return;
-          if (row[3]) datas.add(String(row[3]).slice(0,7));
-          count++;
-        });
-        const period = [...datas].sort().join(', ');
-        adminFiles.marcacao = { count, period, path, date: new Date().toLocaleDateString('pt-BR') };
-        adminAddHistory('marcacao', file.name);
-        adminSetFileStatus('marcacao', `✓ ${count.toLocaleString()} registros · ${period}`, 'ok');
-        if (typeof pontoParseMarcacao === 'function') pontoParseMarcacao(wb, null);
-      } catch(err) { adminSetFileStatus('marcacao', 'Erro: '+err.message, 'err'); }
-    };
-    r.readAsArrayBuffer(file);
-    input.value='';
-  } catch(err) { adminSetFileStatus('marcacao', 'Erro: '+err.message, 'err'); }
+  adminSetFileStatus('marcacao', 'Lendo arquivo...', 'load');
+  const reader = new FileReader();
+  reader.onload = async e => {
+    try {
+      const wb   = XLSX.read(e.target.result, { type:'array' });
+      const ws   = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:false });
+      const records=[]; const datas=new Set();
+      const EXCL=new Set(['HQ2','SEDE','GSE']);
+      function fmtD(v) {
+        if (!v) return null;
+        if (typeof v==='string'&&v.includes('/')) { const [d,m,y]=v.split('/'); return y+'-'+m.padStart(2,'0')+'-'+d.padStart(2,'0'); }
+        if (typeof v==='string'&&v.includes('-')) return v.slice(0,10);
+        if (v instanceof Date) return v.toISOString().slice(0,10);
+        return null;
+      }
+      function fmtT(v) {
+        if (!v) return null;
+        const s=String(v).trim(); if(s.includes(':')) return s.slice(0,5);
+        const f=parseFloat(s); if(!isNaN(f)){const m=Math.round(f*1440);return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');}
+        return null;
+      }
+      rows.forEach((row,i) => {
+        if (i===0||!row||!row[1]) return;
+        const filial=String(row[0]||'').trim().toUpperCase();
+        if (EXCL.has(filial)) return;
+        const mat=String(row[1]).trim().padStart(6,'0');
+        const nome=String(row[2]||'').trim();
+        const data=fmtD(row[3]);
+        if (!data) return;
+        datas.add(data.slice(0,7));
+        records.push({filial,matricula:mat,nome,data,
+          bat1:fmtT(row[4]),bat2:fmtT(row[5]),bat3:fmtT(row[6]),bat4:fmtT(row[7]),
+          bat5:fmtT(row[8]),bat6:fmtT(row[9]),bat7:fmtT(row[10]),bat8:fmtT(row[11]),
+          updated_at:new Date()});
+      });
+      const period=[...datas].sort().join(', ');
+      const total=records.length;
+      adminSetFileStatus('marcacao',`Gravando ${total.toLocaleString()}...`,'load');
+      const BATCH=500; let saved=0;
+      for (let i=0;i<records.length;i+=BATCH) {
+        const {error}=await db.from('marcacao').upsert(records.slice(i,i+BATCH),{onConflict:'filial,matricula,data'});
+        if (error) throw new Error(error.message);
+        saved+=Math.min(BATCH,records.length-i);
+        adminSetFileStatus('marcacao',`Gravando... ${saved.toLocaleString()}/${total.toLocaleString()}`,'load');
+      }
+      adminFiles.marcacao={count:total,period,date:new Date().toLocaleDateString('pt-BR')};
+      adminAddHistory('marcacao',file.name);
+      adminSetFileStatus('marcacao',`✓ ${total.toLocaleString()} registros · ${period}`,'ok');
+      if (typeof pontoParseMarcacao==='function') pontoParseMarcacao(wb,null);
+      input.value='';
+    } catch(err) { adminSetFileStatus('marcacao','Erro: '+err.message,'err'); console.error(err); }
+  };
+  reader.readAsArrayBuffer(file);
 }
 
 async function adminLoadMalha(input) {
   const file = input.files[0];
   if (!file) return;
-  adminSetFileStatus('malha', 'Enviando ao Storage...', 'load');
-  try {
-    const path = `malha/${file.name}`;
-    const { error } = await db.storage
-      .from('arquivos-operacionais')
-      .upload(path, file, { upsert: true, contentType: 'text/csv' });
-    if (error) throw new Error(error.message);
-
-    const r = new FileReader();
-    r.onload = e => {
-      try {
-        const text  = e.target.result;
-        const lines = text.split(/\r?\n/);
-        let dataStart=0;
-        for (let i=0;i<6;i++) { if (lines[i]?.startsWith('Base,')) { dataStart=i+1; break; } }
-        const basesSet=new Set(); const meses=new Set(); let count=0;
-        for (let i=dataStart;i<lines.length;i++) {
-          const parts=lines[i].split(',');
-          if (parts.length<4) continue;
-          const base=parts[0].trim(); const data=parts[3].trim();
-          if (!base||!data) continue;
-          basesSet.add(base);
-          if (data.includes('/')) meses.add(data.split('/').slice(1).join('/'));
-          count++;
-        }
-        const period = [...meses].slice(0,2).join(', ');
-        adminFiles.malha = { count, bases: basesSet.size, period, path, date: new Date().toLocaleDateString('pt-BR') };
-        adminAddHistory('malha', file.name);
-        adminSetFileStatus('malha', `✓ ${count.toLocaleString()} voos · ${basesSet.size} bases`, 'ok');
-        if (typeof malhaParseCSV === 'function') malhaParseCSV(text);
-      } catch(err) { adminSetFileStatus('malha', 'Erro: '+err.message, 'err'); }
-    };
-    r.readAsText(file, 'ISO-8859-1');
-    input.value='';
-  } catch(err) { adminSetFileStatus('malha', 'Erro: '+err.message, 'err'); }
+  adminSetFileStatus('malha', 'Lendo arquivo...', 'load');
+  const reader = new FileReader();
+  reader.onload = async e => {
+    try {
+      const text  = e.target.result;
+      const lines = text.split(/\r?\n/);
+      let dataStart=0;
+      for (let i=0;i<8;i++) { if (lines[i]?.trim().startsWith('Base,')) { dataStart=i+1; break; } }
+      const records=[]; const basesSet=new Set();
+      function fmtD(v) {
+        if (!v) return null;
+        const s=String(v).trim();
+        if (s.match(/^\d{2}\/\d{2}\/\d{4}/)) { const [d,m,y]=s.split('/'); return y+'-'+m+'-'+d; }
+        if (s.match(/^\d{4}-\d{2}-\d{2}/)) return s.slice(0,10);
+        return null;
+      }
+      for (let i=dataStart;i<lines.length;i++) {
+        const parts=lines[i].split(',');
+        if (parts.length<4) continue;
+        const base=parts[0].trim(); if(!base) continue;
+        const data=fmtD(parts[3]); if(!data) continue;
+        basesSet.add(base);
+        records.push({base,data,tipo:parts[5]?.trim()||null,voo:parts[6]?.trim()||null,
+          hora_chegada:parts[7]?.trim()||null,hora_saida:parts[8]?.trim()||null,
+          cia:parts[9]?.trim()||null,aeronave:parts[10]?.trim()||null,updated_at:new Date()});
+      }
+      const total=records.length;
+      adminSetFileStatus('malha',`Gravando ${total.toLocaleString()} voos...`,'load');
+      const BATCH=500; let saved=0;
+      for (let i=0;i<records.length;i+=BATCH) {
+        const {error}=await db.from('malha').upsert(records.slice(i,i+BATCH),{onConflict:'base,data,voo,hora_chegada'});
+        if (error) throw new Error(error.message);
+        saved+=Math.min(BATCH,records.length-i);
+        adminSetFileStatus('malha',`Gravando... ${saved.toLocaleString()}/${total.toLocaleString()}`,'load');
+      }
+      adminFiles.malha={count:total,bases:basesSet.size,date:new Date().toLocaleDateString('pt-BR')};
+      adminAddHistory('malha',file.name);
+      adminSetFileStatus('malha',`✓ ${total.toLocaleString()} voos · ${basesSet.size} bases`,'ok');
+      if (typeof malhaParseCSV==='function') malhaParseCSV(text);
+      input.value='';
+    } catch(err) { adminSetFileStatus('malha','Erro: '+err.message,'err'); console.error(err); }
+  };
+  reader.readAsText(file,'ISO-8859-1');
 }
 
 function adminSetFileStatus(key, msg, type) {
@@ -742,82 +804,107 @@ function adminNewUser() {
 
 async function adminAutoLoadFiles() {
   try {
-    // Only load colaboradores on startup (small — ~5k records)
+    // ── Colaboradores from DB ──────────────────────────
     const { data: colabs } = await db.from('colaboradores')
       .select('matricula,nome,station,funcao,ch,situacao')
       .eq('ativo', true);
-
     if (colabs?.length) {
       adminFiles.colaboradores = {
         count: colabs.length,
-        bases: new Set(colabs.map(r => r.station)).size,
-        date:  'banco',
-        data:  new Map(colabs.map(r => [r.matricula, r]))
+        bases: new Set(colabs.map(r=>r.station)).size,
+        date: 'banco',
+        data: new Map(colabs.map(r=>[r.matricula, r]))
       };
       window.eoColabs = adminFiles.colaboradores.data;
-      console.log(`[autoLoad] ${colabs.length} colaboradores prontos`);
+      console.log(`[autoLoad] ${colabs.length} colaboradores`);
     }
 
-    // Check which large files exist in Storage — metadata only, no download
-    const folders = ['horarios', 'marcacao', 'malha'];
-    for (const folder of folders) {
-      const { data: files } = await db.storage
-        .from('arquivos-operacionais')
-        .list(folder, { limit: 1, sortBy: { column: 'created_at', order: 'desc' } });
+    // ── Check counts for Horarios, Marcacao, Malha ────
+    const [
+      { count: cHor  },
+      { count: cMar  },
+      { count: cMal  },
+    ] = await Promise.all([
+      db.from('horarios').select('*', { count:'exact', head:true }),
+      db.from('marcacao').select('*', { count:'exact', head:true }),
+      db.from('malha'   ).select('*', { count:'exact', head:true }),
+    ]);
 
-      if (files?.length) {
-        const f    = files[0];
-        const date = new Date(f.created_at).toLocaleDateString('pt-BR');
-        const size = f.metadata?.size ? (f.metadata.size/1024/1024).toFixed(1)+' MB' : '';
-        adminFiles[folder] = { count: 0, date, path: `${folder}/${f.name}`, name: f.name, size, ready: false };
-        console.log(`[autoLoad] ${folder} disponível no Storage: ${f.name} ${size}`);
-      }
+    if (cHor > 0) {
+      adminFiles.horarios = { count: cHor, date: 'banco', period: '' };
+      console.log(`[autoLoad] horarios: ${cHor} registros no banco`);
     }
+    if (cMar > 0) {
+      adminFiles.marcacao = { count: cMar, date: 'banco', period: '' };
+      console.log(`[autoLoad] marcacao: ${cMar} registros no banco`);
+    }
+    if (cMal > 0) {
+      adminFiles.malha = { count: cMal, date: 'banco', period: '' };
+      console.log(`[autoLoad] malha: ${cMal} registros no banco`);
+    }
+
   } catch(err) {
     console.warn('[adminAutoLoadFiles]', err.message);
   }
 }
 
-// Download + process a large file on demand (called by Aderência/Malha tabs)
 async function adminLoadFileOnDemand(folder) {
-  const info = adminFiles[folder];
-  if (!info?.path) return false;
-
-  // Already processed this session
-  if (folder === 'horarios' && typeof pontoHorarios !== 'undefined' && pontoHorarios.size > 0) return true;
-  if (folder === 'marcacao' && typeof pontoMarcacao !== 'undefined' && pontoMarcacao.size > 0) return true;
-  if (folder === 'malha'    && typeof malhaVoos !== 'undefined'     && malhaVoos.size > 0)     return true;
-
-  try {
-    console.log(`[onDemand] Baixando ${folder} (${info.size||'?'})...`);
-    const { data: blob, error } = await db.storage
-      .from('arquivos-operacionais').download(info.path);
-
-    if (error || !blob) throw new Error(error?.message || 'Falha no download');
-
-    if (folder === 'malha') {
-      const text = await blob.text();
-      if (typeof malhaParseCSV === 'function') malhaParseCSV(text);
-      adminFiles.malha.count = text.split('\n').length;
-      adminFiles.malha.ready = true;
-    } else {
-      const ab = await blob.arrayBuffer();
-      const wb = XLSX.read(ab, { type: 'array' });
-      if (folder === 'horarios' && typeof pontoParseHorarios === 'function') {
-        pontoParseHorarios(wb, null);
-        adminFiles.horarios.count = pontoHorarios.size;
-        adminFiles.horarios.ready = true;
-      }
-      if (folder === 'marcacao' && typeof pontoParseMarcacao === 'function') {
-        pontoParseMarcacao(wb, null);
-        adminFiles.marcacao.count = pontoMarcacao.size;
-        adminFiles.marcacao.ready = true;
-      }
-    }
-    console.log(`[onDemand] ${folder} processado ✓`);
-    return true;
-  } catch(err) {
-    console.error(`[onDemand] ${folder} erro:`, err.message);
-    return false;
+  // For DB-backed data: build in-memory Maps for aderencia engine
+  if (folder === 'horarios') {
+    if (typeof pontoHorarios !== 'undefined' && pontoHorarios.size > 0) return true;
+    try {
+      console.log('[onDemand] Loading horarios from DB...');
+      const { data, error } = await db.from('horarios').select('*');
+      if (error || !data?.length) return false;
+      pontoHorarios = new Map();
+      data.forEach(r => {
+        const key = `${r.filial}|${r.matricula}|${r.data}`;
+        pontoHorarios.set(key, { filial:r.filial, mat:r.matricula, nome:r.nome,
+          ent1:r.ent1, sai1:r.sai1, ent2:r.ent2, sai2:r.sai2, date:r.data });
+      });
+      adminFiles.horarios = { count: data.length, date: 'banco' };
+      console.log(`[onDemand] horarios: ${pontoHorarios.size} keys`);
+      return true;
+    } catch(e) { console.error('[onDemand] horarios:', e.message); return false; }
   }
+
+  if (folder === 'marcacao') {
+    if (typeof pontoMarcacao !== 'undefined' && pontoMarcacao.size > 0) return true;
+    try {
+      console.log('[onDemand] Loading marcacao from DB...');
+      const { data, error } = await db.from('marcacao').select('*');
+      if (error || !data?.length) return false;
+      pontoMarcacao = new Map();
+      data.forEach(r => {
+        const key = `${r.filial}|${r.matricula}|${r.data}`;
+        pontoMarcacao.set(key, { filial:r.filial, mat:r.matricula, nome:r.nome,
+          bat1:r.bat1, bat2:r.bat2, bat3:r.bat3, bat4:r.bat4,
+          bat5:r.bat5, bat6:r.bat6, bat7:r.bat7, bat8:r.bat8 });
+      });
+      adminFiles.marcacao = { count: data.length, date: 'banco' };
+      console.log(`[onDemand] marcacao: ${pontoMarcacao.size} keys`);
+      return true;
+    } catch(e) { console.error('[onDemand] marcacao:', e.message); return false; }
+  }
+
+  if (folder === 'malha') {
+    if (typeof malhaVoos !== 'undefined' && malhaVoos?.size > 0) return true;
+    try {
+      console.log('[onDemand] Loading malha from DB...');
+      const { data, error } = await db.from('malha').select('base,data,hora_chegada,hora_saida');
+      if (error || !data?.length) return false;
+      // Build malhaVoos Map<base, Map<date, count>>
+      malhaVoos = new Map();
+      data.forEach(r => {
+        if (!malhaVoos.has(r.base)) malhaVoos.set(r.base, new Map());
+        const dm = malhaVoos.get(r.base);
+        dm.set(r.data, (dm.get(r.data)||0) + 1);
+      });
+      adminFiles.malha = { count: data.length, date: 'banco' };
+      console.log(`[onDemand] malha: ${data.length} voos em ${malhaVoos.size} bases`);
+      return true;
+    } catch(e) { console.error('[onDemand] malha:', e.message); return false; }
+  }
+
+  return false;
 }
