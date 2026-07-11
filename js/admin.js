@@ -453,19 +453,34 @@ function adminSetFileStatus(key, msg, type) {
 // ══════════════════════════════════════════════════════
 // TAB: ADERÊNCIA
 // ══════════════════════════════════════════════════════
-function adminAderenciaTab(el) {
+async function adminAderenciaTab(el) {
+  // Show loading state
+  el.innerHTML = `
+    <div class="adm-section-header"><span>Aderência ao Ponto</span></div>
+    <div class="adm-empty-state">
+      <i class="ti ti-loader-2" style="font-size:32px;opacity:.4;animation:spin 1s linear infinite" aria-hidden="true"></i>
+      <p>Verificando dados...</p>
+    </div>`;
+
+  // Check if files are available in Storage
   if (!adminFiles.horarios || !adminFiles.marcacao) {
     el.innerHTML = `
       <div class="adm-section-header"><span>Aderência ao Ponto</span></div>
       <div class="adm-empty-state">
         <i class="ti ti-clock-off" style="font-size:32px;opacity:.2" aria-hidden="true"></i>
-        <p>Carregue os arquivos <strong>Ponto planejado</strong> e <strong>Marcação de ponto</strong> na aba Arquivos para ver a aderência.</p>
+        <p>Carregue os arquivos <strong>Ponto planejado</strong> e <strong>Marcação de ponto</strong> na aba Arquivos.</p>
         <button class="adm-btn-primary" onclick="adminTabSwitch('files', document.querySelectorAll('.adm-tab-btn')[1])">
           Ir para Arquivos
         </button>
       </div>`;
     return;
   }
+
+  // Load on demand if not yet processed
+  el.querySelector('p').textContent = 'Carregando Horários...';
+  await adminLoadFileOnDemand('horarios');
+  el.querySelector('p').textContent = 'Carregando Marcação...';
+  await adminLoadFileOnDemand('marcacao');
 
   // Build comparison using ponto.js engine
   const results = typeof pontoBuildComparison === 'function'
@@ -694,82 +709,87 @@ function adminNewUser() {
 }
 
 // ══════════════════════════════════════════════════════
-// AUTO-LOAD FILES FROM STORAGE (for non-admin users)
+// AUTO-LOAD — Lightweight startup, heavy files on demand
 // ══════════════════════════════════════════════════════
 
-/**
- * Called on appInit — downloads latest files from Storage
- * so every user has fresh data without manual upload.
- */
 async function adminAutoLoadFiles() {
   try {
-    // ── Load colaboradores from DB ──────────────────────
-    const { data: colabs } = await db.from('colaboradores').select('*');
+    // Only load colaboradores on startup (small — ~5k records)
+    const { data: colabs } = await db.from('colaboradores')
+      .select('matricula,nome,station,funcao,ch,situacao')
+      .eq('ativo', true);
+
     if (colabs?.length) {
       adminFiles.colaboradores = {
         count: colabs.length,
-        bases: new Set(colabs.map(c => c.station)).size,
+        bases: new Set(colabs.map(r => r.station)).size,
         date:  'banco',
-        data:  new Map(colabs.map(c => [c.matricula, c]))
+        data:  new Map(colabs.map(r => [r.matricula, r]))
       };
       window.eoColabs = adminFiles.colaboradores.data;
-      console.log(`[autoLoad] ${colabs.length} colaboradores do banco`);
-      adminSetFileStatus('colaboradores', `✓ ${colabs.length.toLocaleString()} pessoas · ${adminFiles.colaboradores.bases} bases`, 'ok');
+      console.log(`[autoLoad] ${colabs.length} colaboradores prontos`);
     }
 
-    // ── Load files from Storage ─────────────────────────
-    const FOLDER_MAP = {
-      horarios: { key: 'horarios', label: '249k registros', parse: (wb) => { if (typeof pontoParseHorarios==='function') pontoParseHorarios(wb,null); } },
-      marcacao: { key: 'marcacao', label: '144k registros', parse: (wb) => { if (typeof pontoParseMarcacao==='function') pontoParseMarcacao(wb,null); } },
-      malha:    { key: 'malha',    label: 'voos',            parseText: (t) => { if (typeof malhaParseCSV==='function') malhaParseCSV(t); } },
-    };
+    // Check which large files exist in Storage — metadata only, no download
+    const folders = ['horarios', 'marcacao', 'malha'];
+    for (const folder of folders) {
+      const { data: files } = await db.storage
+        .from('arquivos-operacionais')
+        .list(folder, { limit: 1, sortBy: { column: 'created_at', order: 'desc' } });
 
-    for (const [folder, cfg] of Object.entries(FOLDER_MAP)) {
-      try {
-        const { data: files } = await db.storage
-          .from('arquivos-operacionais')
-          .list(folder, { sortBy: { column: 'created_at', order: 'desc' } });
-
-        if (!files?.length) continue;
-
-        const latest = files[0];
-        const path   = `${folder}/${latest.name}`;
-        const uploadDate = new Date(latest.created_at).toLocaleDateString('pt-BR');
-
-        adminSetFileStatus(cfg.key, 'Carregando do servidor...', 'load');
-
-        const { data: blob, error } = await db.storage
-          .from('arquivos-operacionais').download(path);
-
-        if (error || !blob) {
-          adminSetFileStatus(cfg.key, 'Erro ao baixar', 'err');
-          continue;
-        }
-
-        if (cfg.parseText) {
-          const text = await blob.text();
-          // Count lines for stats
-          const lines = text.split('\n').length;
-          cfg.parseText(text);
-          adminFiles[cfg.key] = { count: lines, date: uploadDate, path };
-          adminSetFileStatus(cfg.key, `✓ ${lines.toLocaleString()} registros · ${uploadDate}`, 'ok');
-        } else {
-          const ab = await blob.arrayBuffer();
-          const wb = XLSX.read(ab, { type: 'array' });
-          const ws   = wb.Sheets[wb.SheetNames[0]];
-          const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:false });
-          const count = rows.length;
-          cfg.parse(wb);
-          adminFiles[cfg.key] = { count, date: uploadDate, path };
-          adminSetFileStatus(cfg.key, `✓ ${count.toLocaleString()} registros · ${uploadDate}`, 'ok');
-        }
-
-        console.log(`[autoLoad] ${folder} loaded from Storage`);
-      } catch(e) {
-        console.warn(`[autoLoad] ${folder} error:`, e.message);
+      if (files?.length) {
+        const f    = files[0];
+        const date = new Date(f.created_at).toLocaleDateString('pt-BR');
+        const size = f.metadata?.size ? (f.metadata.size/1024/1024).toFixed(1)+' MB' : '';
+        adminFiles[folder] = { count: 0, date, path: `${folder}/${f.name}`, name: f.name, size, ready: false };
+        console.log(`[autoLoad] ${folder} disponível no Storage: ${f.name} ${size}`);
       }
     }
   } catch(err) {
     console.warn('[adminAutoLoadFiles]', err.message);
+  }
+}
+
+// Download + process a large file on demand (called by Aderência/Malha tabs)
+async function adminLoadFileOnDemand(folder) {
+  const info = adminFiles[folder];
+  if (!info?.path) return false;
+
+  // Already processed this session
+  if (folder === 'horarios' && typeof pontoHorarios !== 'undefined' && pontoHorarios.size > 0) return true;
+  if (folder === 'marcacao' && typeof pontoMarcacao !== 'undefined' && pontoMarcacao.size > 0) return true;
+  if (folder === 'malha'    && typeof malhaVoos !== 'undefined'     && malhaVoos.size > 0)     return true;
+
+  try {
+    console.log(`[onDemand] Baixando ${folder} (${info.size||'?'})...`);
+    const { data: blob, error } = await db.storage
+      .from('arquivos-operacionais').download(info.path);
+
+    if (error || !blob) throw new Error(error?.message || 'Falha no download');
+
+    if (folder === 'malha') {
+      const text = await blob.text();
+      if (typeof malhaParseCSV === 'function') malhaParseCSV(text);
+      adminFiles.malha.count = text.split('\n').length;
+      adminFiles.malha.ready = true;
+    } else {
+      const ab = await blob.arrayBuffer();
+      const wb = XLSX.read(ab, { type: 'array' });
+      if (folder === 'horarios' && typeof pontoParseHorarios === 'function') {
+        pontoParseHorarios(wb, null);
+        adminFiles.horarios.count = pontoHorarios.size;
+        adminFiles.horarios.ready = true;
+      }
+      if (folder === 'marcacao' && typeof pontoParseMarcacao === 'function') {
+        pontoParseMarcacao(wb, null);
+        adminFiles.marcacao.count = pontoMarcacao.size;
+        adminFiles.marcacao.ready = true;
+      }
+    }
+    console.log(`[onDemand] ${folder} processado ✓`);
+    return true;
+  } catch(err) {
+    console.error(`[onDemand] ${folder} erro:`, err.message);
+    return false;
   }
 }

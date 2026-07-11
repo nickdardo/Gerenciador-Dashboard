@@ -1955,3 +1955,5 @@ a      { color: inherit; text-decoration: none; }
 }
 
 .adm-base-chk input { accent-color: #00a0d2; }
+
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
