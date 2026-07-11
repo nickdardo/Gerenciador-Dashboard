@@ -484,10 +484,24 @@ function adhOpenBase(base) {
 // VIEW 2 — DETALHE por base
 // ══════════════════════════════════════════════════════
 function adhRenderDetalhe(el, base, showBack) {
-  const bk = base ? adhBaseKPI.get(base) : null;
+  const bk = base ? adhBaseKPI?.get(base) : null;
   if (!bk && base) {
-    el.innerHTML = `<div class="adh-denied"><p>Base "${base}" não encontrada nos dados.</p></div>`;
-    return;
+    // Try to compute — maybe data was just loaded
+    if (!adhBaseKPI) adhBuildKPI();
+    const bk2 = adhBaseKPI?.get(base);
+    if (!bk2) {
+      el.innerHTML = `
+        <div class="page-header"><div>
+          <h1 class="page-title">Aderência · ${base}</h1>
+        </div></div>
+        <div class="adh-denied">
+          <i class="ti ti-clock-off" style="font-size:36px;opacity:.2" aria-hidden="true"></i>
+          <p>Nenhum dado encontrado para a base <strong>${base}</strong>.<br>
+          Verifique se os arquivos de ponto foram carregados no Admin.</p>
+        </div>`;
+      return;
+    }
+    return adhRenderDetalhe(el, base, showBack);
   }
 
   // If no base specified (admin with all) pick global

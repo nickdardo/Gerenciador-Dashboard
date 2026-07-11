@@ -11,7 +11,7 @@ const NAV_ITEMS = [
   { id: 'escala',     icon: 'calendar',   label: 'Escala Online',  roles: ALL_ROLES },
   { id: 'gerador',    icon: 'settings',   label: 'Gerador',        roles: ['admin','gerente','coordenador','supervisor','lideranca'] },
   { id: 'comparador', icon: 'bar-chart',  label: 'Comparador',     roles: ['admin','gerente','coordenador','supervisor'] },
-  { id: 'aderencia',  icon: 'clock',      label: 'Aderência',      roles: ['admin','gerente','coordenador','supervisor'] },
+  { id: 'aderencia',  icon: 'clock',      label: 'Aderência',      roles: ['admin','gerente','coordenador','supervisor','lideranca'] },
   { id: 'admin',      icon: 'shield',     label: 'Admin',          roles: ['admin'] },
 ];
 
@@ -61,8 +61,13 @@ async function appInit(user) {
 
 // ── Sidebar ───────────────────────────────────────────
 function renderSidebar() {
-  const nome  = currentUser?.user_metadata?.nome || currentUser?.email?.split('@')[0] || 'Usuário';
+  const nome  = currentUserProfile?.nome || currentUser?.user_metadata?.nome || currentUser?.email?.split('@')[0] || 'Usuário';
   const email = currentUser?.email || '';
+  const role  = currentUserProfile?.role || 'operador';
+  const ROLE_LABELS = { admin:'Admin Master', gerente:'Gerente', coordenador:'Coordenador', supervisor:'Supervisor', lideranca:'Liderança', operador:'Operador' };
+  const ROLE_COLORS = { admin:'#ef4444', gerente:'#f59e0b', coordenador:'#a78bfa', supervisor:'#34d399', lideranca:'#60a5fa', operador:'#94a3b8' };
+  const roleLabel = ROLE_LABELS[role] || role;
+  const roleColor = ROLE_COLORS[role] || '#94a3b8';
 
   document.getElementById('sidebar').innerHTML = `
     <!-- Brand -->
@@ -102,6 +107,7 @@ function renderSidebar() {
         <div class="sb-avatar">${nome.charAt(0).toUpperCase()}</div>
         <div class="sb-user-info">
           <div class="sb-user-name">${nome}</div>
+          <div class="sb-user-role" style="color:${roleColor}">${roleLabel}</div>
           <div class="sb-user-email">${email}</div>
         </div>
       </div>
