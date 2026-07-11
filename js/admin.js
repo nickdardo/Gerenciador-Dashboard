@@ -305,7 +305,7 @@ async function adminLoadColabs(input) {
     try {
       const wb   = XLSX.read(e.target.result, { type:'array' });
       const ws   = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:false });
+      const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:true });
 
       const records = [];
       const basesSet = new Set();
@@ -366,34 +366,50 @@ async function adminLoadHorarios(input) {
     try {
       const wb   = XLSX.read(e.target.result, { type:'array' });
       const ws   = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:false });
+      const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:true });
       const records = []; const datas = new Set();
       const EXCL = new Set(['HQ2','SEDE','GSE']);
       function fmtD(v) {
         if (!v) return null;
-        // Excel serial date number
+        // Date object (XLSX raw:true returns Date for date cells)
+        if (v instanceof Date) {
+          const y=v.getFullYear(), m=String(v.getMonth()+1).padStart(2,'0'), d=String(v.getDate()).padStart(2,'0');
+          return `${y}-${m}-${d}`;
+        }
+        // Excel serial number
         if (typeof v === 'number') {
-          const d = new Date(Math.round((v - 25569) * 86400 * 1000));
-          return d.toISOString().slice(0,10);
+          const ms = Math.round((v - 25569) * 86400 * 1000);
+          const dt = new Date(ms);
+          const y=dt.getUTCFullYear(), m=String(dt.getUTCMonth()+1).padStart(2,'0'), d=String(dt.getUTCDate()).padStart(2,'0');
+          return `${y}-${m}-${d}`;
         }
-        // Date object
-        if (v instanceof Date) return v.toISOString().slice(0,10);
+        // String: could be "2026-06-01" or "06/01/2026" (MM/DD) or "01/06/2026" (DD/MM)
         const s = String(v).trim();
-        // DD/MM/YYYY or DD/MM/YY
-        if (s.includes('/')) {
-          const [d,m,y] = s.split('/');
-          const year = y.length===2 ? (parseInt(y)<50?'20':'19')+y : y;
-          return year+'-'+m.padStart(2,'0')+'-'+d.padStart(2,'0');
-        }
-        // YYYY-MM-DD
         if (s.match(/^\d{4}-\d{2}-\d{2}/)) return s.slice(0,10);
+        if (s.includes('/')) {
+          const parts = s.split('/');
+          // If first part > 12, it's DD/MM/YYYY; if second part > 12, it's MM/DD/YYYY
+          const [a,b,yr] = parts;
+          const year = yr && yr.length===2 ? (parseInt(yr)<50?'20':'19')+yr : (yr||'2026');
+          if (parseInt(b) > 12) { // a=MM, b=DD
+            return year+'-'+a.padStart(2,'0')+'-'+b.padStart(2,'0');
+          } else { // a=DD, b=MM (BR format)
+            return year+'-'+b.padStart(2,'0')+'-'+a.padStart(2,'0');
+          }
+        }
         return null;
       }
       function fmtT(v) {
-        if (!v) return null;
-        const s=String(v).trim();
+        if (!v && v!==0) return null;
+        if (typeof v === 'number') {
+          const totalMin = Math.round(v * 1440);
+          return String(Math.floor(totalMin/60)%24).padStart(2,'0')+':'+String(totalMin%60).padStart(2,'0');
+        }
+        if (v instanceof Date) return String(v.getHours()).padStart(2,'0')+':'+String(v.getMinutes()).padStart(2,'0');
+        const s = String(v).trim();
         if (s.includes(':')) return s.slice(0,5);
-        const f=parseFloat(s); if(!isNaN(f)){const m=Math.round(f*1440);return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');}
+        const f = parseFloat(s);
+        if (!isNaN(f)) { const m=Math.round(f*1440); return String(Math.floor(m/60)%24).padStart(2,'0')+':'+String(m%60).padStart(2,'0'); }
         return null;
       }
       function mp(e1,s1,e2,s2) {
@@ -444,33 +460,50 @@ async function adminLoadMarcacao(input) {
     try {
       const wb   = XLSX.read(e.target.result, { type:'array' });
       const ws   = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:false });
+      const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:true });
       const records=[]; const datas=new Set();
       const EXCL=new Set(['HQ2','SEDE','GSE']);
       function fmtD(v) {
         if (!v) return null;
-        // Excel serial date number
+        // Date object (XLSX raw:true returns Date for date cells)
+        if (v instanceof Date) {
+          const y=v.getFullYear(), m=String(v.getMonth()+1).padStart(2,'0'), d=String(v.getDate()).padStart(2,'0');
+          return `${y}-${m}-${d}`;
+        }
+        // Excel serial number
         if (typeof v === 'number') {
-          const d = new Date(Math.round((v - 25569) * 86400 * 1000));
-          return d.toISOString().slice(0,10);
+          const ms = Math.round((v - 25569) * 86400 * 1000);
+          const dt = new Date(ms);
+          const y=dt.getUTCFullYear(), m=String(dt.getUTCMonth()+1).padStart(2,'0'), d=String(dt.getUTCDate()).padStart(2,'0');
+          return `${y}-${m}-${d}`;
         }
-        // Date object
-        if (v instanceof Date) return v.toISOString().slice(0,10);
+        // String: could be "2026-06-01" or "06/01/2026" (MM/DD) or "01/06/2026" (DD/MM)
         const s = String(v).trim();
-        // DD/MM/YYYY or DD/MM/YY
-        if (s.includes('/')) {
-          const [d,m,y] = s.split('/');
-          const year = y.length===2 ? (parseInt(y)<50?'20':'19')+y : y;
-          return year+'-'+m.padStart(2,'0')+'-'+d.padStart(2,'0');
-        }
-        // YYYY-MM-DD
         if (s.match(/^\d{4}-\d{2}-\d{2}/)) return s.slice(0,10);
+        if (s.includes('/')) {
+          const parts = s.split('/');
+          // If first part > 12, it's DD/MM/YYYY; if second part > 12, it's MM/DD/YYYY
+          const [a,b,yr] = parts;
+          const year = yr && yr.length===2 ? (parseInt(yr)<50?'20':'19')+yr : (yr||'2026');
+          if (parseInt(b) > 12) { // a=MM, b=DD
+            return year+'-'+a.padStart(2,'0')+'-'+b.padStart(2,'0');
+          } else { // a=DD, b=MM (BR format)
+            return year+'-'+b.padStart(2,'0')+'-'+a.padStart(2,'0');
+          }
+        }
         return null;
       }
       function fmtT(v) {
-        if (!v) return null;
-        const s=String(v).trim(); if(s.includes(':')) return s.slice(0,5);
-        const f=parseFloat(s); if(!isNaN(f)){const m=Math.round(f*1440);return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');}
+        if (!v && v!==0) return null;
+        if (typeof v === 'number') {
+          const totalMin = Math.round(v * 1440);
+          return String(Math.floor(totalMin/60)%24).padStart(2,'0')+':'+String(totalMin%60).padStart(2,'0');
+        }
+        if (v instanceof Date) return String(v.getHours()).padStart(2,'0')+':'+String(v.getMinutes()).padStart(2,'0');
+        const s = String(v).trim();
+        if (s.includes(':')) return s.slice(0,5);
+        const f = parseFloat(s);
+        if (!isNaN(f)) { const m=Math.round(f*1440); return String(Math.floor(m/60)%24).padStart(2,'0')+':'+String(m%60).padStart(2,'0'); }
         return null;
       }
       rows.forEach((row,i) => {
@@ -521,18 +554,32 @@ async function adminLoadMalha(input) {
       const records=[]; const basesSet=new Set();
       function fmtD(v) {
         if (!v) return null;
+        // Date object (XLSX raw:true returns Date for date cells)
+        if (v instanceof Date) {
+          const y=v.getFullYear(), m=String(v.getMonth()+1).padStart(2,'0'), d=String(v.getDate()).padStart(2,'0');
+          return `${y}-${m}-${d}`;
+        }
+        // Excel serial number
         if (typeof v === 'number') {
-          const d = new Date(Math.round((v-25569)*86400*1000));
-          return d.toISOString().slice(0,10);
+          const ms = Math.round((v - 25569) * 86400 * 1000);
+          const dt = new Date(ms);
+          const y=dt.getUTCFullYear(), m=String(dt.getUTCMonth()+1).padStart(2,'0'), d=String(dt.getUTCDate()).padStart(2,'0');
+          return `${y}-${m}-${d}`;
         }
-        if (v instanceof Date) return v.toISOString().slice(0,10);
-        const s=String(v).trim();
-        if (s.includes('/')) {
-          const [d,m,y]=s.split('/');
-          const year=y.length===2?(parseInt(y)<50?'20':'19')+y:y;
-          return year+'-'+m.padStart(2,'0')+'-'+d.padStart(2,'0');
-        }
+        // String: could be "2026-06-01" or "06/01/2026" (MM/DD) or "01/06/2026" (DD/MM)
+        const s = String(v).trim();
         if (s.match(/^\d{4}-\d{2}-\d{2}/)) return s.slice(0,10);
+        if (s.includes('/')) {
+          const parts = s.split('/');
+          // If first part > 12, it's DD/MM/YYYY; if second part > 12, it's MM/DD/YYYY
+          const [a,b,yr] = parts;
+          const year = yr && yr.length===2 ? (parseInt(yr)<50?'20':'19')+yr : (yr||'2026');
+          if (parseInt(b) > 12) { // a=MM, b=DD
+            return year+'-'+a.padStart(2,'0')+'-'+b.padStart(2,'0');
+          } else { // a=DD, b=MM (BR format)
+            return year+'-'+b.padStart(2,'0')+'-'+a.padStart(2,'0');
+          }
+        }
         return null;
       }
       for (let i=dataStart;i<lines.length;i++) {
