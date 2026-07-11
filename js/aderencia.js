@@ -821,12 +821,12 @@ function adhBuildPanelContent(mat, filial, nome, cargo) {
     const planSai = [d.sai1,d.sai2].filter(Boolean).join(' / ') || '—';
     return `<tr>
       <td>${d.dstr}</td>
-      <td style="color:#8896aa">${planEnt}</td>
-      <td style="color:#8896aa">${planSai}</td>
-      <td style="color:#00a0d2">${d.bat1||'—'}</td>
-      <td style="color:#00a0d2">${d.bat2||'—'}</td>
-      <td style="color:#00a0d2">${d.bat3||'—'}</td>
-      <td style="color:#00a0d2">${d.bat4||'—'}</td>
+      <td style="color:#00a0d2">${planEnt}</td>
+      <td style="color:#00a0d2">${planSai}</td>
+      <td style="color:#48bb78">${d.bat1||'—'}</td>
+      <td style="color:#48bb78">${d.bat2||'—'}</td>
+      <td style="color:#48bb78">${d.bat3||'—'}</td>
+      <td style="color:#48bb78">${d.bat4||'—'}</td>
       <td style="text-align:right;color:#f6ad55">${fmtH(d.he)}</td>
       <td style="text-align:right;color:#fc8181">${fmtH(d.falta)}</td>
       <td style="text-align:right;font-weight:700;color:${c2}">${d.pct}%</td>
@@ -862,8 +862,13 @@ function adhBuildPanelContent(mat, filial, nome, cargo) {
       <table class="adh-tip-table">
         <thead>
           <tr>
-            <th>Data</th><th>Plan. entrada</th><th>Plan. saída</th>
-            <th>Bat.1</th><th>Bat.2</th><th>Bat.3</th><th>Bat.4</th>
+            <th>Data</th>
+            <th><span class="adh-leg-dot" style="background:#00a0d2"></span>Plan. entrada</th>
+            <th><span class="adh-leg-dot" style="background:#00a0d2"></span>Plan. saída</th>
+            <th><span class="adh-leg-dot" style="background:#48bb78"></span>Bat.1</th>
+            <th><span class="adh-leg-dot" style="background:#48bb78"></span>Bat.2</th>
+            <th><span class="adh-leg-dot" style="background:#48bb78"></span>Bat.3</th>
+            <th><span class="adh-leg-dot" style="background:#48bb78"></span>Bat.4</th>
             <th style="text-align:right">HE</th>
             <th style="text-align:right">Falta</th>
             <th style="text-align:right">%</th>

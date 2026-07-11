@@ -445,6 +445,13 @@ async function adminLoadHorarios(input) {
       adminAddHistory('horarios',file.name);
       adminSetFileStatus('horarios',`✓ ${total.toLocaleString()} registros · ${period}`,'ok');
       if (typeof pontoParseHorarios==='function') pontoParseHorarios(wb,null);
+      // Auto-recalcular aderência se marcação também já estiver disponível
+      if (typeof pontoMarcacao !== 'undefined' && pontoMarcacao?.size > 0 && typeof adminPrecomputeAderencia === 'function') {
+        adminSetFileStatus('horarios', 'Recalculando aderência...', 'load');
+        adminPrecomputeAderencia()
+          .then(() => adminSetFileStatus('horarios', `✓ ${total.toLocaleString()} registros · ${period}`, 'ok'))
+          .catch(err => console.warn('[adminLoadHorarios] precompute:', err));
+      }
       input.value='';
     } catch(err) { adminSetFileStatus('horarios','Erro: '+err.message,'err'); console.error(err); }
   };
@@ -534,6 +541,13 @@ async function adminLoadMarcacao(input) {
       adminAddHistory('marcacao',file.name);
       adminSetFileStatus('marcacao',`✓ ${total.toLocaleString()} registros · ${period}`,'ok');
       if (typeof pontoParseMarcacao==='function') pontoParseMarcacao(wb,null);
+      // Auto-recalcular aderência se horários também já estiver disponível
+      if (typeof pontoHorarios !== 'undefined' && pontoHorarios?.size > 0 && typeof adminPrecomputeAderencia === 'function') {
+        adminSetFileStatus('marcacao', 'Recalculando aderência...', 'load');
+        adminPrecomputeAderencia()
+          .then(() => adminSetFileStatus('marcacao', `✓ ${total.toLocaleString()} registros · ${period}`, 'ok'))
+          .catch(err => console.warn('[adminLoadMarcacao] precompute:', err));
+      }
       input.value='';
     } catch(err) { adminSetFileStatus('marcacao','Erro: '+err.message,'err'); console.error(err); }
   };
@@ -1116,6 +1130,41 @@ async function adminPrecomputeAderencia() {
     if (acc.mt === 0 && acc.mp > 0) {
       acc.falta = acc.mp; acc.desvio = acc.mp; acc.he = 0;
     }
+  }
+
+  // Build per-colaborador rows + aggregate per base (BUGFIX: baseAcc/colabRows
+  // were referenced below without ever being built, so this function threw a
+  // ReferenceError on every run and no data was ever persisted to the DB).
+  const colabRows = [];
+  const baseAcc   = new Map(); // filial → { mp, desvio, he, falta, colabs }
+
+  for (const [ck, acc] of colabAcc) {
+    if (!acc.mp) continue; // skip colabs with zero planned minutes
+    const pct = Math.max(0, Math.round((100 - acc.desvio / acc.mp * 100) * 10) / 10);
+    colabRows.push({
+      filial:   acc.filial,
+      matricula:acc.mat,
+      nome:     acc.nome,
+      min_prog: acc.mp,
+      min_trab: acc.mt,
+      desvio:   acc.desvio,
+      he:       acc.he,
+      falta:    acc.falta,
+      pct,
+      he_h:     Math.round(acc.he    / 60 * 10) / 10,
+      falta_h:  Math.round(acc.falta / 60 * 10) / 10,
+      updated_at: new Date(),
+    });
+
+    if (!baseAcc.has(acc.filial)) {
+      baseAcc.set(acc.filial, { mp: 0, desvio: 0, he: 0, falta: 0, colabs: 0 });
+    }
+    const b = baseAcc.get(acc.filial);
+    b.mp     += acc.mp;
+    b.desvio += acc.desvio;
+    b.he     += acc.he;
+    b.falta  += acc.falta;
+    b.colabs += 1;
   }
 
   // Build base rows
