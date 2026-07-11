@@ -1076,45 +1076,46 @@ async function adminPrecomputeAderencia() {
     horMin.set(key, { min_prog: mp, filial: h.filial, mat: h.mat, nome: h.nome });
   }
 
-  // Compute per collaborator
+  // Build colabAcc from ALL horarios first (not just those with marcacao)
   const colabAcc = new Map();
+  const tmc = t => { if(!t)return 0; const p=String(t).split(':'); return parseInt(p[0])*60+parseInt(p[1]||0); };
+  const dfc = (a,b) => { if(!a||!b)return 0; const d=tmc(b)-tmc(a); return d<0?d+1440:d; };
+
+  // Init from horarios (all planned colabs)
+  for (const [key, h] of horMin) {
+    const filial = (h.filial||'').toUpperCase();
+    const ck = `${filial}|${h.mat}`;
+    if (!colabAcc.has(ck)) {
+      colabAcc.set(ck, { filial, mat: h.mat, nome: h.nome||'', mp:0, mt:0, desvio:0, he:0, falta:0 });
+    }
+    colabAcc.get(ck).mp += h.min_prog;
+  }
+
+  // Cross with marcacao
   for (const [key, m] of pontoMarcacao) {
     const filial = (m.filial||'').toUpperCase();
     if (ADH_EXCL.has(filial)) continue;
-    const tm = (t) => { if(!t)return 0; const p=String(t).split(':'); return parseInt(p[0])*60+parseInt(p[1]||0); };
-    const diff = (a,b) => { if(!a||!b)return 0; const d=tm(b)-tm(a); return d<0?d+1440:d; };
     let mt = 0;
     [[m.bat1,m.bat2],[m.bat3,m.bat4],[m.bat5,m.bat6],[m.bat7,m.bat8]]
-      .forEach(([a,b]) => { mt += diff(a,b); });
+      .forEach(([a,b]) => { mt += dfc(a,b); });
     const hor = horMin.get(key);
     const mp  = hor ? hor.min_prog : 0;
-    const dev = Math.abs(mt - mp);
-    const he  = Math.max(0, mt - mp);
-    const fat = Math.max(0, mp - mt);
     const ck  = `${filial}|${m.mat}`;
     if (!colabAcc.has(ck)) {
-      const nome = hor?.nome || m.nome || '';
-      colabAcc.set(ck, { filial, mat: m.mat, nome, mp:0, mt:0, desvio:0, he:0, falta:0 });
+      colabAcc.set(ck, { filial, mat: m.mat, nome: hor?.nome||m.nome||'', mp:0, mt:0, desvio:0, he:0, falta:0 });
     }
     const acc = colabAcc.get(ck);
-    acc.mp+=mp; acc.mt+=mt; acc.desvio+=dev; acc.he+=he; acc.falta+=fat;
+    acc.mt += mt;
+    // desvio/he/falta computed per day, but for summary use total
+    const dev = Math.abs(mt - mp), he2 = Math.max(0,mt-mp), fat = Math.max(0,mp-mt);
+    acc.desvio += dev; acc.he += he2; acc.falta += fat;
   }
 
-  // Aggregate per base
-  const baseAcc = new Map();
-  const colabRows = [];
-  for (const [ck, c] of colabAcc) {
-    const base = c.filial;
-    if (!baseAcc.has(base)) baseAcc.set(base, {mp:0,desvio:0,he:0,falta:0,colabs:0});
-    const b = baseAcc.get(base);
-    b.mp+=c.mp; b.desvio+=c.desvio; b.he+=c.he; b.falta+=c.falta; b.colabs++;
-    const pct = c.mp>0 ? Math.max(0,Math.round((100-c.desvio/c.mp*100)*10)/10) : 0;
-    colabRows.push({
-      filial:c.filial, matricula:c.mat, nome:c.nome,
-      min_prog:c.mp, min_trab:c.mt, desvio:c.desvio, he:c.he, falta:c.falta,
-      pct, he_h:Math.round(c.he/60*10)/10, falta_h:Math.round(c.falta/60*10)/10,
-      updated_at: new Date()
-    });
+  // For colabs only in horarios (no marcacao), falta = all planned hours
+  for (const [ck, acc] of colabAcc) {
+    if (acc.mt === 0 && acc.mp > 0) {
+      acc.falta = acc.mp; acc.desvio = acc.mp; acc.he = 0;
+    }
   }
 
   // Build base rows

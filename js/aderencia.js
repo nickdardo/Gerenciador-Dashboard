@@ -756,34 +756,63 @@ function adhBuildPanelContent(mat, filial, nome, cargo) {
   const pctClr = p => p>=88?'#48bb78':p>=70?'#f6ad55':'#fc8181';
   const fmtH = m => m>0?(m/60).toFixed(1)+'h':'—';
 
-  // Hour heatmap — for each hour 0-23, sum planned and worked minutes
+  // Hour chart — smooth area lines for planned vs real
   const hourPlan = new Array(24).fill(0);
   const hourReal = new Array(24).fill(0);
   days.forEach(d => {
     const tm = t => { if(!t)return null; const p=String(t).split(':'); return parseInt(p[0])*60+parseInt(p[1]||0); };
-    // planned spans
     [[d.ent1,d.sai1],[d.ent2,d.sai2]].forEach(([e,s])=>{
-      const em=tm(e),sm=tm(s); if(!em&&em!==0||!sm) return;
+      const em=tm(e),sm=tm(s); if(em==null||!sm) return;
       for(let h=0;h<24;h++){const hs=h*60,he2=hs+60;const os=Math.max(em,hs),oe=Math.min(sm>em?sm:sm+1440,he2);if(oe>os)hourPlan[h]+=oe-os;}
     });
-    // real batidas
     [[d.bat1,d.bat2],[d.bat3,d.bat4]].forEach(([a,b])=>{
-      const am=tm(a),bm=tm(b); if(!am&&am!==0||!bm) return;
+      const am=tm(a),bm=tm(b); if(am==null||!bm) return;
       for(let h=0;h<24;h++){const hs=h*60,he2=hs+60;const os=Math.max(am,hs),oe=Math.min(bm>am?bm:bm+1440,he2);if(oe>os)hourReal[h]+=oe-os;}
     });
   });
   const maxH = Math.max(...hourPlan,...hourReal,1);
+  const W=760, H=80, PAD=28;
+  const pts = (arr) => arr.map((v,i)=>`${PAD+i*(W-PAD*2)/23},${H-4-Math.round(v/maxH*(H-8))}`).join(' ');
+  const planPts = pts(hourPlan);
+  const realPts = pts(hourReal);
+  // Smooth polyline using SVG
+  const svgPath = (points, close=false) => {
+    const arr = points.split(' ').map(p=>p.split(',').map(Number));
+    let d = `M ${arr[0][0]} ${arr[0][1]}`;
+    for(let i=1;i<arr.length;i++){
+      const [px,py]=arr[i-1], [x,y]=arr[i];
+      const cx=(px+x)/2;
+      d+=` C ${cx},${py} ${cx},${y} ${x},${y}`;
+    }
+    if(close) d+=` L ${arr[arr.length-1][0]},${H} L ${arr[0][0]},${H} Z`;
+    return d;
+  };
 
-  // Build chart bars
-  const chartBars = Array.from({length:24},(_,h) => {
-    const pBar = Math.round(hourPlan[h]/maxH*52);
-    const rBar = Math.round(hourReal[h]/maxH*52);
-    return `<div class="adh-tip-hour-col">
-      <div class="adh-tip-hour-plan"  style="height:${pBar}px" title="${String(h).padStart(2,'0')}h planejado: ${fmtH(hourPlan[h])}"></div>
-      <div class="adh-tip-hour-real"  style="height:${rBar}px" title="${String(h).padStart(2,'0')}h realizado: ${fmtH(hourReal[h])}"></div>
-      <div class="adh-tip-hour-label">${h%3===0?String(h).padStart(2,'0'):''}</div>
-    </div>`;
+  const hLabels = Array.from({length:24},(_,h)=>h%3===0?`<text x="${PAD+h*(W-PAD*2)/23}" y="${H+12}" text-anchor="middle" font-size="9" fill="#4a5568">${String(h).padStart(2,'0')}h</text>`:'').join('');
+  // Horizontal grid lines
+  const grid = [0.25,0.5,0.75,1].map(v=>{
+    const y=H-4-Math.round(v*(H-8));
+    return `<line x1="${PAD}" y1="${y}" x2="${W-PAD}" y2="${y}" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>`;
   }).join('');
+
+  const chartBars = `<svg width="100%" viewBox="0 0 ${W} ${H+20}" xmlns="http://www.w3.org/2000/svg" style="overflow:visible">
+    ${grid}
+    <defs>
+      <linearGradient id="gradPlan" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#00a0d2" stop-opacity="0.3"/>
+        <stop offset="100%" stop-color="#00a0d2" stop-opacity="0.02"/>
+      </linearGradient>
+      <linearGradient id="gradReal" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#48bb78" stop-opacity="0.4"/>
+        <stop offset="100%" stop-color="#48bb78" stop-opacity="0.02"/>
+      </linearGradient>
+    </defs>
+    <path d="${svgPath(planPts,true)}" fill="url(#gradPlan)"/>
+    <path d="${svgPath(realPts,true)}" fill="url(#gradReal)"/>
+    <path d="${svgPath(planPts)}" fill="none" stroke="#00a0d2" stroke-width="2" stroke-linecap="round"/>
+    <path d="${svgPath(realPts)}" fill="none" stroke="#48bb78" stroke-width="2" stroke-linecap="round"/>
+    ${hLabels}
+  </svg>`;
 
   // Table rows
   const tableRows = days.map(d => {
@@ -821,9 +850,9 @@ function adhBuildPanelContent(mat, filial, nome, cargo) {
     <!-- Chart -->
     <div class="adh-tip-chart-wrap">
       <div class="adh-tip-chart-label">Distribuição por hora · planejado vs realizado</div>
-      <div class="adh-tip-chart">${chartBars}</div>
+      <div class="adh-tip-chart-svg">${chartBars}</div>
       <div class="adh-tip-chart-legend">
-        <span><span class="adh-leg-dot" style="background:rgba(0,160,210,.5)"></span>Planejado</span>
+        <span><span class="adh-leg-dot" style="background:#00a0d2"></span>Planejado</span>
         <span><span class="adh-leg-dot" style="background:#48bb78"></span>Realizado</span>
       </div>
     </div>
@@ -873,10 +902,10 @@ async function adhShowTooltip(e, row, freeze) {
     }
     panel.style.display = 'flex';
     panel.innerHTML = `
-      <button class="adh-panel-close" onclick="adhClosePanel()">
-        <i class="ti ti-x" aria-hidden="true" style="font-size:16px"></i>
-      </button>
-      <div class="adh-panel-body">${html}</div>`;
+      <div class="adh-panel-body">${html}</div>
+      <button class="adh-panel-close" onclick="adhClosePanel()" title="Fechar">
+        <i class="ti ti-x" aria-hidden="true"></i>
+      </button>`;
     return;
   }
 
