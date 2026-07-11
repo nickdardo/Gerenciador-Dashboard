@@ -948,9 +948,13 @@ async function adminLoadFileOnDemand(folder) {
       if (error || !data?.length) return false;
       pontoHorarios = new Map();
       data.forEach(r => {
-        const key = `${r.filial}|${r.matricula}|${r.data}`;
-        pontoHorarios.set(key, { filial:r.filial, mat:r.matricula, nome:r.nome,
-          ent1:r.ent1, sai1:r.sai1, ent2:r.ent2, sai2:r.sai2, date:r.data });
+        // Convert ISO date (2026-06-01) to dd/mm/yyyy for key consistency
+        const [y,m,d] = r.data.split('-');
+        const dstr = `${d}/${m}/${y}`;
+        const mat = String(r.matricula).padStart(6,'0');
+        const key = `${r.filial}|${mat}|${dstr}`;
+        pontoHorarios.set(key, { filial:r.filial, mat, nome:r.nome,
+          ent1:r.ent1, sai1:r.sai1, ent2:r.ent2, sai2:r.sai2, date:dstr });
       });
       adminFiles.horarios = { count: data.length, date: 'banco' };
       console.log(`[onDemand] horarios: ${pontoHorarios.size} keys`);
@@ -966,8 +970,11 @@ async function adminLoadFileOnDemand(folder) {
       if (error || !data?.length) return false;
       pontoMarcacao = new Map();
       data.forEach(r => {
-        const key = `${r.filial}|${r.matricula}|${r.data}`;
-        pontoMarcacao.set(key, { filial:r.filial, mat:r.matricula, nome:r.nome,
+        const [y,m,d] = r.data.split('-');
+        const dstr = `${d}/${m}/${y}`;
+        const mat = String(r.matricula).padStart(6,'0');
+        const key = `${r.filial}|${mat}|${dstr}`;
+        pontoMarcacao.set(key, { filial:r.filial, mat, nome:r.nome,
           bat1:r.bat1, bat2:r.bat2, bat3:r.bat3, bat4:r.bat4,
           bat5:r.bat5, bat6:r.bat6, bat7:r.bat7, bat8:r.bat8 });
       });

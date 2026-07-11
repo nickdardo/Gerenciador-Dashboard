@@ -1810,9 +1810,11 @@ a { color: inherit; text-decoration: none; }
 /* ── Aderência full layout ── */
 .adh-main-layout {
   display: grid;
-  grid-template-columns: 1fr 320px;
+  grid-template-columns: 1fr 300px;
   gap: 12px;
+  flex: 1;
   min-height: 0;
+  overflow: hidden;
 }
 
 .adh-cards-section {
@@ -1820,6 +1822,7 @@ a { color: inherit; text-decoration: none; }
   flex-direction: column;
   gap: 8px;
   min-height: 0;
+  overflow-y: auto;
 }
 
 .adh-full-grid {
@@ -1832,6 +1835,8 @@ a { color: inherit; text-decoration: none; }
   display: flex;
   flex-direction: column;
   gap: 10px;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .adh-chart-panel {
