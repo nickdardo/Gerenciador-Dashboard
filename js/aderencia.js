@@ -322,10 +322,11 @@ async function pageAderencia(el) {
     return;
   }
 
-  // Build KPI if not yet done
+  // Always rebuild KPI after fresh load from DB
   setMsg('Calculando aderência...');
   await new Promise(r => setTimeout(r, 20)); // yield to UI
-  if (!adhBaseKPI) adhBuildKPI();
+  adhBaseKPI = null; adhColabKPI = null; // force fresh calculation
+  adhBuildKPI();
 
   if (role === 'admin') {
     adhRenderMultiBase(el);

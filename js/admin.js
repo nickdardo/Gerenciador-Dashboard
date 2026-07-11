@@ -944,8 +944,16 @@ async function adminLoadFileOnDemand(folder) {
     if (typeof pontoHorarios !== 'undefined' && pontoHorarios.size > 0) return true;
     try {
       console.log('[onDemand] Loading horarios from DB...');
-      const { data, error } = await db.from('horarios').select('*');
-      if (error || !data?.length) return false;
+      // Paginate to get all rows (Supabase default limit is 1000)
+      const allHor = [];
+      const { count: horCount } = await db.from('horarios').select('*', { count:'exact', head:true });
+      for (let from = 0; from < horCount; from += 1000) {
+        const { data: page, error } = await db.from('horarios').select('*').range(from, from+999);
+        if (error) throw new Error(error.message);
+        if (page) allHor.push(...page);
+      }
+      const data = allHor;
+      if (!data.length) return false;
       pontoHorarios = new Map();
       data.forEach(r => {
         // Convert ISO date (2026-06-01) to dd/mm/yyyy for key consistency
@@ -957,6 +965,7 @@ async function adminLoadFileOnDemand(folder) {
           ent1:r.ent1, sai1:r.sai1, ent2:r.ent2, sai2:r.sai2, date:dstr });
       });
       adminFiles.horarios = { count: data.length, date: 'banco' };
+      adhBaseKPI = null; adhColabKPI = null; // force recompute
       console.log(`[onDemand] horarios: ${pontoHorarios.size} keys`);
       return true;
     } catch(e) { console.error('[onDemand] horarios:', e.message); return false; }
@@ -966,8 +975,15 @@ async function adminLoadFileOnDemand(folder) {
     if (typeof pontoMarcacao !== 'undefined' && pontoMarcacao.size > 0) return true;
     try {
       console.log('[onDemand] Loading marcacao from DB...');
-      const { data, error } = await db.from('marcacao').select('*');
-      if (error || !data?.length) return false;
+      const allMar = [];
+      const { count: marCount } = await db.from('marcacao').select('*', { count:'exact', head:true });
+      for (let from = 0; from < marCount; from += 1000) {
+        const { data: page, error } = await db.from('marcacao').select('*').range(from, from+999);
+        if (error) throw new Error(error.message);
+        if (page) allMar.push(...page);
+      }
+      const data = allMar;
+      if (!data.length) return false;
       pontoMarcacao = new Map();
       data.forEach(r => {
         const [y,m,d] = r.data.split('-');
@@ -979,6 +995,7 @@ async function adminLoadFileOnDemand(folder) {
           bat5:r.bat5, bat6:r.bat6, bat7:r.bat7, bat8:r.bat8 });
       });
       adminFiles.marcacao = { count: data.length, date: 'banco' };
+      adhBaseKPI = null; adhColabKPI = null; // force recompute
       console.log(`[onDemand] marcacao: ${pontoMarcacao.size} keys`);
       return true;
     } catch(e) { console.error('[onDemand] marcacao:', e.message); return false; }
