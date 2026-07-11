@@ -487,7 +487,6 @@ function adhOpenBase(base) {
 function adhRenderDetalhe(el, base, showBack) {
   const bk = base ? adhBaseKPI?.get(base) : null;
   if (!bk && base) {
-    // Try to compute — maybe data was just loaded
     if (!adhBaseKPI) adhBuildKPI();
     const bk2 = adhBaseKPI?.get(base);
     if (!bk2) {
@@ -497,15 +496,13 @@ function adhRenderDetalhe(el, base, showBack) {
         </div></div>
         <div class="adh-denied">
           <i class="ti ti-clock-off" style="font-size:36px;opacity:.2" aria-hidden="true"></i>
-          <p>Nenhum dado encontrado para a base <strong>${base}</strong>.<br>
-          Verifique se os arquivos de ponto foram carregados no Admin.</p>
+          <p>Nenhum dado para <strong>${base}</strong>. Verifique os arquivos no Admin.</p>
         </div>`;
       return;
     }
     return adhRenderDetalhe(el, base, showBack);
   }
 
-  // If no base specified (admin with all) pick global
   const pct    = bk ? bk.pct    : adhGlobalPct();
   const he_h   = bk ? bk.he_h   : [...adhBaseKPI.values()].reduce((a,d)=>a+d.he_h,0);
   const fat_h  = bk ? bk.falta_h: [...adhBaseKPI.values()].reduce((a,d)=>a+d.falta_h,0);
@@ -513,136 +510,242 @@ function adhRenderDetalhe(el, base, showBack) {
   const prog_h = bk ? bk.prog_h  : [...adhBaseKPI.values()].reduce((a,d)=>a+d.prog_h,0);
   const pctClr = adhPctColor(pct);
 
-  // Top 10 piores colaboradores desta base
-  const colabsBase = [...adhColabKPI.entries()]
+  // Build collaborator list for this base
+  const colabList = [...adhColabKPI.entries()]
     .filter(([k,]) => !base || k.startsWith(base+'|'))
     .map(([,d]) => d)
     .filter(d => d.min_prog > 0)
-    .sort((a,b) => a.pct - b.pct)
-    .slice(0, 10);
-
-  // HE x Falta comparison (for admin showing other bases, show top 10)
-  let heVsFaltaRows = '';
-  if (!base) {
-    const sorted = [...adhBaseKPI.entries()]
-      .filter(([,d]) => d.min_prog > 0)
-      .sort((a,b) => b[1].he_h - a[1].he_h);
-    heVsFaltaRows = sorted.map(([b, d]) => `
-      <tr>
-        <td><span class="adm-base-tag">${b}</span></td>
-        <td style="color:#f59e0b;font-weight:600;text-align:right">${adhFmtH(d.he_h)}</td>
-        <td style="color:#ef4444;font-weight:600;text-align:right">${adhFmtH(d.falta_h)}</td>
-        <td style="color:#94a3b8;text-align:right">${d.colabs}</td>
-      </tr>`).join('');
-  }
+    .sort((a,b) => b.he + b.falta - (a.he + a.falta)); // sort by total deviation
 
   el.innerHTML = `
-    <div class="page-header">
-      <div style="display:flex;align-items:center;gap:12px">
-        ${showBack ? `<button class="adh-back-btn" onclick="pageAderencia(document.getElementById('page-content'))">
-          <i class="ti ti-arrow-left" aria-hidden="true"></i>
-        </button>` : ''}
-        <div>
-          <h1 class="page-title">
-            Aderência ao Ponto
-            <span class="adh-base-badge">${base || 'Geral'}</span>
-          </h1>
-          <p class="page-sub">Horas trabalhadas ÷ horas programadas</p>
+    <div class="adh-det-wrap">
+
+      <!-- Header -->
+      <div class="adh-det-header">
+        <div style="display:flex;align-items:center;gap:12px">
+          ${showBack ? `<button class="adh-back-btn" onclick="pageAderencia(document.getElementById('page-content'))">
+            <i class="ti ti-arrow-left" aria-hidden="true"></i>
+          </button>` : ''}
+          <div>
+            <h1 class="adh-full-title">
+              Aderência ao Ponto
+              ${base ? `<span class="adh-base-badge">${base}</span>` : ''}
+            </h1>
+            <p class="adh-full-sub">Horas trabalhadas ÷ horas programadas</p>
+          </div>
         </div>
       </div>
-    </div>
 
-    <!-- KPIs -->
-    <div class="adh-det-kpis">
-      <div class="adh-det-kpi" style="border-top:3px solid ${pctClr}">
-        <div class="adh-det-kpi-v" style="color:${pctClr}">${pct}%</div>
-        <div class="adh-det-kpi-l">% Escala realizada</div>
-        <div class="adh-mini-bar" style="margin-top:8px"><div style="width:${pct}%;background:${pctClr}"></div></div>
+      <!-- KPIs -->
+      <div class="adh-det-kpis-row">
+        <div class="adh-det-kpi-card" style="border-top:3px solid ${pctClr}">
+          <div class="adh-det-kpi-v" style="color:${pctClr}">${pct}%</div>
+          <div class="adh-det-kpi-l">% Escala realizada</div>
+          <div class="adh-full-kpi-bar" style="margin-top:8px"><div style="width:${pct}%;background:${pctClr}"></div></div>
+        </div>
+        <div class="adh-det-kpi-card" style="border-top:3px solid #f6ad55">
+          <div class="adh-det-kpi-v" style="color:#f6ad55">${adhFmtH(he_h)}</div>
+          <div class="adh-det-kpi-l">Horas extras</div>
+        </div>
+        <div class="adh-det-kpi-card" style="border-top:3px solid #fc8181">
+          <div class="adh-det-kpi-v" style="color:#fc8181">${adhFmtH(fat_h)}</div>
+          <div class="adh-det-kpi-l">Horas a menos</div>
+        </div>
+        <div class="adh-det-kpi-card" style="border-top:3px solid #9f7aea">
+          <div class="adh-det-kpi-v" style="color:#9f7aea">${adhFmtH(prog_h)}</div>
+          <div class="adh-det-kpi-l">Horas programadas</div>
+        </div>
+        <div class="adh-det-kpi-card" style="border-top:3px solid #8896aa">
+          <div class="adh-det-kpi-v" style="color:#8896aa">${colabs.toLocaleString()}</div>
+          <div class="adh-det-kpi-l">Colaboradores</div>
+        </div>
       </div>
-      <div class="adh-det-kpi" style="border-top:3px solid #f59e0b">
-        <div class="adh-det-kpi-v" style="color:#f59e0b">${adhFmtH(he_h)}</div>
-        <div class="adh-det-kpi-l">Horas extras</div>
-      </div>
-      <div class="adh-det-kpi" style="border-top:3px solid #ef4444">
-        <div class="adh-det-kpi-v" style="color:#ef4444">${adhFmtH(fat_h)}</div>
-        <div class="adh-det-kpi-l">Horas a menos</div>
-      </div>
-      <div class="adh-det-kpi" style="border-top:3px solid #a78bfa">
-        <div class="adh-det-kpi-v" style="color:#a78bfa">${adhFmtH(prog_h)}</div>
-        <div class="adh-det-kpi-l">Horas programadas</div>
-      </div>
-      <div class="adh-det-kpi" style="border-top:3px solid #94a3b8">
-        <div class="adh-det-kpi-v" style="color:#94a3b8">${colabs.toLocaleString()}</div>
-        <div class="adh-det-kpi-l">Colaboradores</div>
-      </div>
-    </div>
 
-    <!-- Bottom: Top 10 piores + HE vs Falta -->
-    <div class="adh-charts-row">
+      <!-- Table -->
+      <div class="adh-colab-section">
+        <div class="adh-colab-header-row">
+          <span style="font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted)">
+            ${colabList.length} colaboradores · passe o mouse para ver detalhes diários
+          </span>
+          <div class="adh-sort-btns">
+            <button class="adh-sort-btn active" onclick="adhSort('desvio',this)">Maior desvio</button>
+            <button class="adh-sort-btn" onclick="adhSort('he',this)">Mais HE</button>
+            <button class="adh-sort-btn" onclick="adhSort('falta',this)">Mais falta</button>
+            <button class="adh-sort-btn" onclick="adhSort('pct',this)">Menor %</button>
+          </div>
+        </div>
 
-      <!-- Top 10 piores aderências -->
-      <div class="adh-chart-card" style="grid-column:span 2">
-        <div class="adh-chart-title">Top 10 piores aderências · colaboradores</div>
-        <div class="adm-table-wrap">
-          <table class="adm-table">
+        <div class="adh-colab-table-wrap">
+          <table class="adh-colab-table" id="adh-colab-table">
             <thead>
               <tr>
-                <th>Base</th><th>Matrícula</th><th>Nome</th>
-                <th class="r">Prog(h)</th><th class="r">HE(h)</th><th class="r">Falta(h)</th>
+                <th>Matrícula</th>
+                <th>Nome</th>
+                <th>Cargo</th>
+                <th class="r">Prog(h)</th>
+                <th class="r" style="color:#f6ad55">HE(h)</th>
+                <th class="r" style="color:#fc8181">Falta(h)</th>
                 <th class="r">% Ader.</th>
               </tr>
             </thead>
-            <tbody>
-              ${colabsBase.map(c => {
-                const cc = adhPctColor(c.pct);
-                return `<tr>
-                  <td><span class="adm-base-tag">${c.filial}</span></td>
-                  <td style="font-family:monospace">${c.mat}</td>
-                  <td>${c.nome}</td>
-                  <td class="r">${(c.min_prog/60).toFixed(0)}h</td>
-                  <td class="r" style="color:#f59e0b">${c.he_h.toFixed(1)}h</td>
-                  <td class="r" style="color:#ef4444">${c.falta_h.toFixed(1)}h</td>
-                  <td class="r" style="color:${cc};font-weight:700">${c.pct}%</td>
-                </tr>`;
-              }).join('')}
+            <tbody id="adh-colab-tbody">
+              ${adhRenderColabRows(colabList, base)}
             </tbody>
           </table>
         </div>
       </div>
 
-      <!-- HE vs Falta por base (se não filtrado por base) -->
-      <div class="adh-chart-card">
-        ${base ? `
-          <div class="adh-chart-title">% Aderência · ${base}</div>
-          <div style="display:flex;align-items:center;justify-content:center;height:120px">
-            <div style="text-align:center">
-              <div style="font-size:48px;font-weight:800;color:${pctClr};line-height:1">${pct}%</div>
-              <div style="font-size:11px;color:var(--text-muted);margin-top:6px">escala realizada</div>
-            </div>
-          </div>
-          <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
-            <div style="display:flex;justify-content:space-between;font-size:12px;padding:8px;background:rgba(245,158,11,0.08);border-radius:7px">
-              <span style="color:var(--text-muted)">Horas extras</span>
-              <span style="color:#f59e0b;font-weight:700">+${adhFmtH(he_h)}</span>
-            </div>
-            <div style="display:flex;justify-content:space-between;font-size:12px;padding:8px;background:rgba(239,68,68,0.08);border-radius:7px">
-              <span style="color:var(--text-muted)">Horas a menos</span>
-              <span style="color:#ef4444;font-weight:700">−${adhFmtH(fat_h)}</span>
-            </div>
-            <div style="display:flex;justify-content:space-between;font-size:12px;padding:8px;background:rgba(255,255,255,0.03);border-radius:7px">
-              <span style="color:var(--text-muted)">Programadas</span>
-              <span style="color:#a78bfa;font-weight:700">${adhFmtH(prog_h)}</span>
-            </div>
-          </div>
-        ` : `
-          <div class="adh-chart-title">HE × Horas a Menos por base</div>
-          <div class="adm-table-wrap" style="max-height:300px;overflow-y:auto">
-            <table class="adm-table">
-              <thead><tr><th>Base</th><th class="r">HE (h)</th><th class="r">Falta (h)</th><th class="r">Colabs</th></tr></thead>
-              <tbody>${heVsFaltaRows}</tbody>
-            </table>
-          </div>
-        `}
-      </div>
-    </div>`;
+    </div>
+
+    <!-- Tooltip -->
+    <div class="adh-tooltip" id="adh-tooltip" style="display:none"></div>
+  `;
+
+  // Store for sorting
+  window._adhColabList = colabList;
+  window._adhBase = base;
+
+  // Setup tooltip
+  adhSetupTooltip();
+}
+
+function adhRenderColabRows(list, base) {
+  return list.map(c => {
+    const cc = adhPctColor(c.pct);
+    const cargo = window.eoColabs?.get(c.mat)?.funcao || '';
+    return `<tr class="adh-colab-row"
+      data-mat="${c.mat}"
+      data-filial="${c.filial||base||''}"
+      data-nome="${c.nome}"
+      data-cargo="${cargo}"
+      onmouseenter="adhShowTooltip(event,this)"
+      onmouseleave="adhHideTooltip()">
+      <td style="font-family:monospace;font-size:11px">${c.mat}</td>
+      <td style="font-weight:500">${c.nome}</td>
+      <td style="color:var(--text-muted);font-size:11px">${cargo}</td>
+      <td class="r">${(c.min_prog/60).toFixed(1)}h</td>
+      <td class="r" style="color:#f6ad55">${c.he_h.toFixed(1)}h</td>
+      <td class="r" style="color:#fc8181">${c.falta_h.toFixed(1)}h</td>
+      <td class="r" style="font-weight:700;color:${cc}">${c.pct}%</td>
+    </tr>`;
+  }).join('');
+}
+
+function adhSort(by, btn) {
+  document.querySelectorAll('.adh-sort-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  const list = [...(window._adhColabList||[])];
+  if (by==='he')     list.sort((a,b)=>b.he-a.he);
+  if (by==='falta')  list.sort((a,b)=>b.falta-a.falta);
+  if (by==='pct')    list.sort((a,b)=>a.pct-b.pct);
+  if (by==='desvio') list.sort((a,b)=>(b.he+b.falta)-(a.he+a.falta));
+  const tbody = document.getElementById('adh-colab-tbody');
+  if (tbody) tbody.innerHTML = adhRenderColabRows(list, window._adhBase);
+  adhSetupTooltip();
+}
+
+// ── Tooltip ───────────────────────────────────────────
+function adhSetupTooltip() {
+  document.querySelectorAll('.adh-colab-row').forEach(row => {
+    row.addEventListener('mouseenter', e => adhShowTooltip(e, row));
+    row.addEventListener('mousemove',  e => adhPositionTooltip(e));
+    row.addEventListener('mouseleave', adhHideTooltip);
+  });
+}
+
+function adhShowTooltip(e, row) {
+  const mat    = row.dataset.mat;
+  const filial = row.dataset.filial;
+  const nome   = row.dataset.nome;
+  const cargo  = row.dataset.cargo;
+  const tip    = document.getElementById('adh-tooltip');
+  if (!tip) return;
+
+  // Get daily records for this collaborator
+  const days = [];
+  for (const [key, h] of pontoHorarios) {
+    if (!key.startsWith(filial+'|'+mat+'|')) continue;
+    const dstr = key.split('|')[2]; // dd/mm/yyyy
+    const marc = pontoMarcacao.get(key);
+    const minP = h.ent1 && h.sai1 ? adhMinDiff(adhTimeToMin(h.ent1),adhTimeToMin(h.sai1)) + (h.ent2&&h.sai2?adhMinDiff(adhTimeToMin(h.ent2),adhTimeToMin(h.sai2)):0) : 0;
+    let minT = 0;
+    if (marc) {
+      [[marc.bat1,marc.bat2],[marc.bat3,marc.bat4],[marc.bat5,marc.bat6],[marc.bat7,marc.bat8]]
+        .forEach(([a,b])=>{ if(a&&b){const d=adhMinDiff(adhTimeToMin(a),adhTimeToMin(b));minT+=d;} });
+    }
+    const he    = Math.max(0, minT-minP);
+    const falta = Math.max(0, minP-minT);
+    const pct   = minP>0 ? Math.max(0,Math.round((1-falta/minP)*100)) : (minT>0?100:0);
+    days.push({ dstr, ent1:h.ent1, sai1:h.sai1, ent2:h.ent2, sai2:h.sai2,
+      bat1:marc?.bat1, bat2:marc?.bat2, bat3:marc?.bat3, bat4:marc?.bat4,
+      minP, minT, he, falta, pct });
+  }
+  days.sort((a,b)=>a.dstr.split('/').reverse().join('').localeCompare(b.dstr.split('/').reverse().join('')));
+
+  // Build tooltip HTML
+  const pctClr = p => p>=88?'#48bb78':p>=70?'#f6ad55':'#fc8181';
+  const fmtMin = m => m>0 ? (m/60).toFixed(1)+'h' : '—';
+
+  tip.innerHTML = `
+    <div class="adh-tip-header">
+      <div class="adh-tip-name">${nome}</div>
+      <div class="adh-tip-sub">${mat} · ${cargo}</div>
+    </div>
+    <div class="adh-tip-table-wrap">
+      <table class="adh-tip-table">
+        <thead>
+          <tr>
+            <th>Data</th>
+            <th>Plan. entrada</th>
+            <th>Plan. saída</th>
+            <th>Real bat.1</th>
+            <th>Real bat.2</th>
+            <th>Real bat.3</th>
+            <th>Real bat.4</th>
+            <th style="text-align:right">HE</th>
+            <th style="text-align:right">Falta</th>
+            <th style="text-align:right">%</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${days.slice(0,31).map(d=>{
+            const c=pctClr(d.pct);
+            const plan = [d.ent1,d.sai1,d.ent2,d.sai2].filter(Boolean).join(' – ') || '—';
+            return `<tr>
+              <td style="font-size:10px;color:var(--text-muted)">${d.dstr}</td>
+              <td>${d.ent1||'—'}</td>
+              <td>${d.sai2||d.sai1||'—'}</td>
+              <td style="color:#00a0d2">${d.bat1||'—'}</td>
+              <td style="color:#00a0d2">${d.bat2||'—'}</td>
+              <td style="color:#00a0d2">${d.bat3||'—'}</td>
+              <td style="color:#00a0d2">${d.bat4||'—'}</td>
+              <td style="text-align:right;color:#f6ad55">${fmtMin(d.he)}</td>
+              <td style="text-align:right;color:#fc8181">${fmtMin(d.falta)}</td>
+              <td style="text-align:right;font-weight:700;color:${c}">${d.pct}%</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  tip.style.display = 'block';
+  adhPositionTooltip(e);
+}
+
+function adhPositionTooltip(e) {
+  const tip = document.getElementById('adh-tooltip');
+  if (!tip || tip.style.display==='none') return;
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const tw = tip.offsetWidth || 680, th = tip.offsetHeight || 300;
+  let x = e.clientX + 16, y = e.clientY + 16;
+  if (x + tw > vw - 8) x = e.clientX - tw - 8;
+  if (y + th > vh - 8) y = e.clientY - th - 8;
+  tip.style.left = Math.max(4, x) + 'px';
+  tip.style.top  = Math.max(4, y) + 'px';
+}
+
+function adhHideTooltip() {
+  const tip = document.getElementById('adh-tooltip');
+  if (tip) tip.style.display = 'none';
 }

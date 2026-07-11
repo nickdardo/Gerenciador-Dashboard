@@ -1975,3 +1975,192 @@ a { color: inherit; text-decoration: none; }
 
 #adm-tab-content { width: 100%; }
 .admin-body-inner { padding: 0 0 32px; width: 100%; }
+
+/* ══════════════════════════════════════════════════════
+   ADERÊNCIA — Detalhe por base com tabela + tooltip
+════════════════════════════════════════════════════════ */
+
+.adh-det-wrap {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - var(--topbar-h));
+  overflow: hidden;
+  padding: 12px 16px 0;
+  gap: 10px;
+}
+
+.adh-det-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.adh-det-kpis-row {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.adh-det-kpi-card {
+  background: var(--bg-surface);
+  padding: 13px 16px;
+}
+
+.adh-det-kpi-v { font-size: 22px; font-weight: 700; line-height: 1; }
+.adh-det-kpi-l { font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; margin-top: 4px; }
+
+/* Collaborator table section */
+.adh-colab-section {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: 8px;
+  padding-bottom: 12px;
+}
+
+.adh-colab-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.adh-sort-btns {
+  display: flex;
+  gap: 4px;
+}
+
+.adh-sort-btn {
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 5px;
+  background: transparent;
+  border: 0.5px solid var(--border-strong);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all .15s;
+}
+
+.adh-sort-btn:hover { color: var(--text-primary); border-color: var(--text-muted); }
+.adh-sort-btn.active { background: rgba(0,160,210,.12); border-color: rgba(0,160,210,.3); color: #00a0d2; }
+
+/* Table */
+.adh-colab-table-wrap {
+  flex: 1;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.adh-colab-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.adh-colab-table th {
+  background: var(--bg-app);
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  white-space: nowrap;
+  z-index: 1;
+}
+
+.adh-colab-table th.r { text-align: right; }
+
+.adh-colab-row td {
+  padding: 9px 12px;
+  border-bottom: 0.5px solid var(--border);
+  color: var(--text-primary);
+  vertical-align: middle;
+}
+
+.adh-colab-table td.r { text-align: right; }
+.adh-colab-row:last-child td { border-bottom: none; }
+.adh-colab-row:hover td { background: rgba(0,160,210,.04); cursor: default; }
+
+/* ── Tooltip ── */
+.adh-tooltip {
+  position: fixed;
+  z-index: 9999;
+  background: #111827;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0,0,0,.7);
+  padding: 0;
+  max-width: 780px;
+  min-width: 580px;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.adh-tip-header {
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(0,160,210,.06);
+}
+
+.adh-tip-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.adh-tip-sub {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.adh-tip-table-wrap {
+  overflow-x: auto;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.adh-tip-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.adh-tip-table th {
+  background: var(--bg-app);
+  padding: 6px 10px;
+  text-align: left;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  white-space: nowrap;
+}
+
+.adh-tip-table td {
+  padding: 6px 10px;
+  border-bottom: 0.5px solid var(--border);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.adh-tip-table tr:last-child td { border-bottom: none; }
+.adh-tip-table tr:hover td { background: rgba(255,255,255,.02); }
