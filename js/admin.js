@@ -15,6 +15,19 @@ const ROLES = {
 };
 
 // In-memory store for uploaded files (session only)
+const adminFileHistory = {
+  colaboradores: JSON.parse(localStorage.getItem('adm_hist_colaboradores') || '[]'),
+  horarios:      JSON.parse(localStorage.getItem('adm_hist_horarios')      || '[]'),
+  marcacao:      JSON.parse(localStorage.getItem('adm_hist_marcacao')      || '[]'),
+  malha:         JSON.parse(localStorage.getItem('adm_hist_malha')         || '[]'),
+};
+
+function adminAddHistory(key, name) {
+  const entry = { name, date: new Date().toLocaleDateString('pt-BR') + ' ' + new Date().toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) };
+  adminFileHistory[key] = [entry, ...(adminFileHistory[key]||[]).slice(0,4)];
+  try { localStorage.setItem('adm_hist_'+key, JSON.stringify(adminFileHistory[key])); } catch(_){}
+}
+
 const adminFiles = {
   colaboradores: null,  // { count, bases, date, data: Map<mat, {nome,filial,funcao,ch,situacao}> }
   horarios:      null,  // { count, period, date }
@@ -237,35 +250,47 @@ function adminFilesTab() {
       <span style="font-size:11px;color:var(--text-muted)">Arquivos ficam em memória durante a sessão</span>
     </div>
     <div class="adm-files-grid">
-      ${files.map(f => `
-        <div class="adm-file-card">
-          <div class="adm-file-header">
-            <div class="adm-file-icon" style="background:${f.color}18;color:${f.color}">
-              <i class="ti ${f.icon}" style="font-size:18px" aria-hidden="true"></i>
+      ${files.map(f => {
+        const hist = adminFileHistory[f.key] || [];
+        return `
+          <div class="adm-file-card">
+            <div class="adm-file-header">
+              <div class="adm-file-icon" style="background:${f.color}18;color:${f.color}">
+                <i class="ti ${f.icon}" style="font-size:18px" aria-hidden="true"></i>
+              </div>
+              <div class="adm-file-meta">
+                <div class="adm-file-name">${f.name}</div>
+                <div class="adm-file-desc">${f.desc}</div>
+              </div>
             </div>
-            <div class="adm-file-meta">
-              <div class="adm-file-name">${f.name}</div>
-              <div class="adm-file-desc">${f.desc}</div>
+
+            <div class="adm-file-progress">
+              <div class="adm-file-progress-fill" style="width:${f.info?'100%':'0%'};background:${f.color}"></div>
             </div>
-          </div>
 
-          <div class="adm-file-progress">
-            <div class="adm-file-progress-fill" style="width:${f.info?'100%':'0%'};background:${f.color}"></div>
-          </div>
+            <div class="adm-file-footer">
+              <span id="adm-status-${f.key}" class="${f.info?'adm-file-badge-ok':'adm-file-badge-no'}">
+                ${f.info || 'Não carregado'}
+              </span>
+              <label class="adm-upload-btn">
+                <i class="ti ti-upload" style="font-size:11px" aria-hidden="true"></i>
+                ${f.info ? 'Atualizar' : 'Carregar'}
+                <input type="file" accept="${f.accept}" style="display:none"
+                  onchange="${f.fn}(this)">
+              </label>
+            </div>
 
-          <div class="adm-file-footer">
-            <span id="adm-status-${f.key}" class="${f.info?'adm-file-badge-ok':'adm-file-badge-no'}">
-              ${f.info || 'Não carregado'}
-            </span>
-            <label class="adm-upload-btn">
-              <i class="ti ti-upload" style="font-size:11px" aria-hidden="true"></i>
-              ${f.info ? 'Atualizar' : 'Carregar'}
-              <input type="file" accept="${f.accept}" style="display:none"
-                onchange="${f.fn}(this)">
-            </label>
-          </div>
-        </div>
-      `).join('')}
+            ${hist.length ? `
+              <div class="adm-file-history">
+                <div class="adm-file-history-title">Histórico de uploads</div>
+                ${hist.slice(0,3).map(h => `
+                  <div class="adm-hist-row">
+                    <span>${h.name}</span>
+                    <span>${h.date}</span>
+                  </div>`).join('')}
+              </div>` : ''}
+          </div>`;
+      }).join('')}
     </div>`;
 }
 
@@ -358,6 +383,7 @@ async function adminLoadHorarios(input) {
         });
         const period = [...datas].sort().join(', ');
         adminFiles.horarios = { count, period, path, date: new Date().toLocaleDateString('pt-BR') };
+        adminAddHistory('horarios', file.name);
         adminSetFileStatus('horarios', `✓ ${count.toLocaleString()} registros · ${period}`, 'ok');
         if (typeof pontoParseHorarios === 'function') pontoParseHorarios(wb, null);
       } catch(err) { adminSetFileStatus('horarios', 'Erro: '+err.message, 'err'); }
@@ -392,6 +418,7 @@ async function adminLoadMarcacao(input) {
         });
         const period = [...datas].sort().join(', ');
         adminFiles.marcacao = { count, period, path, date: new Date().toLocaleDateString('pt-BR') };
+        adminAddHistory('marcacao', file.name);
         adminSetFileStatus('marcacao', `✓ ${count.toLocaleString()} registros · ${period}`, 'ok');
         if (typeof pontoParseMarcacao === 'function') pontoParseMarcacao(wb, null);
       } catch(err) { adminSetFileStatus('marcacao', 'Erro: '+err.message, 'err'); }
@@ -431,6 +458,7 @@ async function adminLoadMalha(input) {
         }
         const period = [...meses].slice(0,2).join(', ');
         adminFiles.malha = { count, bases: basesSet.size, period, path, date: new Date().toLocaleDateString('pt-BR') };
+        adminAddHistory('malha', file.name);
         adminSetFileStatus('malha', `✓ ${count.toLocaleString()} voos · ${basesSet.size} bases`, 'ok');
         if (typeof malhaParseCSV === 'function') malhaParseCSV(text);
       } catch(err) { adminSetFileStatus('malha', 'Erro: '+err.message, 'err'); }
