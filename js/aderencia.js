@@ -690,7 +690,7 @@ function adhRenderColabRows(list, base) {
       data-filial="${c.filial||base||''}"
       data-nome="${c.nome}"
       data-cargo="${cargo}"
-      onmouseenter="adhShowTooltip(event,this)"
+      onmouseenter="adhShowTooltip(event,this,false).catch(console.warn)"
       onmouseleave="adhHideTooltip()">
       <td style="font-family:monospace;font-size:11px">${mat}</td>
       <td style="font-weight:500">${c.nome}</td>
@@ -719,10 +719,10 @@ function adhSort(by, btn) {
 // ── Tooltip + Panel ──────────────────────────────────
 function adhSetupTooltip() {
   document.querySelectorAll('.adh-colab-row').forEach(row => {
-    row.addEventListener('mouseenter', e => { if (!_adhPanelFrozen) adhShowTooltip(e, row, false); });
+    row.addEventListener('mouseenter', e => { if (!_adhPanelFrozen) adhShowTooltip(e, row, false).catch(console.warn); });
     row.addEventListener('mousemove',  e => { if (!_adhPanelFrozen) adhPositionTooltip(e); });
     row.addEventListener('mouseleave', ()=> { if (!_adhPanelFrozen) adhHideTooltip(); });
-    row.addEventListener('click',      e => adhShowTooltip(e, row, true));
+    row.addEventListener('click',      e => adhShowTooltip(e, row, true).catch(console.warn));
   });
 }
 
@@ -845,14 +845,23 @@ function adhBuildPanelContent(mat, filial, nome, cargo) {
     </div>`;
 }
 
-function adhShowTooltip(e, row, freeze) {
+async function adhShowTooltip(e, row, freeze) {
   const mat    = row.dataset.mat;
   const filial = row.dataset.filial;
   const nome   = row.dataset.nome;
   const cargo  = row.dataset.cargo;
 
+  // Load daily data from DB if not in memory
+  if (!pontoHorarios?.size) {
+    await adminLoadFileOnDemand('horarios');
+  }
+  if (!pontoMarcacao?.size) {
+    await adminLoadFileOnDemand('marcacao');
+  }
+
+  const html = adhBuildPanelContent(mat, filial, nome, cargo);
+
   if (freeze) {
-    // Open as fixed panel
     _adhPanelFrozen = true;
     adhHideTooltip();
     let panel = document.getElementById('adh-panel');
@@ -862,14 +871,12 @@ function adhShowTooltip(e, row, freeze) {
       panel.className = 'adh-panel';
       document.body.appendChild(panel);
     }
+    panel.style.display = 'flex';
     panel.innerHTML = `
       <button class="adh-panel-close" onclick="adhClosePanel()">
-        <i class="ti ti-x" aria-hidden="true"></i>
+        <i class="ti ti-x" aria-hidden="true" style="font-size:16px"></i>
       </button>
-      <div class="adh-panel-body">
-        ${adhBuildPanelContent(mat, filial, nome, cargo)}
-      </div>`;
-    panel.style.display = 'flex';
+      <div class="adh-panel-body">${html}</div>`;
     return;
   }
 
@@ -881,7 +888,7 @@ function adhShowTooltip(e, row, freeze) {
     tip.className = 'adh-tooltip';
     document.body.appendChild(tip);
   }
-  tip.innerHTML = adhBuildPanelContent(mat, filial, nome, cargo);
+  tip.innerHTML = html;
   tip.style.display = 'block';
   adhPositionTooltip(e);
 }
