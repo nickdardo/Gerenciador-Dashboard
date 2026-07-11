@@ -965,8 +965,10 @@ async function adminLoadFileOnDemand(folder) {
           ent1:r.ent1, sai1:r.sai1, ent2:r.ent2, sai2:r.sai2, date:dstr });
       });
       adminFiles.horarios = { count: data.length, date: 'banco' };
-      adhBaseKPI = null; adhColabKPI = null; // force recompute
+      adhBaseKPI = null; adhColabKPI = null;
       console.log(`[onDemand] horarios: ${pontoHorarios.size} keys`);
+      // Trigger precompute if marcacao also loaded
+      if (pontoMarcacao?.size > 0) adminPrecomputeAderencia().catch(console.warn);
       return true;
     } catch(e) { console.error('[onDemand] horarios:', e.message); return false; }
   }
@@ -1021,4 +1023,108 @@ async function adminLoadFileOnDemand(folder) {
   }
 
   return false;
+}
+
+// ══════════════════════════════════════════════════════
+// PRÉ-CÁLCULO DE ADERÊNCIA — roda após upload de arquivos
+// Salva resultado no banco + invalida localStorage cache
+// ══════════════════════════════════════════════════════
+async function adminPrecomputeAderencia() {
+  if (!pontoHorarios?.size || !pontoMarcacao?.size) {
+    console.warn('[precompute] horarios ou marcacao não carregados');
+    return;
+  }
+
+  console.log('[precompute] Calculando KPI de aderência...');
+  const ADH_EXCL = new Set(['HQ2','SEDE','GSE']);
+
+  // Build horario minutes per key
+  const horMin = new Map();
+  for (const [key, h] of pontoHorarios) {
+    if (ADH_EXCL.has((h.filial||'').toUpperCase())) continue;
+    let mp = 0;
+    const tm = (t) => { if(!t)return 0; const p=String(t).split(':'); return parseInt(p[0])*60+parseInt(p[1]||0); };
+    const diff = (a,b) => { if(!a||!b)return 0; const d=tm(b)-tm(a); return d<0?d+1440:d; };
+    mp += diff(h.ent1, h.sai1);
+    if (h.ent2&&h.sai2) mp += diff(h.ent2, h.sai2);
+    horMin.set(key, { min_prog: mp, filial: h.filial, mat: h.mat, nome: h.nome });
+  }
+
+  // Compute per collaborator
+  const colabAcc = new Map();
+  for (const [key, m] of pontoMarcacao) {
+    const filial = (m.filial||'').toUpperCase();
+    if (ADH_EXCL.has(filial)) continue;
+    const tm = (t) => { if(!t)return 0; const p=String(t).split(':'); return parseInt(p[0])*60+parseInt(p[1]||0); };
+    const diff = (a,b) => { if(!a||!b)return 0; const d=tm(b)-tm(a); return d<0?d+1440:d; };
+    let mt = 0;
+    [[m.bat1,m.bat2],[m.bat3,m.bat4],[m.bat5,m.bat6],[m.bat7,m.bat8]]
+      .forEach(([a,b]) => { mt += diff(a,b); });
+    const hor = horMin.get(key);
+    const mp  = hor ? hor.min_prog : 0;
+    const dev = Math.abs(mt - mp);
+    const he  = Math.max(0, mt - mp);
+    const fat = Math.max(0, mp - mt);
+    const ck  = `${filial}|${m.mat}`;
+    if (!colabAcc.has(ck)) {
+      const nome = hor?.nome || m.nome || '';
+      colabAcc.set(ck, { filial, mat: m.mat, nome, mp:0, mt:0, desvio:0, he:0, falta:0 });
+    }
+    const acc = colabAcc.get(ck);
+    acc.mp+=mp; acc.mt+=mt; acc.desvio+=dev; acc.he+=he; acc.falta+=fat;
+  }
+
+  // Aggregate per base
+  const baseAcc = new Map();
+  const colabRows = [];
+  for (const [ck, c] of colabAcc) {
+    const base = c.filial;
+    if (!baseAcc.has(base)) baseAcc.set(base, {mp:0,desvio:0,he:0,falta:0,colabs:0});
+    const b = baseAcc.get(base);
+    b.mp+=c.mp; b.desvio+=c.desvio; b.he+=c.he; b.falta+=c.falta; b.colabs++;
+    const pct = c.mp>0 ? Math.max(0,Math.round((100-c.desvio/c.mp*100)*10)/10) : 0;
+    colabRows.push({
+      filial:c.filial, matricula:c.mat, nome:c.nome,
+      min_prog:c.mp, min_trab:c.mt, desvio:c.desvio, he:c.he, falta:c.falta,
+      pct, he_h:Math.round(c.he/60*10)/10, falta_h:Math.round(c.falta/60*10)/10,
+      updated_at: new Date()
+    });
+  }
+
+  // Build base rows
+  const baseRows = [];
+  for (const [filial, b] of baseAcc) {
+    if (!b.mp) continue;
+    const pct = Math.max(0, Math.round((100-b.desvio/b.mp*100)*10)/10);
+    baseRows.push({
+      filial, min_prog:b.mp, desvio:b.desvio, he:b.he, falta:b.falta, colabs:b.colabs,
+      pct, he_h:Math.round(b.he/60*10)/10, falta_h:Math.round(b.falta/60*10)/10,
+      prog_h:Math.round(b.mp/60*10)/10, updated_at: new Date()
+    });
+  }
+
+  console.log(`[precompute] ${baseRows.length} bases, ${colabRows.length} colaboradores`);
+
+  // Save base KPI to DB
+  const BATCH = 500;
+  for (let i=0; i<baseRows.length; i+=BATCH) {
+    const { error } = await db.from('aderencia_kpi')
+      .upsert(baseRows.slice(i,i+BATCH), { onConflict:'filial' });
+    if (error) { console.error('[precompute] base KPI error:', error.message); return; }
+  }
+
+  // Save colab KPI to DB
+  for (let i=0; i<colabRows.length; i+=BATCH) {
+    const { error } = await db.from('aderencia_colab')
+      .upsert(colabRows.slice(i,i+BATCH), { onConflict:'filial,matricula' });
+    if (error) { console.error('[precompute] colab KPI error:', error.message); return; }
+  }
+
+  // Invalidate localStorage cache
+  try {
+    localStorage.removeItem('adh_kpi_cache');
+    localStorage.removeItem('adh_kpi_ts');
+  } catch(_){}
+
+  console.log('[precompute] ✓ KPI salvo no banco e cache invalidado');
 }

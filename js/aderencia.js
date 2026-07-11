@@ -301,13 +301,79 @@ async function pageAderencia(el) {
 
   const setMsg = m => { const e = document.getElementById('adh-load-msg'); if(e) e.textContent = m; };
 
-  // Load files on demand
+  // ── LAYER 1: localStorage cache (instantâneo) ──────
+  const CACHE_KEY = 'adh_kpi_cache';
+  const CACHE_TS  = 'adh_kpi_ts';
+  const CACHE_MAX = 8 * 60 * 60 * 1000; // 8 hours
+
+  try {
+    const ts    = parseInt(localStorage.getItem(CACHE_TS) || '0');
+    const fresh = (Date.now() - ts) < CACHE_MAX;
+    if (fresh) {
+      const raw = localStorage.getItem(CACHE_KEY);
+      if (raw) {
+        const cached = JSON.parse(raw);
+        adhBaseKPI  = new Map(cached.baseKPI.map(r => [r.filial, r]));
+        adhColabKPI = new Map(cached.colabKPI.map(r => [r.filial+'|'+r.matricula, r]));
+        console.log('[aderencia] Loaded from localStorage cache');
+        // Skip loading, go straight to render
+        if (role === 'admin') { adhRenderMultiBase(el); return; }
+        const myBase = bases.includes('*') ? null : (bases[0] || null);
+        adhRenderDetalhe(el, myBase, false);
+        return;
+      }
+    }
+  } catch(_) {}
+
+  // ── LAYER 2: banco aderencia_kpi (rápido ~30 rows) ──
+  setMsg('Carregando KPI do banco...');
+  try {
+    const [{ data: kpiRows }, { data: colabRows }] = await Promise.all([
+      db.from('aderencia_kpi').select('*'),
+      db.from('aderencia_colab').select('*'),
+    ]);
+
+    if (kpiRows?.length && colabRows?.length) {
+      adhBaseKPI  = new Map(kpiRows.map(r => [r.filial, {
+        pct: parseFloat(r.pct), he_h: parseFloat(r.he_h),
+        falta_h: parseFloat(r.falta_h), prog_h: parseFloat(r.prog_h),
+        colabs: r.colabs, min_prog: r.min_prog, desvio: r.desvio,
+        he: r.he, falta: r.falta
+      }]));
+      adhColabKPI = new Map(colabRows.map(r => [r.filial+'|'+r.matricula, {
+        filial: r.filial, mat: r.matricula, nome: r.nome,
+        pct: parseFloat(r.pct), he_h: parseFloat(r.he_h),
+        falta_h: parseFloat(r.falta_h), min_prog: r.min_prog,
+        he: r.he, falta: r.falta
+      }]));
+      console.log(`[aderencia] Loaded ${kpiRows.length} bases from DB KPI`);
+
+      // Save to localStorage cache
+      try {
+        localStorage.setItem(CACHE_KEY, JSON.stringify({
+          baseKPI:  kpiRows,
+          colabKPI: colabRows
+        }));
+        localStorage.setItem(CACHE_TS, Date.now().toString());
+      } catch(_) {}
+
+      if (role === 'admin') { adhRenderMultiBase(el); return; }
+      const myBase = bases.includes('*') ? null : (bases[0] || null);
+      adhRenderDetalhe(el, myBase, false);
+      return;
+    }
+  } catch(e) {
+    console.warn('[aderencia] DB KPI error:', e.message);
+  }
+
+  // ── LAYER 3: calcular na hora (só 1ª vez ou se banco vazio) ──
+  setMsg('Primeira vez: baixando dados para calcular...');
   if (!pontoHorarios?.size) {
-    setMsg('Baixando Horários do servidor...');
+    setMsg('Baixando Horários...');
     await adminLoadFileOnDemand('horarios');
   }
   if (!pontoMarcacao?.size) {
-    setMsg('Baixando Marcação do servidor...');
+    setMsg('Baixando Marcação...');
     await adminLoadFileOnDemand('marcacao');
   }
 
@@ -322,11 +388,15 @@ async function pageAderencia(el) {
     return;
   }
 
-  // Always rebuild KPI after fresh load from DB
   setMsg('Calculando aderência...');
-  await new Promise(r => setTimeout(r, 20)); // yield to UI
-  adhBaseKPI = null; adhColabKPI = null; // force fresh calculation
+  await new Promise(r => setTimeout(r, 20));
+  adhBaseKPI = null; adhColabKPI = null;
   adhBuildKPI();
+
+  // Trigger precompute to save for next time
+  if (typeof adminPrecomputeAderencia === 'function') {
+    adminPrecomputeAderencia().catch(console.warn);
+  }
 
   if (role === 'admin') {
     adhRenderMultiBase(el);
