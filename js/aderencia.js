@@ -714,108 +714,196 @@ function adhSort(by, btn) {
   adhSetupTooltip();
 }
 
-// ── Tooltip ───────────────────────────────────────────
+// ── Tooltip + Panel ──────────────────────────────────
 function adhSetupTooltip() {
   document.querySelectorAll('.adh-colab-row').forEach(row => {
-    row.addEventListener('mouseenter', e => adhShowTooltip(e, row));
-    row.addEventListener('mousemove',  e => adhPositionTooltip(e));
-    row.addEventListener('mouseleave', adhHideTooltip);
+    row.addEventListener('mouseenter', e => { if (!_adhPanelFrozen) adhShowTooltip(e, row, false); });
+    row.addEventListener('mousemove',  e => { if (!_adhPanelFrozen) adhPositionTooltip(e); });
+    row.addEventListener('mouseleave', ()=> { if (!_adhPanelFrozen) adhHideTooltip(); });
+    row.addEventListener('click',      e => adhShowTooltip(e, row, true));
   });
 }
 
-function adhShowTooltip(e, row) {
-  const mat    = row.dataset.mat;
-  const filial = row.dataset.filial;
-  const nome   = row.dataset.nome;
-  const cargo  = row.dataset.cargo;
-  const tip    = document.getElementById('adh-tooltip');
-  if (!tip) return;
+let _adhPanelFrozen = false;
 
-  // Get daily records for this collaborator
+function adhBuildPanelContent(mat, filial, nome, cargo) {
+  // Get daily records
   const days = [];
   for (const [key, h] of pontoHorarios) {
     if (!key.startsWith(filial+'|'+mat+'|')) continue;
-    const dstr = key.split('|')[2]; // dd/mm/yyyy
+    const dstr = key.split('|')[2];
     const marc = pontoMarcacao.get(key);
-    const minP = h.ent1 && h.sai1 ? adhMinDiff(adhTimeToMin(h.ent1),adhTimeToMin(h.sai1)) + (h.ent2&&h.sai2?adhMinDiff(adhTimeToMin(h.ent2),adhTimeToMin(h.sai2)):0) : 0;
-    let minT = 0;
-    if (marc) {
-      [[marc.bat1,marc.bat2],[marc.bat3,marc.bat4],[marc.bat5,marc.bat6],[marc.bat7,marc.bat8]]
-        .forEach(([a,b])=>{ if(a&&b){const d=adhMinDiff(adhTimeToMin(a),adhTimeToMin(b));minT+=d;} });
-    }
-    const he    = Math.max(0, minT-minP);
-    const falta = Math.max(0, minP-minT);
-    const pct   = minP>0 ? Math.max(0,Math.round((1-falta/minP)*100)) : (minT>0?100:0);
-    days.push({ dstr, ent1:h.ent1, sai1:h.sai1, ent2:h.ent2, sai2:h.sai2,
-      bat1:marc?.bat1, bat2:marc?.bat2, bat3:marc?.bat3, bat4:marc?.bat4,
-      minP, minT, he, falta, pct });
+    const tm = t => { if(!t)return 0; const p=String(t).split(':'); return parseInt(p[0])*60+parseInt(p[1]||0); };
+    const diff = (a,b) => { if(!a||!b)return 0; const d=tm(b)-tm(a); return d<0?d+1440:d; };
+    const minP = diff(h.ent1,h.sai1) + (h.ent2&&h.sai2?diff(h.ent2,h.sai2):0);
+    let minT=0;
+    if (marc) [[marc.bat1,marc.bat2],[marc.bat3,marc.bat4],[marc.bat5,marc.bat6],[marc.bat7,marc.bat8]]
+      .forEach(([a,b])=>{ minT+=diff(a,b); });
+    const he=Math.max(0,minT-minP), falta=Math.max(0,minP-minT);
+    const pct=minP>0?Math.max(0,Math.round((1-falta/minP)*100)):(minT>0?100:0);
+    days.push({dstr,ent1:h.ent1,sai1:h.sai1,ent2:h.ent2,sai2:h.sai2,
+      bat1:marc?.bat1,bat2:marc?.bat2,bat3:marc?.bat3,bat4:marc?.bat4,
+      minP,minT,he,falta,pct});
   }
   days.sort((a,b)=>a.dstr.split('/').reverse().join('').localeCompare(b.dstr.split('/').reverse().join('')));
 
-  // Build tooltip HTML
+  const totP = days.reduce((s,d)=>s+d.minP,0);
+  const totHE = days.reduce((s,d)=>s+d.he,0);
+  const totF  = days.reduce((s,d)=>s+d.falta,0);
+  const totPct = totP>0?Math.max(0,Math.round((1-totF/totP)*100)):0;
   const pctClr = p => p>=88?'#48bb78':p>=70?'#f6ad55':'#fc8181';
-  const fmtMin = m => m>0 ? (m/60).toFixed(1)+'h' : '—';
+  const fmtH = m => m>0?(m/60).toFixed(1)+'h':'—';
 
-  tip.innerHTML = `
-    <div class="adh-tip-header">
-      <div class="adh-tip-name">${nome}</div>
-      <div class="adh-tip-sub">${mat} · ${cargo}</div>
+  // Hour heatmap — for each hour 0-23, sum planned and worked minutes
+  const hourPlan = new Array(24).fill(0);
+  const hourReal = new Array(24).fill(0);
+  days.forEach(d => {
+    const tm = t => { if(!t)return null; const p=String(t).split(':'); return parseInt(p[0])*60+parseInt(p[1]||0); };
+    // planned spans
+    [[d.ent1,d.sai1],[d.ent2,d.sai2]].forEach(([e,s])=>{
+      const em=tm(e),sm=tm(s); if(!em&&em!==0||!sm) return;
+      for(let h=0;h<24;h++){const hs=h*60,he2=hs+60;const os=Math.max(em,hs),oe=Math.min(sm>em?sm:sm+1440,he2);if(oe>os)hourPlan[h]+=oe-os;}
+    });
+    // real batidas
+    [[d.bat1,d.bat2],[d.bat3,d.bat4]].forEach(([a,b])=>{
+      const am=tm(a),bm=tm(b); if(!am&&am!==0||!bm) return;
+      for(let h=0;h<24;h++){const hs=h*60,he2=hs+60;const os=Math.max(am,hs),oe=Math.min(bm>am?bm:bm+1440,he2);if(oe>os)hourReal[h]+=oe-os;}
+    });
+  });
+  const maxH = Math.max(...hourPlan,...hourReal,1);
+
+  // Build chart bars
+  const chartBars = Array.from({length:24},(_,h) => {
+    const pBar = Math.round(hourPlan[h]/maxH*52);
+    const rBar = Math.round(hourReal[h]/maxH*52);
+    return `<div class="adh-tip-hour-col">
+      <div class="adh-tip-hour-plan"  style="height:${pBar}px" title="${String(h).padStart(2,'0')}h planejado: ${fmtH(hourPlan[h])}"></div>
+      <div class="adh-tip-hour-real"  style="height:${rBar}px" title="${String(h).padStart(2,'0')}h realizado: ${fmtH(hourReal[h])}"></div>
+      <div class="adh-tip-hour-label">${h%3===0?String(h).padStart(2,'0'):''}</div>
+    </div>`;
+  }).join('');
+
+  // Table rows
+  const tableRows = days.map(d => {
+    const c2 = pctClr(d.pct);
+    const planEnt = [d.ent1,d.ent2].filter(Boolean).join(' / ') || '—';
+    const planSai = [d.sai1,d.sai2].filter(Boolean).join(' / ') || '—';
+    return `<tr>
+      <td>${d.dstr}</td>
+      <td style="color:#8896aa">${planEnt}</td>
+      <td style="color:#8896aa">${planSai}</td>
+      <td style="color:#00a0d2">${d.bat1||'—'}</td>
+      <td style="color:#00a0d2">${d.bat2||'—'}</td>
+      <td style="color:#00a0d2">${d.bat3||'—'}</td>
+      <td style="color:#00a0d2">${d.bat4||'—'}</td>
+      <td style="text-align:right;color:#f6ad55">${fmtH(d.he)}</td>
+      <td style="text-align:right;color:#fc8181">${fmtH(d.falta)}</td>
+      <td style="text-align:right;font-weight:700;color:${c2}">${d.pct}%</td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <div class="adh-panel-topbar">
+      <div>
+        <div class="adh-panel-name">${nome}</div>
+        <div class="adh-panel-sub">${mat} · ${cargo}</div>
+      </div>
+      <div class="adh-panel-summary">
+        <span style="color:#8896aa">Prog: <strong style="color:#e8edf5">${fmtH(totP)}</strong></span>
+        <span style="color:#f6ad55">HE: <strong>${fmtH(totHE)}</strong></span>
+        <span style="color:#fc8181">Falta: <strong>${fmtH(totF)}</strong></span>
+        <span style="color:${pctClr(totPct)}">Aderência: <strong>${totPct}%</strong></span>
+      </div>
     </div>
-    <div class="adh-tip-table-wrap">
+
+    <!-- Chart -->
+    <div class="adh-tip-chart-wrap">
+      <div class="adh-tip-chart-label">Distribuição por hora · planejado vs realizado</div>
+      <div class="adh-tip-chart">${chartBars}</div>
+      <div class="adh-tip-chart-legend">
+        <span><span class="adh-leg-dot" style="background:rgba(0,160,210,.5)"></span>Planejado</span>
+        <span><span class="adh-leg-dot" style="background:#48bb78"></span>Realizado</span>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="adh-tip-table-section">
       <table class="adh-tip-table">
         <thead>
           <tr>
-            <th>Data</th>
-            <th>Plan. entrada</th>
-            <th>Plan. saída</th>
-            <th>Real bat.1</th>
-            <th>Real bat.2</th>
-            <th>Real bat.3</th>
-            <th>Real bat.4</th>
+            <th>Data</th><th>Plan. entrada</th><th>Plan. saída</th>
+            <th>Bat.1</th><th>Bat.2</th><th>Bat.3</th><th>Bat.4</th>
             <th style="text-align:right">HE</th>
             <th style="text-align:right">Falta</th>
             <th style="text-align:right">%</th>
           </tr>
         </thead>
-        <tbody>
-          ${days.slice(0,31).map(d=>{
-            const c=pctClr(d.pct);
-            const plan = [d.ent1,d.sai1,d.ent2,d.sai2].filter(Boolean).join(' – ') || '—';
-            return `<tr>
-              <td style="font-size:10px;color:var(--text-muted)">${d.dstr}</td>
-              <td>${d.ent1||'—'}</td>
-              <td>${d.sai2||d.sai1||'—'}</td>
-              <td style="color:#00a0d2">${d.bat1||'—'}</td>
-              <td style="color:#00a0d2">${d.bat2||'—'}</td>
-              <td style="color:#00a0d2">${d.bat3||'—'}</td>
-              <td style="color:#00a0d2">${d.bat4||'—'}</td>
-              <td style="text-align:right;color:#f6ad55">${fmtMin(d.he)}</td>
-              <td style="text-align:right;color:#fc8181">${fmtMin(d.falta)}</td>
-              <td style="text-align:right;font-weight:700;color:${c}">${d.pct}%</td>
-            </tr>`;
-          }).join('')}
-        </tbody>
+        <tbody>${tableRows}</tbody>
       </table>
-    </div>
-  `;
+    </div>`;
+}
 
+function adhShowTooltip(e, row, freeze) {
+  const mat    = row.dataset.mat;
+  const filial = row.dataset.filial;
+  const nome   = row.dataset.nome;
+  const cargo  = row.dataset.cargo;
+
+  if (freeze) {
+    // Open as fixed panel
+    _adhPanelFrozen = true;
+    adhHideTooltip();
+    let panel = document.getElementById('adh-panel');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = 'adh-panel';
+      panel.className = 'adh-panel';
+      document.body.appendChild(panel);
+    }
+    panel.innerHTML = `
+      <button class="adh-panel-close" onclick="adhClosePanel()">
+        <i class="ti ti-x" aria-hidden="true"></i>
+      </button>
+      <div class="adh-panel-body">
+        ${adhBuildPanelContent(mat, filial, nome, cargo)}
+      </div>`;
+    panel.style.display = 'flex';
+    return;
+  }
+
+  // Hover tooltip
+  let tip = document.getElementById('adh-tooltip');
+  if (!tip) {
+    tip = document.createElement('div');
+    tip.id = 'adh-tooltip';
+    tip.className = 'adh-tooltip';
+    document.body.appendChild(tip);
+  }
+  tip.innerHTML = adhBuildPanelContent(mat, filial, nome, cargo);
   tip.style.display = 'block';
   adhPositionTooltip(e);
+}
+
+function adhClosePanel() {
+  _adhPanelFrozen = false;
+  const panel = document.getElementById('adh-panel');
+  if (panel) panel.style.display = 'none';
 }
 
 function adhPositionTooltip(e) {
   const tip = document.getElementById('adh-tooltip');
   if (!tip || tip.style.display==='none') return;
-  const vw = window.innerWidth, vh = window.innerHeight;
-  const tw = tip.offsetWidth || 680, th = tip.offsetHeight || 300;
-  let x = e.clientX + 16, y = e.clientY + 16;
-  if (x + tw > vw - 8) x = e.clientX - tw - 8;
-  if (y + th > vh - 8) y = e.clientY - th - 8;
-  tip.style.left = Math.max(4, x) + 'px';
-  tip.style.top  = Math.max(4, y) + 'px';
+  const vw=window.innerWidth, vh=window.innerHeight;
+  const tw=Math.min(tip.offsetWidth||720, vw-16);
+  const th=Math.min(tip.offsetHeight||400, vh-16);
+  let x=e.clientX+18, y=e.clientY+18;
+  if (x+tw>vw-8) x=e.clientX-tw-8;
+  if (y+th>vh-8) y=e.clientY-th-8;
+  tip.style.left=Math.max(4,x)+'px';
+  tip.style.top=Math.max(4,y)+'px';
 }
 
 function adhHideTooltip() {
   const tip = document.getElementById('adh-tooltip');
-  if (tip) tip.style.display = 'none';
+  if (tip) tip.style.display='none';
 }
