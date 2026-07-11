@@ -703,51 +703,71 @@ function adminNewUser() {
  */
 async function adminAutoLoadFiles() {
   try {
-    // List latest files in each folder
-    const folders = ['horarios', 'marcacao', 'malha'];
-    for (const folder of folders) {
-      const { data: files } = await db.storage
-        .from('arquivos-operacionais')
-        .list(folder, { sortBy: { column: 'created_at', order: 'desc' } });
-
-      if (!files || files.length === 0) continue;
-      const latest = files[0];
-      const path   = `${folder}/${latest.name}`;
-
-      const { data: blob, error } = await db.storage
-        .from('arquivos-operacionais')
-        .download(path);
-
-      if (error || !blob) continue;
-
-      if (folder === 'malha') {
-        const text = await blob.text();
-        if (typeof malhaParseCSV === 'function') malhaParseCSV(text);
-        console.log('[storage] Malha loaded from Storage');
-      } else {
-        const ab = await blob.arrayBuffer();
-        const wb = XLSX.read(ab, { type: 'array' });
-        if (folder === 'horarios' && typeof pontoParseHorarios === 'function') {
-          pontoParseHorarios(wb, null);
-          console.log('[storage] Horarios loaded from Storage');
-        }
-        if (folder === 'marcacao' && typeof pontoParseMarcacao === 'function') {
-          pontoParseMarcacao(wb, null);
-          console.log('[storage] Marcacao loaded from Storage');
-        }
-      }
-    }
-
-    // Load colaboradores from Supabase DB into memory map
+    // ── Load colaboradores from DB ──────────────────────
     const { data: colabs } = await db.from('colaboradores').select('*');
     if (colabs?.length) {
-      if (!adminFiles.colaboradores) adminFiles.colaboradores = { data: new Map() };
-      adminFiles.colaboradores.count  = colabs.length;
-      adminFiles.colaboradores.bases  = new Set(colabs.map(c=>c.station)).size;
-      adminFiles.colaboradores.data   = new Map(colabs.map(c=>[c.matricula, c]));
-      // Expose globally for escala-online.js lookup
+      adminFiles.colaboradores = {
+        count: colabs.length,
+        bases: new Set(colabs.map(c => c.station)).size,
+        date:  'banco',
+        data:  new Map(colabs.map(c => [c.matricula, c]))
+      };
       window.eoColabs = adminFiles.colaboradores.data;
-      console.log(`[storage] ${colabs.length} colaboradores loaded from DB`);
+      console.log(`[autoLoad] ${colabs.length} colaboradores do banco`);
+      adminSetFileStatus('colaboradores', `✓ ${colabs.length.toLocaleString()} pessoas · ${adminFiles.colaboradores.bases} bases`, 'ok');
+    }
+
+    // ── Load files from Storage ─────────────────────────
+    const FOLDER_MAP = {
+      horarios: { key: 'horarios', label: '249k registros', parse: (wb) => { if (typeof pontoParseHorarios==='function') pontoParseHorarios(wb,null); } },
+      marcacao: { key: 'marcacao', label: '144k registros', parse: (wb) => { if (typeof pontoParseMarcacao==='function') pontoParseMarcacao(wb,null); } },
+      malha:    { key: 'malha',    label: 'voos',            parseText: (t) => { if (typeof malhaParseCSV==='function') malhaParseCSV(t); } },
+    };
+
+    for (const [folder, cfg] of Object.entries(FOLDER_MAP)) {
+      try {
+        const { data: files } = await db.storage
+          .from('arquivos-operacionais')
+          .list(folder, { sortBy: { column: 'created_at', order: 'desc' } });
+
+        if (!files?.length) continue;
+
+        const latest = files[0];
+        const path   = `${folder}/${latest.name}`;
+        const uploadDate = new Date(latest.created_at).toLocaleDateString('pt-BR');
+
+        adminSetFileStatus(cfg.key, 'Carregando do servidor...', 'load');
+
+        const { data: blob, error } = await db.storage
+          .from('arquivos-operacionais').download(path);
+
+        if (error || !blob) {
+          adminSetFileStatus(cfg.key, 'Erro ao baixar', 'err');
+          continue;
+        }
+
+        if (cfg.parseText) {
+          const text = await blob.text();
+          // Count lines for stats
+          const lines = text.split('\n').length;
+          cfg.parseText(text);
+          adminFiles[cfg.key] = { count: lines, date: uploadDate, path };
+          adminSetFileStatus(cfg.key, `✓ ${lines.toLocaleString()} registros · ${uploadDate}`, 'ok');
+        } else {
+          const ab = await blob.arrayBuffer();
+          const wb = XLSX.read(ab, { type: 'array' });
+          const ws   = wb.Sheets[wb.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:false });
+          const count = rows.length;
+          cfg.parse(wb);
+          adminFiles[cfg.key] = { count, date: uploadDate, path };
+          adminSetFileStatus(cfg.key, `✓ ${count.toLocaleString()} registros · ${uploadDate}`, 'ok');
+        }
+
+        console.log(`[autoLoad] ${folder} loaded from Storage`);
+      } catch(e) {
+        console.warn(`[autoLoad] ${folder} error:`, e.message);
+      }
     }
   } catch(err) {
     console.warn('[adminAutoLoadFiles]', err.message);
