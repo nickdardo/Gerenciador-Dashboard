@@ -900,12 +900,27 @@ async function adhShowTooltip(e, row, freeze) {
       panel.className = 'adh-panel';
       document.body.appendChild(panel);
     }
+    // Add overlay for click-outside-to-close
+    let overlay = document.getElementById('adh-panel-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'adh-panel-overlay';
+      overlay.className = 'adh-panel-overlay';
+      overlay.onclick = () => adhClosePanel();
+      document.body.appendChild(overlay);
+    }
+    overlay.style.display = 'block';
+
     panel.style.display = 'flex';
     panel.innerHTML = `
       <div class="adh-panel-body">${html}</div>
-      <button class="adh-panel-close" onclick="adhClosePanel()" title="Fechar">
+      <button class="adh-panel-close" onclick="adhClosePanel()" title="Fechar (Esc)">
         <i class="ti ti-x" aria-hidden="true"></i>
       </button>`;
+
+    // Close on Escape key
+    window._adhEscHandler = (e) => { if (e.key === 'Escape') adhClosePanel(); };
+    window.addEventListener('keydown', window._adhEscHandler);
     return;
   }
 
@@ -926,6 +941,14 @@ function adhClosePanel() {
   _adhPanelFrozen = false;
   const panel = document.getElementById('adh-panel');
   if (panel) panel.style.display = 'none';
+  const overlay = document.getElementById('adh-panel-overlay');
+  if (overlay) overlay.style.display = 'none';
+  if (window._adhEscHandler) {
+    window.removeEventListener('keydown', window._adhEscHandler);
+    window._adhEscHandler = null;
+  }
+  // Hide tooltip too
+  adhHideTooltip();
 }
 
 function adhPositionTooltip(e) {
