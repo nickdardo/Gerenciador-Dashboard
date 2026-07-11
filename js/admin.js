@@ -44,7 +44,7 @@ async function pageAdmin(el) {
         <p class="page-sub">Controle de usuários, dados e aderência</p>
       </div>
     </div>
-    <div id="admin-body" style="padding:0 24px 32px">
+    <div id="admin-body" style="padding:0 20px 32px;width:100%">
       <div class="admin-loading">Carregando...</div>
     </div>`;
 
@@ -247,7 +247,7 @@ function adminFilesTab() {
   return `
     <div class="adm-section-header">
       <span>Hub de dados operacionais</span>
-      <span style="font-size:11px;color:var(--text-muted)">Arquivos ficam em memória durante a sessão</span>
+      <span style="font-size:11px;color:var(--text-muted)">Dados salvos no banco de dados</span>
     </div>
     <div class="adm-files-grid">
       ${files.map(f => {
@@ -371,10 +371,22 @@ async function adminLoadHorarios(input) {
       const EXCL = new Set(['HQ2','SEDE','GSE']);
       function fmtD(v) {
         if (!v) return null;
-        if (typeof v==='string'&&v.includes('/')) { const [d,m,y]=v.split('/'); return y+'-'+m.padStart(2,'0')+'-'+d.padStart(2,'0'); }
-        if (typeof v==='string'&&v.includes('-')) return v.slice(0,10);
+        // Excel serial date number
+        if (typeof v === 'number') {
+          const d = new Date(Math.round((v - 25569) * 86400 * 1000));
+          return d.toISOString().slice(0,10);
+        }
+        // Date object
         if (v instanceof Date) return v.toISOString().slice(0,10);
-        const s=String(v); if(s.match(/^\d{4}-\d{2}-\d{2}/)) return s.slice(0,10);
+        const s = String(v).trim();
+        // DD/MM/YYYY or DD/MM/YY
+        if (s.includes('/')) {
+          const [d,m,y] = s.split('/');
+          const year = y.length===2 ? (parseInt(y)<50?'20':'19')+y : y;
+          return year+'-'+m.padStart(2,'0')+'-'+d.padStart(2,'0');
+        }
+        // YYYY-MM-DD
+        if (s.match(/^\d{4}-\d{2}-\d{2}/)) return s.slice(0,10);
         return null;
       }
       function fmtT(v) {
@@ -437,9 +449,22 @@ async function adminLoadMarcacao(input) {
       const EXCL=new Set(['HQ2','SEDE','GSE']);
       function fmtD(v) {
         if (!v) return null;
-        if (typeof v==='string'&&v.includes('/')) { const [d,m,y]=v.split('/'); return y+'-'+m.padStart(2,'0')+'-'+d.padStart(2,'0'); }
-        if (typeof v==='string'&&v.includes('-')) return v.slice(0,10);
+        // Excel serial date number
+        if (typeof v === 'number') {
+          const d = new Date(Math.round((v - 25569) * 86400 * 1000));
+          return d.toISOString().slice(0,10);
+        }
+        // Date object
         if (v instanceof Date) return v.toISOString().slice(0,10);
+        const s = String(v).trim();
+        // DD/MM/YYYY or DD/MM/YY
+        if (s.includes('/')) {
+          const [d,m,y] = s.split('/');
+          const year = y.length===2 ? (parseInt(y)<50?'20':'19')+y : y;
+          return year+'-'+m.padStart(2,'0')+'-'+d.padStart(2,'0');
+        }
+        // YYYY-MM-DD
+        if (s.match(/^\d{4}-\d{2}-\d{2}/)) return s.slice(0,10);
         return null;
       }
       function fmtT(v) {
@@ -496,8 +521,17 @@ async function adminLoadMalha(input) {
       const records=[]; const basesSet=new Set();
       function fmtD(v) {
         if (!v) return null;
+        if (typeof v === 'number') {
+          const d = new Date(Math.round((v-25569)*86400*1000));
+          return d.toISOString().slice(0,10);
+        }
+        if (v instanceof Date) return v.toISOString().slice(0,10);
         const s=String(v).trim();
-        if (s.match(/^\d{2}\/\d{2}\/\d{4}/)) { const [d,m,y]=s.split('/'); return y+'-'+m+'-'+d; }
+        if (s.includes('/')) {
+          const [d,m,y]=s.split('/');
+          const year=y.length===2?(parseInt(y)<50?'20':'19')+y:y;
+          return year+'-'+m.padStart(2,'0')+'-'+d.padStart(2,'0');
+        }
         if (s.match(/^\d{4}-\d{2}-\d{2}/)) return s.slice(0,10);
         return null;
       }
@@ -804,19 +838,28 @@ function adminNewUser() {
 
 async function adminAutoLoadFiles() {
   try {
-    // ── Colaboradores from DB ──────────────────────────
-    const { data: colabs } = await db.from('colaboradores')
-      .select('matricula,nome,station,funcao,ch,situacao')
-      .eq('ativo', true);
-    if (colabs?.length) {
+    // ── Colaboradores from DB (all records via pagination) ──
+    const { count: totalColabs } = await db.from('colaboradores')
+      .select('*', { count:'exact', head:true }).eq('ativo', true);
+
+    if (totalColabs > 0) {
+      const allColabs = [];
+      const PAGE = 1000;
+      for (let from = 0; from < totalColabs; from += PAGE) {
+        const { data: page } = await db.from('colaboradores')
+          .select('matricula,nome,station,funcao,ch,situacao')
+          .eq('ativo', true)
+          .range(from, from + PAGE - 1);
+        if (page) allColabs.push(...page);
+      }
       adminFiles.colaboradores = {
-        count: colabs.length,
-        bases: new Set(colabs.map(r=>r.station)).size,
+        count: allColabs.length,
+        bases: new Set(allColabs.map(r=>r.station)).size,
         date: 'banco',
-        data: new Map(colabs.map(r=>[r.matricula, r]))
+        data: new Map(allColabs.map(r=>[r.matricula, r]))
       };
       window.eoColabs = adminFiles.colaboradores.data;
-      console.log(`[autoLoad] ${colabs.length} colaboradores`);
+      console.log(`[autoLoad] ${allColabs.length} colaboradores`);
     }
 
     // ── Check counts for Horarios, Marcacao, Malha ────

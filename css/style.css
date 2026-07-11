@@ -267,6 +267,8 @@ a { color: inherit; text-decoration: none; }
   display: none;
   height: 100vh;
   overflow: hidden;
+  width: 100vw;
+  position: relative;
 }
 
 /* ── Sidebar ──────────────────────────────────────── */
@@ -470,15 +472,18 @@ a { color: inherit; text-decoration: none; }
 
 /* ── Main area ──────────────────────────────────────── */
 #main-area {
-  margin-left: var(--sb-width);
+  position: absolute;
+  top: 0;
+  left: var(--sb-width);
+  right: 0;
   height: 100vh;
   display: flex;
   flex-direction: column;
-  transition: margin-left var(--t);
+  transition: left var(--t);
   overflow: hidden;
 }
 
-#app-shell.sb-closed #main-area { margin-left: var(--sb-width-closed); }
+#app-shell.sb-closed #main-area { left: var(--sb-width-closed); }
 
 /* ── Topbar ─────────────────────────────────────────── */
 #topbar {
@@ -539,6 +544,8 @@ a { color: inherit; text-decoration: none; }
   overflow-y: auto;
   overflow-x: hidden;
   background: var(--bg-app);
+  min-height: 0;
+  width: 100%;
 }
 
 .page-header {
@@ -548,6 +555,7 @@ a { color: inherit; text-decoration: none; }
   padding: 16px 20px 12px;
   flex-wrap: wrap;
   gap: 10px;
+  width: 100%;
 }
 
 .page-title {
@@ -973,10 +981,11 @@ a { color: inherit; text-decoration: none; }
   grid-template-columns: repeat(5, 1fr);
   gap: 1px;
   background: var(--border);
-  margin-bottom: 20px;
+  margin-bottom: 16px;
   border-radius: 10px;
   overflow: hidden;
   margin-top: 16px;
+  width: 100%;
 }
 
 .adm-kpi {
@@ -1949,3 +1958,6 @@ a { color: inherit; text-decoration: none; }
   margin-right: 4px;
   vertical-align: middle;
 }
+
+#adm-tab-content { width: 100%; }
+.admin-body-inner { padding: 0 0 32px; width: 100%; }
