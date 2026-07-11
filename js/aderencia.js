@@ -391,29 +391,85 @@ function adhRenderMultiBase(el) {
         </div>
       </div>
 
-      <!-- Base grid label -->
-      <div class="adh-full-grid-label">% Escala realizada por base</div>
+      <!-- Main content: cards + chart side by side -->
+      <div class="adh-main-layout">
 
-      <!-- Base cards grid — 4 columns, full width -->
-      <div class="adh-full-grid">
-        ${sorted.map(([base, d]) => {
-          const c = adhPctColor(d.pct);
-          return `
-            <div class="adh-full-card" onclick="adhOpenBase('${base}')">
-              <div class="adh-full-card-top">
-                <span class="adh-full-card-name">${base}</span>
-                <span class="adh-full-card-pct" style="color:${c}">${d.pct}%</span>
+        <!-- Left: base cards -->
+        <div class="adh-cards-section">
+          <div class="adh-full-grid-label">% Escala realizada por base</div>
+          <div class="adh-full-grid" id="adh-base-grid">
+            ${sorted.map(([base, d]) => {
+              const cl = adhPctColor(d.pct);
+              return `
+                <div class="adh-full-card" onclick="adhOpenBase('${base}')">
+                  <div class="adh-full-card-top">
+                    <span class="adh-full-card-name">${base}</span>
+                    <span class="adh-full-card-pct" style="color:${cl}">${d.pct}%</span>
+                  </div>
+                  <div class="adh-full-card-bar">
+                    <div style="width:${d.pct}%;background:${cl};height:100%;border-radius:2px"></div>
+                  </div>
+                  <div class="adh-full-card-stats">
+                    <span><span style="color:#f6ad55">+</span>${adhFmtH(d.he_h)}</span>
+                    <span><span style="color:#fc8181">−</span>${adhFmtH(d.falta_h)}</span>
+                    <span><span style="color:#8896aa">▲</span>${d.colabs}</span>
+                  </div>
+                </div>`;
+            }).join('')}
+          </div>
+        </div>
+
+        <!-- Right: analytics chart -->
+        <div class="adh-chart-section">
+          <div class="adh-chart-panel">
+            <div class="adh-chart-panel-title">% Escala realizada por base</div>
+            <div class="adh-chart-panel-sub">Ordenado por aderência</div>
+            <div class="adh-bar-chart" id="adh-bar-chart">
+              ${sorted.map(([base, d]) => {
+                const cl = adhPctColor(d.pct);
+                const w  = Math.round(d.pct);
+                return `
+                  <div class="adh-chart-row" onclick="adhOpenBase('${base}')">
+                    <span class="adh-chart-base">${base}</span>
+                    <div class="adh-chart-track">
+                      <div class="adh-chart-fill" style="width:${w}%;background:${cl}"></div>
+                    </div>
+                    <span class="adh-chart-val" style="color:${cl}">${d.pct}%</span>
+                  </div>`;
+              }).join('')}
+            </div>
+          </div>
+
+          <div class="adh-chart-panel adh-chart-panel-he">
+            <div class="adh-chart-panel-title">HE × Horas a Menos por base</div>
+            <div class="adh-chart-panel-sub">Top 10 por volume total</div>
+            <div class="adh-he-chart" id="adh-he-chart">
+              ${[...sorted].sort((a,b)=>(b[1].he_h+b[1].falta_h)-(a[1].he_h+a[1].falta_h)).slice(0,10).map(([base,d]) => {
+                const maxVal = Math.max(d.he_h, d.falta_h, 1);
+                const totalMax = Math.max(...[...adhBaseKPI.values()].map(x=>x.he_h+x.falta_h), 1);
+                const scale = (v) => Math.round(v / (totalMax * 0.7) * 100);
+                return `
+                  <div class="adh-he-row" onclick="adhOpenBase('${base}')">
+                    <span class="adh-chart-base">${base}</span>
+                    <div class="adh-he-bars">
+                      <div class="adh-he-bar-he"  style="width:${Math.min(scale(d.he_h),100)}%;background:#f6ad55"></div>
+                      <div class="adh-he-bar-gap" style="height:2px"></div>
+                      <div class="adh-he-bar-fat" style="width:${Math.min(scale(d.falta_h),100)}%;background:#fc8181"></div>
+                    </div>
+                    <div class="adh-he-vals">
+                      <span style="color:#f6ad55">+${adhFmtH(d.he_h)}</span>
+                      <span style="color:#fc8181">−${adhFmtH(d.falta_h)}</span>
+                    </div>
+                  </div>`;
+              }).join('')}
+              <div class="adh-he-legend">
+                <span><span class="adh-leg-dot" style="background:#f6ad55"></span>Horas extras</span>
+                <span><span class="adh-leg-dot" style="background:#fc8181"></span>Horas a menos</span>
               </div>
-              <div class="adh-full-card-bar">
-                <div style="width:${d.pct}%;background:${c};height:100%;border-radius:2px;transition:width .3s"></div>
-              </div>
-              <div class="adh-full-card-stats">
-                <span title="Horas Extras"><span style="color:#f6ad55">+</span>${adhFmtH(d.he_h)}</span>
-                <span title="Horas a Menos"><span style="color:#fc8181">−</span>${adhFmtH(d.falta_h)}</span>
-                <span title="Colaboradores"><span style="color:#8896aa">▲</span>${d.colabs}</span>
-              </div>
-            </div>`;
-        }).join('')}
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
   `;
