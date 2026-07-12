@@ -557,9 +557,18 @@ function adhRenderMultiBase(el) {
         <div class="adh-cards-section">
           <div class="adh-full-grid-label">% Escala realizada por base</div>
           <div class="adh-full-grid" id="adh-base-grid">
-            ${sorted.map(([base, d]) => {
-              const cl = adhPctColor(d.pct);
-              return `
+            ${(() => {
+              const rosterByBase = new Map();
+              if (window.eoColabs) {
+                for (const [, r] of window.eoColabs) {
+                  const st = (r.station || '').toUpperCase();
+                  rosterByBase.set(st, (rosterByBase.get(st) || 0) + 1);
+                }
+              }
+              return sorted.map(([base, d]) => {
+                const cl = adhPctColor(d.pct);
+                const rosterTotal = rosterByBase.get(base);
+                return `
                 <div class="adh-full-card" onclick="adhOpenBase('${base}')">
                   <div class="adh-full-card-top">
                     <span class="adh-full-card-name">${base}</span>
@@ -571,10 +580,14 @@ function adhRenderMultiBase(el) {
                   <div class="adh-full-card-stats">
                     <span><span style="color:#f6ad55">+</span>${adhFmtH(d.he_h)}</span>
                     <span><span style="color:#fc8181">−</span>${adhFmtH(d.falta_h)}</span>
-                    <span><span style="color:#8896aa">▲</span>${d.colabs}</span>
+                    <span title="Colaboradores com ponto registrado${rosterTotal?` / total no cadastro (${rosterTotal})`:''}">
+                      <i class="ti ti-users" style="font-size:9px;opacity:.5" aria-hidden="true"></i>
+                      ${d.colabs}${rosterTotal ? `<span style="opacity:.45">/${rosterTotal}</span>` : ''}
+                    </span>
                   </div>
                 </div>`;
-            }).join('')}
+              }).join('');
+            })()}
           </div>
         </div>
 
@@ -839,9 +852,16 @@ function adhRenderColabRows(list, base) {
       ? `<span class="adh-situ-badge ${ativo ? 'adh-situ-ativo' : 'adh-situ-afastado'}">${situacao}</span>`
       : '';
     const rowClass = 'adh-colab-row' + (c.semDados ? ' adh-colab-row-nodata' : '');
+    // Flag deviations from people who aren't actually "Trabalhando" this
+    // period (férias, afastamento, aposentadoria etc) — the falta/% here
+    // often just reflects their absence, not a real scheduling problem.
+    const flagAusencia = !c.semDados && !ativo && situacao && c.pct != null;
     const pctCell = (c.pct == null)
       ? `<td class="r" style="color:var(--text-muted);font-size:10px" title="${c.semDados ? 'Sem dados de ponto neste período' : 'Tem marcação mas nenhum horário programado neste período'}">${c.semDados ? '—' : 's/ prog.'}</td>`
-      : `<td class="r" style="font-weight:700;color:${adhPctColor(c.pct)}">${c.pct}%</td>`;
+      : `<td class="r">
+          <span style="font-weight:700;color:${adhPctColor(c.pct)}">${c.pct}%</span>
+          ${flagAusencia ? `<i class="ti ti-alert-triangle" style="font-size:10px;color:#f59e0b;margin-left:5px" title="Colaborador consta como &quot;${situacao}&quot; neste período — o desvio pode refletir a ausência, não um problema de escala"></i>` : ''}
+        </td>`;
     return `<tr class="${rowClass}"
       data-mat="${mat}"
       data-filial="${c.filial||base||''}"
