@@ -838,7 +838,9 @@ function adhBuildFullColabList(base) {
 }
 
 function adhIsAtivo(situacao) {
-  return /trabalh/i.test(situacao || '');
+  // Exact match only — "Trabalhando" means active. Anything else (including
+  // things that merely mention the word, like "Acidente Trabalho") is not.
+  return String(situacao || '').trim().toLowerCase() === 'trabalhando';
 }
 
 function adhRenderColabRows(list, base) {
