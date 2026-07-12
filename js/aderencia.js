@@ -392,11 +392,26 @@ async function pageAderencia(el) {
   // ── LAYER 2: banco aderencia_kpi (rápido ~30 rows) ──
   setMsg('Carregando KPI do banco...');
   try {
-    const [{ data: kpiRows, error: e1 }, { data: colabRows, error: e2 }] = await Promise.all([
+    // aderencia_colab pode ter milhares de linhas — o Supabase corta em 1000
+    // por página independente do .limit() pedido, então paginamos com .range().
+    async function fetchAllColabRows() {
+      const PAGE = 1000;
+      const { count, error: eCount } = await db.from('aderencia_colab').select('*', { count:'exact', head:true });
+      if (eCount || !count) return [];
+      const all = [];
+      for (let from = 0; from < count; from += PAGE) {
+        const { data, error } = await db.from('aderencia_colab').select('*').range(from, from + PAGE - 1);
+        if (error) throw new Error(error.message);
+        if (data) all.push(...data);
+      }
+      return all;
+    }
+
+    const [{ data: kpiRows, error: e1 }, colabRows] = await Promise.all([
       db.from('aderencia_kpi').select('*'),
-      db.from('aderencia_colab').select('*').limit(50000),
+      fetchAllColabRows(),
     ]);
-    if (e1||e2) console.warn('[aderencia] DB KPI query error', e1||e2);
+    if (e1) console.warn('[aderencia] DB KPI query error', e1);
 
     if (kpiRows?.length && colabRows?.length) {
       adhBaseKPI  = new Map(kpiRows.map(r => [r.filial, {
@@ -411,7 +426,7 @@ async function pageAderencia(el) {
         falta_h: parseFloat(r.falta_h), min_prog: r.min_prog,
         he: r.he, falta: r.falta
       }]));
-      console.log(`[aderencia] Loaded ${kpiRows.length} bases from DB KPI`);
+      console.log(`[aderencia] Loaded ${kpiRows.length} bases, ${colabRows.length} colaboradores from DB KPI`);
 
       // Save to localStorage cache
       try {
