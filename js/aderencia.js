@@ -982,7 +982,7 @@ function adhSetupTooltip() {
 
 let _adhPanelFrozen = false;
 
-function adhBuildPanelContent(mat, filial, nome, cargo) {
+function adhBuildPanelContent(mat, filial, nome, cargo, compact = false) {
   // Get daily records — union of dates present in horarios OR marcacao, so
   // days with punches but no planned schedule (and vice-versa) both show up.
   const prefix = filial + '|' + mat + '|';
@@ -1075,8 +1075,8 @@ function adhBuildPanelContent(mat, filial, nome, cargo) {
     ${hLabels}
   </svg>`;
 
-  // Table rows
-  const tableRows = days.map(d => {
+  // Table rows (skipped for the compact hover card — full detail only on click)
+  const tableRows = compact ? '' : days.map(d => {
     const c2 = pctClr(d.pct);
     return `<tr>
       <td>${d.dstr}</td>
@@ -1094,6 +1094,26 @@ function adhBuildPanelContent(mat, filial, nome, cargo) {
     </tr>`;
   }).join('');
 
+
+  if (compact) {
+    return `
+      <div class="adh-panel-topbar" style="padding:10px 12px 6px;border:none">
+        <div>
+          <div class="adh-panel-name" style="font-size:13px">${nome}</div>
+          <div class="adh-panel-sub" style="font-size:10px">${mat} · ${cargo}</div>
+        </div>
+      </div>
+      <div class="adh-tip-chart-wrap" style="padding:0 12px 6px">
+        <div class="adh-tip-chart-svg" style="height:46px;overflow:hidden">${chartBars}</div>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;padding:0 12px 8px;font-size:11px">
+        <span style="color:#8896aa">Prog <b style="color:#e8edf5">${fmtH(totP)}</b></span>
+        <span style="color:#f6ad55">HE <b>${fmtH(totHE)}</b></span>
+        <span style="color:#fc8181">Falta <b>${fmtH(totF)}</b></span>
+        <span style="color:${pctClr(totPct)};font-weight:700">${totPct==null?'—':totPct+'%'}</span>
+      </div>
+      <div style="font-size:9px;color:var(--text-muted);padding:0 12px 10px">Clique para ver detalhes diários</div>`;
+  }
 
   return `
     <div class="adh-panel-topbar">
@@ -1208,7 +1228,7 @@ async function adhShowTooltip(e, row, freeze) {
       if (!tip) {
         tip = document.createElement('div');
         tip.id = 'adh-tooltip';
-        tip.className = 'adh-tooltip';
+        tip.className = 'adh-tooltip adh-tooltip-compact';
         document.body.appendChild(tip);
       }
       tip.innerHTML = msgHTML;
@@ -1233,7 +1253,7 @@ async function adhShowTooltip(e, row, freeze) {
       if (!tip) {
         tip = document.createElement('div');
         tip.id = 'adh-tooltip';
-        tip.className = 'adh-tooltip';
+        tip.className = 'adh-tooltip adh-tooltip-compact';
         document.body.appendChild(tip);
       }
       tip.innerHTML = loadingHTML;
@@ -1257,7 +1277,7 @@ async function adhShowTooltip(e, row, freeze) {
     if (!freeze && document.getElementById('adh-tooltip')?.style.display === 'none') return;
   }
 
-  const html = adhBuildPanelContent(mat, filial, nome, cargo);
+  const html = adhBuildPanelContent(mat, filial, nome, cargo, !freeze);
 
   if (freeze) {
     _adhPanelFrozen = true;
@@ -1265,12 +1285,12 @@ async function adhShowTooltip(e, row, freeze) {
     return;
   }
 
-  // Hover tooltip
+  // Hover tooltip — compact + semi-transparent (full detail is one click away)
   let tip = document.getElementById('adh-tooltip');
   if (!tip) {
     tip = document.createElement('div');
     tip.id = 'adh-tooltip';
-    tip.className = 'adh-tooltip';
+    tip.className = 'adh-tooltip adh-tooltip-compact';
     document.body.appendChild(tip);
   }
   tip.innerHTML = html;
