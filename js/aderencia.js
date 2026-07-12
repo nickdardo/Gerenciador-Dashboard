@@ -686,6 +686,7 @@ function adhRenderDetalhe(el, base, showBack) {
   const colabListFull = adhBuildFullColabList(base);
   window._adhColabListFull  = colabListFull;
   window._adhSituacaoFilter = 'all';
+  window._adhSearchQuery = '';
   window._adhSortField = 'desvio';
   window._adhSortDir   = -1;
   const colabList = adhSortColabs(colabListFull.slice(), 'desvio', -1);
@@ -745,6 +746,11 @@ function adhRenderDetalhe(el, base, showBack) {
 
       <!-- Table -->
       <div class="adh-colab-section">
+        <div class="adh-search-wrap">
+          <i class="ti ti-search" aria-hidden="true"></i>
+          <input type="text" id="adh-search-input" placeholder="Buscar por nome ou matrícula..." oninput="adhSearchColab(this.value)">
+        </div>
+
         <div class="adh-colab-header-row">
           <span id="adh-colab-count" style="font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted)">
             ${colabList.length} colaboradores · passe o mouse para ver detalhes diários
@@ -911,11 +917,21 @@ function adhSortColabs(list, field, dir) {
   });
 }
 
-// Re-applies the current situação filter + sort, and redraws just the table.
+// Re-applies the current situação filter + search + sort, and redraws just the table.
 function adhRerenderColabTable() {
   let list = (window._adhColabListFull || []).slice();
   if (window._adhSituacaoFilter === 'ativo')    list = list.filter(c => adhIsAtivo(c.situacao));
   if (window._adhSituacaoFilter === 'afastado') list = list.filter(c => !adhIsAtivo(c.situacao));
+
+  const q = (window._adhSearchQuery || '').trim().toLowerCase();
+  if (q) {
+    list = list.filter(c => {
+      const mat  = String(c.mat || c.matricula || '').toLowerCase();
+      const nome = String(c.nome || '').toLowerCase();
+      return mat.includes(q) || nome.includes(q);
+    });
+  }
+
   list = adhSortColabs(list, window._adhSortField || 'desvio', window._adhSortDir || -1);
   window._adhColabList = list;
 
@@ -931,6 +947,12 @@ function adhRerenderColabTable() {
   }
 
   adhSetupTooltip();
+}
+
+// Search box (by nome or matrícula)
+function adhSearchColab(value) {
+  window._adhSearchQuery = value;
+  adhRerenderColabTable();
 }
 
 // Situação filter buttons (Todos / Ativos / Afastados)
