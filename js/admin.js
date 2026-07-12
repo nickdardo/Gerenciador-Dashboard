@@ -1205,6 +1205,14 @@ async function adminPrecomputeAderencia() {
     }
   }
 
+  // Cargos isentos de bater ponto (Gerentes e Coordenador de Operações) —
+  // tratamos como 100% de aderência em vez de 0%, já que estruturalmente
+  // essas funções não registram marcação.
+  function adminCargoIsento(funcao) {
+    const f = String(funcao || '').toUpperCase();
+    return f.includes('GERENTE') || f.includes('COORDENADOR DE OPERA');
+  }
+
   // Build per-colaborador rows + aggregate per base (BUGFIX: baseAcc/colabRows
   // were referenced below without ever being built, so this function threw a
   // ReferenceError on every run and no data was ever persisted to the DB).
@@ -1216,6 +1224,12 @@ async function adminPrecomputeAderencia() {
     // punches). People with marcação but no horarios (or vice-versa) still
     // get a row — we just can't compute a % without a planned baseline.
     if (!acc.mp && !acc.mt) continue;
+
+    const funcao = window.eoColabs?.get(acc.mat)?.funcao;
+    if (acc.mp > 0 && adminCargoIsento(funcao)) {
+      acc.desvio = 0; acc.he = 0; acc.falta = 0;
+    }
+
     const pct = acc.mp > 0
       ? Math.max(0, Math.round((100 - acc.desvio / acc.mp * 100) * 10) / 10)
       : null; // no horarios entry → nothing to compare marcação against

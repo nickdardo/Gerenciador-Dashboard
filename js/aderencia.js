@@ -251,11 +251,22 @@ function adhBuildKPI() {
     }
   }
 
+  // Cargos isentos de bater ponto (Gerentes e Coordenador de Operações) —
+  // tratamos como 100% de aderência em vez de 0%.
+  function adhCargoIsento(funcao) {
+    const f = String(funcao || '').toUpperCase();
+    return f.includes('GERENTE') || f.includes('COORDENADOR DE OPERA');
+  }
+
   // Step 3: Build colab KPI list + aggregate per base. People with marcação
   // but no horarios entry still get a row (pct=null, no baseline to compare
   // against), but don't count toward the base's % aderência totals.
   for (const [ck, c] of colabAcc) {
     if (!c.min_prog && !c.min_trab) continue; // truly nothing at all
+
+    if (c.min_prog > 0 && adhCargoIsento(window.eoColabs?.get(c.mat)?.funcao)) {
+      c.desvio = 0; c.he = 0; c.falta = 0;
+    }
 
     const pct = c.min_prog > 0
       ? Math.max(0, Math.round((100 - c.desvio / c.min_prog * 100) * 10) / 10)
@@ -471,6 +482,7 @@ async function pageAderencia(el) {
 
   setMsg('Calculando aderência...');
   await new Promise(r => setTimeout(r, 20));
+  await rosterPromise; // precisa do roster carregado p/ isenção de cargo (gerente/coordenador)
   adhBaseKPI = null; adhColabKPI = null;
   adhBuildKPI();
 
@@ -479,7 +491,6 @@ async function pageAderencia(el) {
     adminPrecomputeAderencia().catch(console.warn);
   }
 
-  await rosterPromise;
   if (role === 'admin') {
     adhRenderMultiBase(el);
   } else {
@@ -1007,6 +1018,10 @@ function adhSetupTooltip() {
 let _adhPanelFrozen = false;
 
 function adhBuildPanelContent(mat, filial, nome, cargo, compact = false) {
+  // Cargos isentos de bater ponto (Gerentes e Coordenador de Operações) não
+  // têm falta descontada — tratamos cada dia programado como cumprido.
+  const isento = /GERENTE|COORDENADOR DE OPERA/i.test(cargo || '');
+
   // Get daily records — union of dates present in horarios OR marcacao, so
   // days with punches but no planned schedule (and vice-versa) both show up.
   const prefix = filial + '|' + mat + '|';
@@ -1026,7 +1041,8 @@ function adhBuildPanelContent(mat, filial, nome, cargo, compact = false) {
     let minT=0;
     if (marc) [[marc.bat1,marc.bat2],[marc.bat3,marc.bat4],[marc.bat5,marc.bat6],[marc.bat7,marc.bat8]]
       .forEach(([a,b])=>{ minT+=diff(a,b); });
-    const he=Math.max(0,minT-minP), falta=Math.max(0,minP-minT);
+    const he = isento ? 0 : Math.max(0,minT-minP);
+    const falta = isento ? 0 : Math.max(0,minP-minT);
     const pct = minP>0 ? Math.max(0,Math.round((1-falta/minP)*100)) : null; // no schedule to compare against
     days.push({dstr,ent1:h?.ent1,sai1:h?.sai1,ent2:h?.ent2,sai2:h?.sai2,
       bat1:marc?.bat1,bat2:marc?.bat2,bat3:marc?.bat3,bat4:marc?.bat4,
