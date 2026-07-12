@@ -542,7 +542,7 @@ function adhRenderMultiBase(el) {
         <div class="adh-full-kpi" style="border-top:3px solid #8896aa">
           <div class="adh-full-kpi-v" style="color:#8896aa">${(window.eoColabs?.size || totColabs).toLocaleString()}</div>
           <div class="adh-full-kpi-l">Colaboradores (total)</div>
-          <div class="adh-full-kpi-sub">${totColabs.toLocaleString()} com ponto registrado</div>
+          <div class="adh-full-kpi-sub" style="color:#72c02c">${totColabs.toLocaleString()} com ponto registrado</div>
         </div>
         <div class="adh-full-kpi" style="border-top:3px solid #9f7aea">
           <div class="adh-full-kpi-v" style="color:#9f7aea">${adhFmtH(totProg)}</div>
@@ -739,7 +739,7 @@ function adhRenderDetalhe(el, base, showBack) {
         <div class="adh-det-kpi-card" style="border-top:3px solid #8896aa">
           <div class="adh-det-kpi-v" style="color:#8896aa">${colabs.toLocaleString()}</div>
           <div class="adh-det-kpi-l">Colaboradores (total)</div>
-          ${bk ? `<div class="adh-full-kpi-sub">${bk.colabs.toLocaleString()} com ponto registrado</div>` : ''}
+          ${bk ? `<div class="adh-full-kpi-sub" style="color:#72c02c">${bk.colabs.toLocaleString()} com ponto registrado</div>` : ''}
         </div>
       </div>
 
