@@ -312,8 +312,12 @@ async function adminLoadColabs(input) {
 
       rows.forEach((row, i) => {
         if (i===0 || !row || !row[0]) return;
-        const mat = String(row[0]).trim();
-        if (!mat || isNaN(parseInt(mat))) return;
+        const matRaw = String(row[0]).trim();
+        if (!matRaw || isNaN(parseInt(matRaw))) return;
+        // Zero-pad to 6 digits — must match the key format used when parsing
+        // Horarios/Marcacao (String(matricula).padStart(6,'0')), or the join
+        // between the roster and the aderência KPI silently fails.
+        const mat      = matRaw.padStart(6, '0');
         const nome    = String(row[1]||'').trim();
         const station = String(row[2]||'').trim().toUpperCase();
         const hmês    = String(row[4]||'').trim();
@@ -752,10 +756,15 @@ async function adminAderenciaTab(el) {
   el.innerHTML = `
     <div class="adm-section-header">
       <span>Aderência ao Ponto · ${results.length.toLocaleString()} registros</span>
-      <div style="display:flex;gap:8px">
-        <span class="adm-legend-item"><span class="adm-dot" style="background:#72c02c"></span>≥90% ótimo</span>
-        <span class="adm-legend-item"><span class="adm-dot" style="background:#f59e0b"></span>70–89% atenção</span>
-        <span class="adm-legend-item"><span class="adm-dot" style="background:#ef4444"></span>&lt;70% crítico</span>
+      <div style="display:flex;align-items:center;gap:14px">
+        <div style="display:flex;gap:8px">
+          <span class="adm-legend-item"><span class="adm-dot" style="background:#72c02c"></span>≥90% ótimo</span>
+          <span class="adm-legend-item"><span class="adm-dot" style="background:#f59e0b"></span>70–89% atenção</span>
+          <span class="adm-legend-item"><span class="adm-dot" style="background:#ef4444"></span>&lt;70% crítico</span>
+        </div>
+        <button id="adm-recalc-btn" class="adm-btn-primary" onclick="adminTriggerPrecompute()" style="font-size:11px;padding:6px 12px">
+          ↺ Recalcular
+        </button>
       </div>
     </div>
 
