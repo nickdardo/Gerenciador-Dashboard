@@ -1761,6 +1761,14 @@ a { color: inherit; text-decoration: none; }
   margin-top: 4px;
 }
 
+.adh-full-kpi-sub {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
 .adh-full-kpi-bar {
   height: 3px;
   background: var(--border);
