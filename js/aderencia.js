@@ -131,6 +131,29 @@ function pontoParseMarcacao(wb, base) {
 
 const ADH_EXCLUDE = new Set(['HQ2', 'SEDE', 'GSE']);
 
+// Ensure the full colaborador roster (window.eoColabs) is loaded, so the
+// Aderência table can show everyone at a base — not just who has ponto data.
+// Usually already populated by adminAutoLoadFiles() shortly after login; this
+// is a fallback for when the page is reached before that finishes.
+async function adhEnsureRoster() {
+  if (window.eoColabs?.size) return;
+  try {
+    const { count } = await db.from('colaboradores').select('*', { count:'exact', head:true });
+    if (!count) return;
+    const all = [];
+    const PAGE = 1000;
+    for (let from = 0; from < count; from += PAGE) {
+      const { data, error } = await db.from('colaboradores')
+        .select('matricula,nome,station,funcao,ch,situacao')
+        .range(from, from + PAGE - 1);
+      if (error) throw new Error(error.message);
+      if (data) all.push(...data);
+    }
+    window.eoColabs = new Map(all.map(r => [r.matricula, r]));
+    console.log(`[aderencia] roster: ${window.eoColabs.size} colaboradores`);
+  } catch (e) { console.warn('[aderencia] ensureRoster:', e.message); }
+}
+
 // ── In-memory computed data ───────────────────────────
 // Built once per session when files are loaded
 let adhBaseKPI  = null;  // Map<base, {minProg, desvio, he, falta, colabs}>
@@ -310,6 +333,10 @@ async function pageAderencia(el) {
     if (count) count.textContent = `${loaded.toLocaleString('pt-BR')} / ${total.toLocaleString('pt-BR')} registros · ${pct}%`;
   };
 
+  // Kick off the full colaborador roster load in parallel (doesn't block the
+  // KPI cache paths below) — awaited right before rendering the base detail.
+  const rosterPromise = adhEnsureRoster();
+
   // ── LAYER 1: localStorage cache (instantâneo) ──────
   const CACHE_KEY = 'adh_kpi_cache';
   const CACHE_TS  = 'adh_kpi_ts';
@@ -326,6 +353,7 @@ async function pageAderencia(el) {
         adhColabKPI = new Map(cached.colabKPI.map(r => [r.filial+'|'+r.matricula, {...r, mat: r.matricula}]));
         console.log('[aderencia] Loaded from localStorage cache');
         // Skip loading, go straight to render
+        await rosterPromise;
         if (role === 'admin') { adhRenderMultiBase(el); return; }
         const myBase = bases.includes('*') ? null : (bases[0] || null);
         adhRenderDetalhe(el, myBase, false);
@@ -369,6 +397,7 @@ async function pageAderencia(el) {
 
       if (role === 'admin') { adhRenderMultiBase(el); return; }
       const myBase = bases.includes('*') ? null : (bases[0] || null);
+      await rosterPromise;
       adhRenderDetalhe(el, myBase, false);
       return;
     }
@@ -408,6 +437,7 @@ async function pageAderencia(el) {
     adminPrecomputeAderencia().catch(console.warn);
   }
 
+  await rosterPromise;
   if (role === 'admin') {
     adhRenderMultiBase(el);
   } else {
@@ -586,16 +616,23 @@ function adhRenderDetalhe(el, base, showBack) {
   const pct    = bk ? bk.pct    : adhGlobalPct();
   const he_h   = bk ? bk.he_h   : [...adhBaseKPI.values()].reduce((a,d)=>a+d.he_h,0);
   const fat_h  = bk ? bk.falta_h: [...adhBaseKPI.values()].reduce((a,d)=>a+d.falta_h,0);
-  const colabs = bk ? bk.colabs  : [...adhBaseKPI.values()].reduce((a,d)=>a+d.colabs,0);
   const prog_h = bk ? bk.prog_h  : [...adhBaseKPI.values()].reduce((a,d)=>a+d.prog_h,0);
   const pctClr = adhPctColor(pct);
 
-  // Build collaborator list for this base
-  const colabList = [...adhColabKPI.entries()]
-    .filter(([k,]) => !base || k.startsWith(base+'|'))
-    .map(([,d]) => d)
-    .filter(d => d.min_prog > 0)
-    .sort((a,b) => b.he + b.falta - (a.he + a.falta)); // sort by total deviation
+  // Build collaborator list for this base — merges the FULL roster
+  // (colaboradores table, window.eoColabs) with the computed KPI, so people
+  // without ponto data for this period still show up (with dashes).
+  const colabListFull = adhBuildFullColabList(base);
+  window._adhColabListFull  = colabListFull;
+  window._adhSituacaoFilter = 'all';
+  window._adhSortField = 'desvio';
+  window._adhSortDir   = -1;
+  const colabList = adhSortColabs(colabListFull.slice(), 'desvio', -1);
+
+  // Total colaboradores: full roster count when we have one for this base,
+  // otherwise fall back to the KPI-derived count (e.g. "todas as bases" view).
+  const colabs = base && colabListFull.length ? colabListFull.length
+               : (bk ? bk.colabs : [...adhBaseKPI.values()].reduce((a,d)=>a+d.colabs,0));
 
   el.innerHTML = `
     <div class="adh-det-wrap">
@@ -644,14 +681,18 @@ function adhRenderDetalhe(el, base, showBack) {
       <!-- Table -->
       <div class="adh-colab-section">
         <div class="adh-colab-header-row">
-          <span style="font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted)">
+          <span id="adh-colab-count" style="font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted)">
             ${colabList.length} colaboradores · passe o mouse para ver detalhes diários
           </span>
           <div class="adh-sort-btns">
-            <button class="adh-sort-btn active" onclick="adhSort('desvio',this)">Maior desvio</button>
-            <button class="adh-sort-btn" onclick="adhSort('he',this)">Mais HE</button>
-            <button class="adh-sort-btn" onclick="adhSort('falta',this)">Mais falta</button>
-            <button class="adh-sort-btn" onclick="adhSort('pct',this)">Menor %</button>
+            <button class="adh-sort-btn adh-situ-filter-btn active" onclick="adhFilterSituacao('all',this)">Todos</button>
+            <button class="adh-sort-btn adh-situ-filter-btn" onclick="adhFilterSituacao('ativo',this)">Ativos</button>
+            <button class="adh-sort-btn adh-situ-filter-btn" onclick="adhFilterSituacao('afastado',this)">Afastados</button>
+            <span class="adh-filter-divider"></span>
+            <button class="adh-sort-btn active" data-quick onclick="adhSort('desvio',this)">Maior desvio</button>
+            <button class="adh-sort-btn" data-quick onclick="adhSort('he',this)">Mais HE</button>
+            <button class="adh-sort-btn" data-quick onclick="adhSort('falta',this)">Mais falta</button>
+            <button class="adh-sort-btn" data-quick onclick="adhSort('pct',this)">Menor %</button>
           </div>
         </div>
 
@@ -659,13 +700,14 @@ function adhRenderDetalhe(el, base, showBack) {
           <table class="adh-colab-table" id="adh-colab-table">
             <thead>
               <tr>
-                <th>Matrícula</th>
-                <th>Nome</th>
-                <th>Cargo</th>
-                <th class="r">Prog(h)</th>
-                <th class="r" style="color:#f6ad55">HE(h)</th>
-                <th class="r" style="color:#fc8181">Falta(h)</th>
-                <th class="r">% Ader.</th>
+                <th data-sort="mat"      onclick="adhSortByCol('mat',this)">Matrícula</th>
+                <th data-sort="nome"     onclick="adhSortByCol('nome',this)">Nome</th>
+                <th data-sort="cargo"    onclick="adhSortByCol('cargo',this)">Cargo</th>
+                <th data-sort="situacao" onclick="adhSortByCol('situacao',this)" style="text-align:center">Situação</th>
+                <th class="r" data-sort="prog"  onclick="adhSortByCol('prog',this)">Prog(h)</th>
+                <th class="r" data-sort="he"    onclick="adhSortByCol('he',this)" style="color:#f6ad55">HE(h)</th>
+                <th class="r" data-sort="falta" onclick="adhSortByCol('falta',this)" style="color:#fc8181">Falta(h)</th>
+                <th class="r" data-sort="pct"   onclick="adhSortByCol('pct',this)">% Ader.</th>
               </tr>
             </thead>
             <tbody id="adh-colab-tbody">
@@ -689,40 +731,167 @@ function adhRenderDetalhe(el, base, showBack) {
   adhSetupTooltip();
 }
 
+// Merge the full colaborador roster (window.eoColabs, from HRCL204.xlsx) with
+// the computed aderência KPI — so people without ponto data this period still
+// show up in the list (with dashes), instead of silently disappearing.
+function adhBuildFullColabList(base) {
+  const kpiByMat = new Map();
+  for (const [k, d] of adhColabKPI) {
+    if (base && !k.startsWith(base + '|')) continue;
+    kpiByMat.set(String(d.mat || d.matricula || '').padStart(6,'0'), d);
+  }
+
+  if (!base || !window.eoColabs?.size) {
+    // Admin "todas as bases" view, or roster not loaded yet: fall back to KPI-only
+    return [...kpiByMat.values()];
+  }
+
+  const out = [];
+  const seen = new Set();
+  for (const [mat, r] of window.eoColabs) {
+    if ((r.station || '').toUpperCase() !== base.toUpperCase()) continue;
+    const matPad = String(mat).padStart(6,'0');
+    seen.add(matPad);
+    const kpi = kpiByMat.get(matPad);
+    if (kpi) {
+      out.push({ ...kpi, funcao: r.funcao, situacao: r.situacao });
+    } else {
+      out.push({
+        filial: base, mat: matPad, matricula: matPad, nome: r.nome,
+        funcao: r.funcao, situacao: r.situacao,
+        min_prog: 0, min_trab: 0, desvio: 0, he: 0, falta: 0,
+        he_h: 0, falta_h: 0, pct: null, semDados: true
+      });
+    }
+  }
+  // Edge case: someone with KPI data but missing from the roster snapshot
+  for (const [matPad, kpi] of kpiByMat) {
+    if (!seen.has(matPad)) out.push(kpi);
+  }
+  return out;
+}
+
+function adhIsAtivo(situacao) {
+  return /trabalh/i.test(situacao || '');
+}
+
 function adhRenderColabRows(list, base) {
   return list.map(c => {
-    const cc = adhPctColor(c.pct);
-    const cargo = window.eoColabs?.get(c.mat)?.funcao || '';
-    const mat = c.mat || c.matricula || '';
-    return `<tr class="adh-colab-row"
+    const mat     = c.mat || c.matricula || '';
+    const cargo   = c.funcao   || window.eoColabs?.get(mat)?.funcao   || '';
+    const situacao= c.situacao || window.eoColabs?.get(mat)?.situacao || '';
+    const ativo   = adhIsAtivo(situacao);
+    const situBadge = situacao
+      ? `<span class="adh-situ-badge ${ativo ? 'adh-situ-ativo' : 'adh-situ-afastado'}">${situacao}</span>`
+      : '';
+    const rowClass = 'adh-colab-row' + (c.semDados ? ' adh-colab-row-nodata' : '');
+    const pctCell = (c.pct == null)
+      ? `<td class="r" style="color:var(--text-muted)">—</td>`
+      : `<td class="r" style="font-weight:700;color:${adhPctColor(c.pct)}">${c.pct}%</td>`;
+    return `<tr class="${rowClass}"
       data-mat="${mat}"
       data-filial="${c.filial||base||''}"
       data-nome="${c.nome}"
       data-cargo="${cargo}"
+      data-nodata="${c.semDados?1:0}"
       onmouseenter="adhShowTooltip(event,this,false).catch(console.warn)"
       onmouseleave="adhHideTooltip()">
       <td style="font-family:monospace;font-size:11px">${mat}</td>
       <td style="font-weight:500">${c.nome}</td>
       <td style="color:var(--text-muted);font-size:11px">${cargo}</td>
-      <td class="r">${(c.min_prog/60).toFixed(1)}h</td>
-      <td class="r" style="color:#f6ad55">${c.he_h.toFixed(1)}h</td>
-      <td class="r" style="color:#fc8181">${c.falta_h.toFixed(1)}h</td>
-      <td class="r" style="font-weight:700;color:${cc}">${c.pct}%</td>
+      <td style="text-align:center">${situBadge}</td>
+      <td class="r">${c.semDados ? '—' : (c.min_prog/60).toFixed(1)+'h'}</td>
+      <td class="r" style="color:#f6ad55">${c.semDados ? '—' : c.he_h.toFixed(1)+'h'}</td>
+      <td class="r" style="color:#fc8181">${c.semDados ? '—' : c.falta_h.toFixed(1)+'h'}</td>
+      ${pctCell}
     </tr>`;
   }).join('');
 }
 
-function adhSort(by, btn) {
-  document.querySelectorAll('.adh-sort-btn').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');
-  const list = [...(window._adhColabList||[])];
-  if (by==='he')     list.sort((a,b)=>b.he-a.he);
-  if (by==='falta')  list.sort((a,b)=>b.falta-a.falta);
-  if (by==='pct')    list.sort((a,b)=>a.pct-b.pct);
-  if (by==='desvio') list.sort((a,b)=>(b.he+b.falta)-(a.he+a.falta));
+// Generic column comparator used by both the quick-filter buttons and the
+// clickable table headers.
+function adhSortColabs(list, field, dir) {
+  const getVal = (c) => {
+    switch (field) {
+      case 'mat':      return c.mat || c.matricula || '';
+      case 'nome':     return (c.nome || '').toLowerCase();
+      case 'cargo':    return (c.funcao || window.eoColabs?.get(c.mat)?.funcao || '').toLowerCase();
+      case 'situacao': return (c.situacao || window.eoColabs?.get(c.mat)?.situacao || '').toLowerCase();
+      case 'prog':     return c.min_prog || 0;
+      case 'he':       return c.he || 0;
+      case 'falta':    return c.falta || 0;
+      case 'pct':      return c.pct == null ? -1 : c.pct;
+      case 'desvio':
+      default:         return (c.he || 0) + (c.falta || 0);
+    }
+  };
+  return list.sort((a, b) => {
+    const va = getVal(a), vb = getVal(b);
+    if (va < vb) return -1 * dir;
+    if (va > vb) return  1 * dir;
+    return 0;
+  });
+}
+
+// Re-applies the current situação filter + sort, and redraws just the table.
+function adhRerenderColabTable() {
+  let list = (window._adhColabListFull || []).slice();
+  if (window._adhSituacaoFilter === 'ativo')    list = list.filter(c => adhIsAtivo(c.situacao));
+  if (window._adhSituacaoFilter === 'afastado') list = list.filter(c => !adhIsAtivo(c.situacao));
+  list = adhSortColabs(list, window._adhSortField || 'desvio', window._adhSortDir || -1);
+  window._adhColabList = list;
+
   const tbody = document.getElementById('adh-colab-tbody');
   if (tbody) tbody.innerHTML = adhRenderColabRows(list, window._adhBase);
+
+  const total = (window._adhColabListFull || []).length;
+  const countEl = document.getElementById('adh-colab-count');
+  if (countEl) {
+    countEl.textContent = list.length === total
+      ? `${total} colaboradores · passe o mouse para ver detalhes diários`
+      : `${list.length} de ${total} colaboradores · passe o mouse para ver detalhes diários`;
+  }
+
   adhSetupTooltip();
+}
+
+// Situação filter buttons (Todos / Ativos / Afastados)
+function adhFilterSituacao(mode, btn) {
+  document.querySelectorAll('.adh-situ-filter-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  window._adhSituacaoFilter = mode;
+  adhRerenderColabTable();
+}
+
+// Quick-filter buttons (Maior desvio / Mais HE / Mais falta / Menor %)
+function adhSort(by, btn) {
+  document.querySelectorAll('.adh-sort-btn[data-quick]').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  const map = { desvio: ['desvio', -1], he: ['he', -1], falta: ['falta', -1], pct: ['pct', 1] };
+  const [field, dir] = map[by] || ['desvio', -1];
+  window._adhSortField = field;
+  window._adhSortDir   = dir;
+  document.querySelectorAll('.adh-colab-table th[data-sort]').forEach(th => th.classList.remove('adh-sort-asc','adh-sort-desc'));
+  adhRerenderColabTable();
+}
+
+// Clickable column headers — toggles asc/desc on repeat clicks
+function adhSortByCol(field, thEl) {
+  let dir;
+  if (window._adhSortField === field) {
+    dir = -(window._adhSortDir || 1);
+  } else {
+    const descDefault = new Set(['he','falta','desvio','prog']);
+    dir = descDefault.has(field) ? -1 : 1;
+  }
+  window._adhSortField = field;
+  window._adhSortDir   = dir;
+
+  document.querySelectorAll('.adh-sort-btn[data-quick]').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.adh-colab-table th[data-sort]').forEach(th => th.classList.remove('adh-sort-asc','adh-sort-desc'));
+  if (thEl) thEl.classList.add(dir === 1 ? 'adh-sort-asc' : 'adh-sort-desc');
+
+  adhRerenderColabTable();
 }
 
 // ── Tooltip + Panel ──────────────────────────────────
@@ -888,53 +1057,125 @@ function adhBuildPanelContent(mat, filial, nome, cargo) {
     </div>`;
 }
 
+function adhLoadingHTML(label) {
+  return `
+    <div class="adm-progress-wrap" style="padding:28px 20px">
+      <i class="ti ti-loader-2" style="font-size:24px;opacity:.5;animation:spin 1s linear infinite" aria-hidden="true"></i>
+      <div class="adm-progress-label" id="adh-tip-load-label">${label}</div>
+      <div class="adm-progress-track"><div class="adm-progress-fill" id="adh-tip-load-fill" style="width:0%"></div></div>
+      <div class="adm-progress-count" id="adh-tip-load-count"></div>
+    </div>`;
+}
+
+function adhRenderFrozenPanel(html) {
+  let panel = document.getElementById('adh-panel');
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = 'adh-panel';
+    panel.className = 'adh-panel';
+    document.body.appendChild(panel);
+  }
+  // Add overlay for click-outside-to-close
+  let overlay = document.getElementById('adh-panel-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'adh-panel-overlay';
+    overlay.className = 'adh-panel-overlay';
+    overlay.onclick = () => adhClosePanel();
+    document.body.appendChild(overlay);
+  }
+  overlay.style.display = 'block';
+
+  panel.style.display = 'flex';
+  panel.innerHTML = `
+    <div class="adh-panel-body">${html}</div>
+    <button class="adh-panel-close" onclick="adhClosePanel()" title="Fechar (Esc)">
+      <i class="ti ti-x" aria-hidden="true"></i>
+    </button>`;
+
+  // Close on Escape key
+  window._adhEscHandler = (e) => { if (e.key === 'Escape') adhClosePanel(); };
+  window.addEventListener('keydown', window._adhEscHandler);
+}
+
 async function adhShowTooltip(e, row, freeze) {
   const mat    = row.dataset.mat;
   const filial = row.dataset.filial;
   const nome   = row.dataset.nome;
   const cargo  = row.dataset.cargo;
 
-  // Load daily data from DB if not in memory
-  if (!pontoHorarios?.size) {
-    await adminLoadFileOnDemand('horarios');
+  // Collaborator has no ponto data at all for this period — don't bother
+  // downloading horarios/marcacao just to show an empty table.
+  if (row.dataset.nodata === '1') {
+    const msgHTML = `
+      <div style="padding:28px 20px;text-align:center">
+        <div class="adh-panel-name" style="margin-bottom:4px">${nome}</div>
+        <div class="adh-panel-sub" style="margin-bottom:14px">${mat} · ${cargo}</div>
+        <p style="color:var(--text-muted);font-size:12px">Sem dados de ponto (Horários/Marcação) para este colaborador neste período.</p>
+      </div>`;
+    if (freeze) {
+      _adhPanelFrozen = true;
+      adhHideTooltip();
+      adhRenderFrozenPanel(msgHTML);
+    } else {
+      let tip = document.getElementById('adh-tooltip');
+      if (!tip) {
+        tip = document.createElement('div');
+        tip.id = 'adh-tooltip';
+        tip.className = 'adh-tooltip';
+        document.body.appendChild(tip);
+      }
+      tip.innerHTML = msgHTML;
+      tip.style.display = 'block';
+      adhPositionTooltip(e);
+    }
+    return;
   }
-  if (!pontoMarcacao?.size) {
-    await adminLoadFileOnDemand('marcacao');
+
+  // ── Load daily data from DB if not in memory (first hover/click only) ──
+  // Horarios (~240k) + Marcacao (~140k) rows take a few seconds even parallelized,
+  // so show a real loading state immediately instead of doing nothing visible.
+  if (!pontoHorarios?.size || !pontoMarcacao?.size) {
+    const loadingHTML = adhLoadingHTML('Baixando dados de ponto (só na 1ª vez)...');
+
+    if (freeze) {
+      _adhPanelFrozen = true;
+      adhHideTooltip();
+      adhRenderFrozenPanel(loadingHTML);
+    } else {
+      let tip = document.getElementById('adh-tooltip');
+      if (!tip) {
+        tip = document.createElement('div');
+        tip.id = 'adh-tooltip';
+        tip.className = 'adh-tooltip';
+        document.body.appendChild(tip);
+      }
+      tip.innerHTML = loadingHTML;
+      tip.style.display = 'block';
+      adhPositionTooltip(e);
+    }
+
+    const prog = (loaded, total) => {
+      const fill  = document.getElementById('adh-tip-load-fill');
+      const count = document.getElementById('adh-tip-load-count');
+      const pct = total ? Math.min(100, Math.round(loaded/total*100)) : 0;
+      if (fill)  fill.style.width = pct + '%';
+      if (count) count.textContent = `${loaded.toLocaleString('pt-BR')} / ${total.toLocaleString('pt-BR')} · ${pct}%`;
+    };
+
+    if (!pontoHorarios?.size) await adminLoadFileOnDemand('horarios', prog);
+    if (!pontoMarcacao?.size) await adminLoadFileOnDemand('marcacao', prog);
+
+    // If the user already moved on (closed panel / mouse left) don't force it back open
+    if (freeze && !_adhPanelFrozen) return;
+    if (!freeze && document.getElementById('adh-tooltip')?.style.display === 'none') return;
   }
 
   const html = adhBuildPanelContent(mat, filial, nome, cargo);
 
   if (freeze) {
     _adhPanelFrozen = true;
-    adhHideTooltip();
-    let panel = document.getElementById('adh-panel');
-    if (!panel) {
-      panel = document.createElement('div');
-      panel.id = 'adh-panel';
-      panel.className = 'adh-panel';
-      document.body.appendChild(panel);
-    }
-    // Add overlay for click-outside-to-close
-    let overlay = document.getElementById('adh-panel-overlay');
-    if (!overlay) {
-      overlay = document.createElement('div');
-      overlay.id = 'adh-panel-overlay';
-      overlay.className = 'adh-panel-overlay';
-      overlay.onclick = () => adhClosePanel();
-      document.body.appendChild(overlay);
-    }
-    overlay.style.display = 'block';
-
-    panel.style.display = 'flex';
-    panel.innerHTML = `
-      <div class="adh-panel-body">${html}</div>
-      <button class="adh-panel-close" onclick="adhClosePanel()" title="Fechar (Esc)">
-        <i class="ti ti-x" aria-hidden="true"></i>
-      </button>`;
-
-    // Close on Escape key
-    window._adhEscHandler = (e) => { if (e.key === 'Escape') adhClosePanel(); };
-    window.addEventListener('keydown', window._adhEscHandler);
+    adhRenderFrozenPanel(html);
     return;
   }
 

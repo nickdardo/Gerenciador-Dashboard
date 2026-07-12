@@ -653,9 +653,12 @@ async function adminTriggerPrecompute() {
       return;
     }
     if (btn) btn.textContent = 'Calculando...';
-    await adminPrecomputeAderencia();
+    const result = await adminPrecomputeAderencia();
     // Invalidate localStorage cache
     try { localStorage.removeItem('adh_kpi_cache'); localStorage.removeItem('adh_kpi_ts'); } catch(_){}
+    if (result?.errors?.length) {
+      alert(`Recalculado com ${result.errors.length} erro(s) ao salvar no banco. Alguns colaboradores podem não aparecer. Veja o console para detalhes.`);
+    }
     if (btn) { btn.textContent = '✓ Recalculado!'; setTimeout(()=>{ btn.disabled=false; btn.textContent='↺ Recalcular Aderência'; },3000); }
   } catch(e) {
     alert('Erro: '+e.message);
@@ -1242,19 +1245,26 @@ async function adminPrecomputeAderencia() {
 
   console.log(`[precompute] ${baseRows.length} bases, ${colabRows.length} colaboradores`);
 
-  // Save base KPI to DB
+  const errors = [];
+
+  // Save base KPI to DB — keep going even if one batch fails, so a single
+  // bad batch doesn't silently wipe out every base/colaborador after it.
   const BATCH = 500;
   for (let i=0; i<baseRows.length; i+=BATCH) {
     const { error } = await db.from('aderencia_kpi')
       .upsert(baseRows.slice(i,i+BATCH), { onConflict:'filial' });
-    if (error) { console.error('[precompute] base KPI error:', error.message); return; }
+    if (error) { console.error('[precompute] base KPI error:', error.message); errors.push('base:'+error.message); }
   }
 
   // Save colab KPI to DB
   for (let i=0; i<colabRows.length; i+=BATCH) {
     const { error } = await db.from('aderencia_colab')
       .upsert(colabRows.slice(i,i+BATCH), { onConflict:'filial,matricula' });
-    if (error) { console.error('[precompute] colab KPI error:', error.message); return; }
+    if (error) { console.error('[precompute] colab KPI error:', error.message); errors.push('colab:'+error.message); }
+  }
+
+  if (errors.length) {
+    console.warn(`[precompute] ${errors.length} lote(s) falharam ao salvar:`, errors);
   }
 
   // Invalidate localStorage cache
@@ -1264,4 +1274,5 @@ async function adminPrecomputeAderencia() {
   } catch(_){}
 
   console.log('[precompute] ✓ KPI salvo no banco e cache invalidado');
+  return { baseCount: baseRows.length, colabCount: colabRows.length, errors };
 }
