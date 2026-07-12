@@ -251,11 +251,11 @@ function adhBuildKPI() {
     }
   }
 
-  // Cargos isentos de bater ponto (Gerentes e Coordenador de Operações) —
-  // tratamos como 100% de aderência em vez de 0%.
+  // Cargos isentos de bater ponto (Gerentes e Coordenadores) — tratamos como
+  // 100% de aderência SE não houver nenhuma marcação registrada no período.
   function adhCargoIsento(funcao) {
     const f = String(funcao || '').toUpperCase();
-    return f.includes('GERENTE') || f.includes('COORDENADOR DE OPERA');
+    return f.includes('GERENTE') || f.includes('COORDENADOR');
   }
 
   // Step 3: Build colab KPI list + aggregate per base. People with marcação
@@ -264,7 +264,7 @@ function adhBuildKPI() {
   for (const [ck, c] of colabAcc) {
     if (!c.min_prog && !c.min_trab) continue; // truly nothing at all
 
-    if (c.min_prog > 0 && adhCargoIsento(window.eoColabs?.get(c.mat)?.funcao)) {
+    if (c.min_prog > 0 && c.min_trab === 0 && adhCargoIsento(window.eoColabs?.get(c.mat)?.funcao)) {
       c.desvio = 0; c.he = 0; c.falta = 0;
     }
 
@@ -1018,9 +1018,10 @@ function adhSetupTooltip() {
 let _adhPanelFrozen = false;
 
 function adhBuildPanelContent(mat, filial, nome, cargo, compact = false) {
-  // Cargos isentos de bater ponto (Gerentes e Coordenador de Operações) não
-  // têm falta descontada — tratamos cada dia programado como cumprido.
-  const isento = /GERENTE|COORDENADOR DE OPERA/i.test(cargo || '');
+  // Cargos isentos de bater ponto (Gerentes e Coordenadores) não têm falta
+  // descontada em dias sem nenhuma marcação — se houver ponto batido naquele
+  // dia, o cálculo real é respeitado.
+  const isento = /GERENTE|COORDENADOR/i.test(cargo || '');
 
   // Get daily records — union of dates present in horarios OR marcacao, so
   // days with punches but no planned schedule (and vice-versa) both show up.
@@ -1041,8 +1042,9 @@ function adhBuildPanelContent(mat, filial, nome, cargo, compact = false) {
     let minT=0;
     if (marc) [[marc.bat1,marc.bat2],[marc.bat3,marc.bat4],[marc.bat5,marc.bat6],[marc.bat7,marc.bat8]]
       .forEach(([a,b])=>{ minT+=diff(a,b); });
-    const he = isento ? 0 : Math.max(0,minT-minP);
-    const falta = isento ? 0 : Math.max(0,minP-minT);
+    const diaIsento = isento && minT === 0; // sem nenhuma marcação neste dia
+    const he = diaIsento ? 0 : Math.max(0,minT-minP);
+    const falta = diaIsento ? 0 : Math.max(0,minP-minT);
     const pct = minP>0 ? Math.max(0,Math.round((1-falta/minP)*100)) : null; // no schedule to compare against
     days.push({dstr,ent1:h?.ent1,sai1:h?.sai1,ent2:h?.ent2,sai2:h?.sai2,
       bat1:marc?.bat1,bat2:marc?.bat2,bat3:marc?.bat3,bat4:marc?.bat4,

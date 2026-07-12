@@ -1205,12 +1205,12 @@ async function adminPrecomputeAderencia() {
     }
   }
 
-  // Cargos isentos de bater ponto (Gerentes e Coordenador de Operações) —
-  // tratamos como 100% de aderência em vez de 0%, já que estruturalmente
-  // essas funções não registram marcação.
+  // Cargos isentos de bater ponto (Gerentes e Coordenadores) — tratamos como
+  // 100% de aderência SE não houver nenhuma marcação registrada no período.
+  // Se a pessoa tiver algum ponto batido, respeitamos o cálculo real.
   function adminCargoIsento(funcao) {
     const f = String(funcao || '').toUpperCase();
-    return f.includes('GERENTE') || f.includes('COORDENADOR DE OPERA');
+    return f.includes('GERENTE') || f.includes('COORDENADOR');
   }
 
   // Build per-colaborador rows + aggregate per base (BUGFIX: baseAcc/colabRows
@@ -1226,7 +1226,7 @@ async function adminPrecomputeAderencia() {
     if (!acc.mp && !acc.mt) continue;
 
     const funcao = window.eoColabs?.get(acc.mat)?.funcao;
-    if (acc.mp > 0 && adminCargoIsento(funcao)) {
+    if (acc.mp > 0 && acc.mt === 0 && adminCargoIsento(funcao)) {
       acc.desvio = 0; acc.he = 0; acc.falta = 0;
     }
 
