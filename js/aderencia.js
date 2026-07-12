@@ -201,8 +201,17 @@ function adhBuildKPI() {
     horMin.set(key, { min_prog, filial: h.filial, mat: h.mat, nome: h.nome });
   }
 
-  // Step 2: For each marcacao row, compute desvio/HE/Falta
+  // Step 2: Init colabAcc from horarios (all planned colabs), then cross with marcacao
   const colabAcc = new Map(); // "filial|mat" → accum
+
+  for (const [key, h] of horMin) {
+    const filial = (h.filial||'').toUpperCase();
+    const ck = `${filial}|${h.mat}`;
+    if (!colabAcc.has(ck)) {
+      colabAcc.set(ck, { filial, mat: h.mat, nome: h.nome||'', min_prog:0, min_trab:0, desvio:0, he:0, falta:0 });
+    }
+    colabAcc.get(ck).min_prog += h.min_prog;
+  }
 
   for (const [key, m] of pontoMarcacao) {
     const filial = (m.filial||'').toUpperCase();
@@ -222,9 +231,6 @@ function adhBuildKPI() {
 
     const hor = horMin.get(key);
     const min_prog = hor ? hor.min_prog : 0;
-    const desvio   = Math.abs(min_trab - min_prog);
-    const he       = Math.max(0, min_trab - min_prog);
-    const falta    = Math.max(0, min_prog - min_trab);
 
     const ck = `${filial}|${m.mat}`;
     if (!colabAcc.has(ck)) {
@@ -232,31 +238,42 @@ function adhBuildKPI() {
       colabAcc.set(ck, { filial, mat: m.mat, nome, min_prog: 0, min_trab: 0, desvio: 0, he: 0, falta: 0 });
     }
     const acc = colabAcc.get(ck);
-    acc.min_prog += min_prog;
     acc.min_trab += min_trab;
-    acc.desvio   += desvio;
-    acc.he       += he;
-    acc.falta    += falta;
+    acc.desvio   += Math.abs(min_trab - min_prog);
+    acc.he       += Math.max(0, min_trab - min_prog);
+    acc.falta    += Math.max(0, min_prog - min_trab);
   }
 
-  // Step 3: Aggregate per base
-  for (const [ck, c] of colabAcc) {
-    const base = c.filial;
-    if (!baseKPI.has(base)) {
-      baseKPI.set(base, { min_prog: 0, desvio: 0, he: 0, falta: 0, colabs: 0 });
+  // For colabs only in horarios (no marcacao at all), falta = all planned time
+  for (const [ck, acc] of colabAcc) {
+    if (acc.min_trab === 0 && acc.min_prog > 0) {
+      acc.falta = acc.min_prog; acc.desvio = acc.min_prog; acc.he = 0;
     }
-    const bk = baseKPI.get(base);
-    bk.min_prog += c.min_prog;
-    bk.desvio   += c.desvio;
-    bk.he       += c.he;
-    bk.falta    += c.falta;
-    bk.colabs++;
+  }
 
-    // % aderencia per colab
+  // Step 3: Build colab KPI list + aggregate per base. People with marcação
+  // but no horarios entry still get a row (pct=null, no baseline to compare
+  // against), but don't count toward the base's % aderência totals.
+  for (const [ck, c] of colabAcc) {
+    if (!c.min_prog && !c.min_trab) continue; // truly nothing at all
+
     const pct = c.min_prog > 0
-      ? Math.max(0, Math.round(100 - (c.desvio / c.min_prog * 100) * 10) / 10)
-      : 0;
+      ? Math.max(0, Math.round((100 - c.desvio / c.min_prog * 100) * 10) / 10)
+      : null;
     colabKPI.set(ck, { ...c, pct, he_h: Math.round(c.he/60*10)/10, falta_h: Math.round(c.falta/60*10)/10 });
+
+    if (c.min_prog > 0) {
+      const base = c.filial;
+      if (!baseKPI.has(base)) {
+        baseKPI.set(base, { min_prog: 0, desvio: 0, he: 0, falta: 0, colabs: 0 });
+      }
+      const bk = baseKPI.get(base);
+      bk.min_prog += c.min_prog;
+      bk.desvio   += c.desvio;
+      bk.he       += c.he;
+      bk.falta    += c.falta;
+      bk.colabs++;
+    }
   }
 
   // Step 4: Compute % per base
@@ -380,7 +397,7 @@ async function pageAderencia(el) {
       }]));
       adhColabKPI = new Map(colabRows.map(r => [r.filial+'|'+r.matricula, {
         filial: r.filial, mat: r.matricula, matricula: r.matricula, nome: r.nome,
-        pct: parseFloat(r.pct), he_h: parseFloat(r.he_h),
+        pct: r.pct == null ? null : parseFloat(r.pct), he_h: parseFloat(r.he_h),
         falta_h: parseFloat(r.falta_h), min_prog: r.min_prog,
         he: r.he, falta: r.falta
       }]));
@@ -786,7 +803,7 @@ function adhRenderColabRows(list, base) {
       : '';
     const rowClass = 'adh-colab-row' + (c.semDados ? ' adh-colab-row-nodata' : '');
     const pctCell = (c.pct == null)
-      ? `<td class="r" style="color:var(--text-muted)">—</td>`
+      ? `<td class="r" style="color:var(--text-muted);font-size:10px" title="${c.semDados ? 'Sem dados de ponto neste período' : 'Tem marcação mas nenhum horário programado neste período'}">${c.semDados ? '—' : 's/ prog.'}</td>`
       : `<td class="r" style="font-weight:700;color:${adhPctColor(c.pct)}">${c.pct}%</td>`;
     return `<tr class="${rowClass}"
       data-mat="${mat}"
@@ -907,21 +924,28 @@ function adhSetupTooltip() {
 let _adhPanelFrozen = false;
 
 function adhBuildPanelContent(mat, filial, nome, cargo) {
-  // Get daily records
+  // Get daily records — union of dates present in horarios OR marcacao, so
+  // days with punches but no planned schedule (and vice-versa) both show up.
+  const prefix = filial + '|' + mat + '|';
+  const tm = t => { if(!t)return 0; const p=String(t).split(':'); return parseInt(p[0])*60+parseInt(p[1]||0); };
+  const diff = (a,b) => { if(!a||!b)return 0; const d=tm(b)-tm(a); return d<0?d+1440:d; };
+
+  const dateSet = new Set();
+  for (const key of pontoHorarios.keys()) { if (key.startsWith(prefix)) dateSet.add(key.split('|')[2]); }
+  for (const key of pontoMarcacao.keys()) { if (key.startsWith(prefix)) dateSet.add(key.split('|')[2]); }
+
   const days = [];
-  for (const [key, h] of pontoHorarios) {
-    if (!key.startsWith(filial+'|'+mat+'|')) continue;
-    const dstr = key.split('|')[2];
+  for (const dstr of dateSet) {
+    const key  = prefix + dstr;
+    const h    = pontoHorarios.get(key);
     const marc = pontoMarcacao.get(key);
-    const tm = t => { if(!t)return 0; const p=String(t).split(':'); return parseInt(p[0])*60+parseInt(p[1]||0); };
-    const diff = (a,b) => { if(!a||!b)return 0; const d=tm(b)-tm(a); return d<0?d+1440:d; };
-    const minP = diff(h.ent1,h.sai1) + (h.ent2&&h.sai2?diff(h.ent2,h.sai2):0);
+    const minP = h ? diff(h.ent1,h.sai1) + (h.ent2&&h.sai2?diff(h.ent2,h.sai2):0) : 0;
     let minT=0;
     if (marc) [[marc.bat1,marc.bat2],[marc.bat3,marc.bat4],[marc.bat5,marc.bat6],[marc.bat7,marc.bat8]]
       .forEach(([a,b])=>{ minT+=diff(a,b); });
     const he=Math.max(0,minT-minP), falta=Math.max(0,minP-minT);
-    const pct=minP>0?Math.max(0,Math.round((1-falta/minP)*100)):(minT>0?100:0);
-    days.push({dstr,ent1:h.ent1,sai1:h.sai1,ent2:h.ent2,sai2:h.sai2,
+    const pct = minP>0 ? Math.max(0,Math.round((1-falta/minP)*100)) : null; // no schedule to compare against
+    days.push({dstr,ent1:h?.ent1,sai1:h?.sai1,ent2:h?.ent2,sai2:h?.sai2,
       bat1:marc?.bat1,bat2:marc?.bat2,bat3:marc?.bat3,bat4:marc?.bat4,
       minP,minT,he,falta,pct});
   }
@@ -930,8 +954,8 @@ function adhBuildPanelContent(mat, filial, nome, cargo) {
   const totP = days.reduce((s,d)=>s+d.minP,0);
   const totHE = days.reduce((s,d)=>s+d.he,0);
   const totF  = days.reduce((s,d)=>s+d.falta,0);
-  const totPct = totP>0?Math.max(0,Math.round((1-totF/totP)*100)):0;
-  const pctClr = p => p>=88?'#48bb78':p>=70?'#f6ad55':'#fc8181';
+  const totPct = totP>0 ? Math.max(0,Math.round((1-totF/totP)*100)) : null;
+  const pctClr = p => p==null ? 'var(--text-muted)' : (p>=88?'#48bb78':p>=70?'#f6ad55':'#fc8181');
   const fmtH = m => m>0?(m/60).toFixed(1)+'h':'—';
 
   // Hour chart — smooth area lines for planned vs real
@@ -1007,7 +1031,7 @@ function adhBuildPanelContent(mat, filial, nome, cargo) {
       <td style="color:#48bb78">${d.bat4||'—'}</td>
       <td style="text-align:right;color:#f6ad55">${fmtH(d.he)}</td>
       <td style="text-align:right;color:#fc8181">${fmtH(d.falta)}</td>
-      <td style="text-align:right;font-weight:700;color:${c2}">${d.pct}%</td>
+      <td style="text-align:right;font-weight:700;color:${c2}">${d.pct==null?'—':d.pct+'%'}</td>
     </tr>`;
   }).join('');
 
@@ -1021,7 +1045,7 @@ function adhBuildPanelContent(mat, filial, nome, cargo) {
         <span style="color:#8896aa">Prog: <strong style="color:#e8edf5">${fmtH(totP)}</strong></span>
         <span style="color:#f6ad55">HE: <strong>${fmtH(totHE)}</strong></span>
         <span style="color:#fc8181">Falta: <strong>${fmtH(totF)}</strong></span>
-        <span style="color:${pctClr(totPct)}">Aderência: <strong>${totPct}%</strong></span>
+        <span style="color:${pctClr(totPct)}">Aderência: <strong>${totPct==null?'—':totPct+'%'}</strong></span>
       </div>
     </div>
 

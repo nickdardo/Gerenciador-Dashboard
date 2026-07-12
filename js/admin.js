@@ -1203,8 +1203,13 @@ async function adminPrecomputeAderencia() {
   const baseAcc   = new Map(); // filial → { mp, desvio, he, falta, colabs }
 
   for (const [ck, acc] of colabAcc) {
-    if (!acc.mp) continue; // skip colabs with zero planned minutes
-    const pct = Math.max(0, Math.round((100 - acc.desvio / acc.mp * 100) * 10) / 10);
+    // Only skip if there's truly nothing at all (no planned schedule AND no
+    // punches). People with marcação but no horarios (or vice-versa) still
+    // get a row — we just can't compute a % without a planned baseline.
+    if (!acc.mp && !acc.mt) continue;
+    const pct = acc.mp > 0
+      ? Math.max(0, Math.round((100 - acc.desvio / acc.mp * 100) * 10) / 10)
+      : null; // no horarios entry → nothing to compare marcação against
     colabRows.push({
       filial:   acc.filial,
       matricula:acc.mat,
@@ -1220,15 +1225,19 @@ async function adminPrecomputeAderencia() {
       updated_at: new Date(),
     });
 
-    if (!baseAcc.has(acc.filial)) {
-      baseAcc.set(acc.filial, { mp: 0, desvio: 0, he: 0, falta: 0, colabs: 0 });
+    // Base-level totals only count colaboradores who actually had a planned
+    // schedule, so unscheduled worked hours don't skew the base's % aderência.
+    if (acc.mp > 0) {
+      if (!baseAcc.has(acc.filial)) {
+        baseAcc.set(acc.filial, { mp: 0, desvio: 0, he: 0, falta: 0, colabs: 0 });
+      }
+      const b = baseAcc.get(acc.filial);
+      b.mp     += acc.mp;
+      b.desvio += acc.desvio;
+      b.he     += acc.he;
+      b.falta  += acc.falta;
+      b.colabs += 1;
     }
-    const b = baseAcc.get(acc.filial);
-    b.mp     += acc.mp;
-    b.desvio += acc.desvio;
-    b.he     += acc.he;
-    b.falta  += acc.falta;
-    b.colabs += 1;
   }
 
   // Build base rows
