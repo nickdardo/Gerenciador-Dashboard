@@ -2030,6 +2030,23 @@ a { color: inherit; text-decoration: none; }
   flex-shrink: 0;
 }
 
+.adh-refresh-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .15s;
+}
+.adh-refresh-btn:hover { border-color: #00a0d2; color: #00a0d2; }
+.adh-refresh-btn i { font-size: 14px; }
+
 .adh-det-kpis-row {
   display: grid;
   grid-template-columns: repeat(5, 1fr);

@@ -307,10 +307,20 @@ function adhFmtH(h) {
   return h.toFixed(1)+'h';
 }
 
+// Force a fresh reload of aderência data, bypassing the localStorage cache —
+// gives users a one-click way to refresh instead of clearing cache manually.
+async function adhForceRefresh() {
+  try { localStorage.removeItem('adh_kpi_cache'); localStorage.removeItem('adh_kpi_ts'); } catch(_){}
+  adhBaseKPI = null; adhColabKPI = null;
+  const el = window._adhCurrentEl;
+  if (el) await pageAderencia(el);
+}
+
 // ══════════════════════════════════════════════════════
 // ENTRY POINT
 // ══════════════════════════════════════════════════════
 async function pageAderencia(el) {
+  window._adhCurrentEl = el;
   const role  = currentUserProfile?.role;
   const bases = currentUserProfile?.bases || [];
   const ROLES_OK = ['admin','gerente','coordenador','supervisor','lideranca'];
@@ -491,7 +501,12 @@ function adhRenderMultiBase(el) {
           <h1 class="adh-full-title">Aderência ao Ponto</h1>
           <p class="adh-full-sub">Todas as bases · clique em uma base para detalhar</p>
         </div>
-        <span class="adh-global-badge" style="color:${gColor}">${global}% escala realizada</span>
+        <div style="display:flex;align-items:center;gap:12px">
+          <button class="adh-refresh-btn" onclick="adhForceRefresh()" title="Atualizar dados agora (ignora cache local)">
+            <i class="ti ti-refresh" aria-hidden="true"></i> Atualizar
+          </button>
+          <span class="adh-global-badge" style="color:${gColor}">${global}% escala realizada</span>
+        </div>
       </div>
 
       <!-- KPI strip -->
@@ -668,6 +683,9 @@ function adhRenderDetalhe(el, base, showBack) {
             <p class="adh-full-sub">Horas trabalhadas ÷ horas programadas</p>
           </div>
         </div>
+        <button class="adh-refresh-btn" onclick="adhForceRefresh()" title="Atualizar dados agora (ignora cache local)">
+          <i class="ti ti-refresh" aria-hidden="true"></i> Atualizar
+        </button>
       </div>
 
       <!-- KPIs -->
