@@ -1078,12 +1078,12 @@ function adhBuildPanelContent(mat, filial, nome, cargo) {
   // Table rows
   const tableRows = days.map(d => {
     const c2 = pctClr(d.pct);
-    const planEnt = [d.ent1,d.ent2].filter(Boolean).join(' / ') || '—';
-    const planSai = [d.sai1,d.sai2].filter(Boolean).join(' / ') || '—';
     return `<tr>
       <td>${d.dstr}</td>
-      <td style="color:#00a0d2">${planEnt}</td>
-      <td style="color:#00a0d2">${planSai}</td>
+      <td style="color:#00a0d2">${d.ent1||'—'}</td>
+      <td style="color:#00a0d2">${d.sai1||'—'}</td>
+      <td style="color:#00a0d2">${d.ent2||'—'}</td>
+      <td style="color:#00a0d2">${d.sai2||'—'}</td>
       <td style="color:#48bb78">${d.bat1||'—'}</td>
       <td style="color:#48bb78">${d.bat2||'—'}</td>
       <td style="color:#48bb78">${d.bat3||'—'}</td>
@@ -1093,6 +1093,7 @@ function adhBuildPanelContent(mat, filial, nome, cargo) {
       <td style="text-align:right;font-weight:700;color:${c2}">${d.pct==null?'—':d.pct+'%'}</td>
     </tr>`;
   }).join('');
+
 
   return `
     <div class="adh-panel-topbar">
@@ -1124,8 +1125,10 @@ function adhBuildPanelContent(mat, filial, nome, cargo) {
         <thead>
           <tr>
             <th>Data</th>
-            <th><span class="adh-leg-dot" style="background:#00a0d2"></span>Plan. entrada</th>
-            <th><span class="adh-leg-dot" style="background:#00a0d2"></span>Plan. saída</th>
+            <th><span class="adh-leg-dot" style="background:#00a0d2"></span>Ent.1</th>
+            <th><span class="adh-leg-dot" style="background:#00a0d2"></span>Saí.1</th>
+            <th><span class="adh-leg-dot" style="background:#00a0d2"></span>Ent.2</th>
+            <th><span class="adh-leg-dot" style="background:#00a0d2"></span>Saí.2</th>
             <th><span class="adh-leg-dot" style="background:#48bb78"></span>Bat.1</th>
             <th><span class="adh-leg-dot" style="background:#48bb78"></span>Bat.2</th>
             <th><span class="adh-leg-dot" style="background:#48bb78"></span>Bat.3</th>
