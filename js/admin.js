@@ -1148,6 +1148,12 @@ async function adminPrecomputeAderencia() {
     return;
   }
 
+  // Precisamos do cadastro completo (cargo de cada matrícula) para aplicar a
+  // isenção de ponto de Gerentes/Coordenadores — garante que já carregou.
+  if (!window.eoColabs?.size && typeof adhEnsureRoster === 'function') {
+    await adhEnsureRoster();
+  }
+
   console.log('[precompute] Calculando KPI de aderência...');
   const ADH_EXCL = new Set(['HQ2','SEDE','GSE']);
 
