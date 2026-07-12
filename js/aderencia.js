@@ -721,6 +721,7 @@ function adhRenderDetalhe(el, base, showBack) {
                 <th data-sort="nome"     onclick="adhSortByCol('nome',this)">Nome</th>
                 <th data-sort="cargo"    onclick="adhSortByCol('cargo',this)">Cargo</th>
                 <th data-sort="situacao" onclick="adhSortByCol('situacao',this)" style="text-align:center">Situação</th>
+                <th class="r" data-sort="ch"    onclick="adhSortByCol('ch',this)">Carga(h)</th>
                 <th class="r" data-sort="prog"  onclick="adhSortByCol('prog',this)">Prog(h)</th>
                 <th class="r" data-sort="he"    onclick="adhSortByCol('he',this)" style="color:#f6ad55">HE(h)</th>
                 <th class="r" data-sort="falta" onclick="adhSortByCol('falta',this)" style="color:#fc8181">Falta(h)</th>
@@ -771,11 +772,11 @@ function adhBuildFullColabList(base) {
     seen.add(matPad);
     const kpi = kpiByMat.get(matPad);
     if (kpi) {
-      out.push({ ...kpi, funcao: r.funcao, situacao: r.situacao });
+      out.push({ ...kpi, funcao: r.funcao, situacao: r.situacao, ch: r.ch });
     } else {
       out.push({
         filial: base, mat: matPad, matricula: matPad, nome: r.nome,
-        funcao: r.funcao, situacao: r.situacao,
+        funcao: r.funcao, situacao: r.situacao, ch: r.ch,
         min_prog: 0, min_trab: 0, desvio: 0, he: 0, falta: 0,
         he_h: 0, falta_h: 0, pct: null, semDados: true
       });
@@ -797,6 +798,7 @@ function adhRenderColabRows(list, base) {
     const mat     = c.mat || c.matricula || '';
     const cargo   = c.funcao   || window.eoColabs?.get(mat)?.funcao   || '';
     const situacao= c.situacao || window.eoColabs?.get(mat)?.situacao || '';
+    const ch      = c.ch ?? window.eoColabs?.get(mat)?.ch ?? 0;
     const ativo   = adhIsAtivo(situacao);
     const situBadge = situacao
       ? `<span class="adh-situ-badge ${ativo ? 'adh-situ-ativo' : 'adh-situ-afastado'}">${situacao}</span>`
@@ -817,6 +819,7 @@ function adhRenderColabRows(list, base) {
       <td style="font-weight:500">${c.nome}</td>
       <td style="color:var(--text-muted);font-size:11px">${cargo}</td>
       <td style="text-align:center">${situBadge}</td>
+      <td class="r" style="color:var(--text-muted)">${ch ? ch+'h' : '—'}</td>
       <td class="r">${c.semDados ? '—' : (c.min_prog/60).toFixed(1)+'h'}</td>
       <td class="r" style="color:#f6ad55">${c.semDados ? '—' : c.he_h.toFixed(1)+'h'}</td>
       <td class="r" style="color:#fc8181">${c.semDados ? '—' : c.falta_h.toFixed(1)+'h'}</td>
@@ -834,6 +837,7 @@ function adhSortColabs(list, field, dir) {
       case 'nome':     return (c.nome || '').toLowerCase();
       case 'cargo':    return (c.funcao || window.eoColabs?.get(c.mat)?.funcao || '').toLowerCase();
       case 'situacao': return (c.situacao || window.eoColabs?.get(c.mat)?.situacao || '').toLowerCase();
+      case 'ch':       return c.ch ?? window.eoColabs?.get(c.mat)?.ch ?? 0;
       case 'prog':     return c.min_prog || 0;
       case 'he':       return c.he || 0;
       case 'falta':    return c.falta || 0;
