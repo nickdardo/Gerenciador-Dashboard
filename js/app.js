@@ -9,9 +9,9 @@ const ALL_ROLES = ['admin','gerente','coordenador','supervisor','lideranca','ope
 
 const NAV_ITEMS = [
   { id: 'escala',     icon: 'calendar',   label: 'Escala Online',  roles: ALL_ROLES },
+  { id: 'aderencia',  icon: 'clock',      label: 'Aderência',      roles: ['admin','gerente','coordenador','supervisor','lideranca'] },
   { id: 'gerador',    icon: 'settings',   label: 'Gerador',        roles: ['admin','gerente','coordenador','supervisor','lideranca'] },
   { id: 'comparador', icon: 'bar-chart',  label: 'Comparador',     roles: ['admin','gerente','coordenador','supervisor'] },
-  { id: 'aderencia',  icon: 'clock',      label: 'Aderência',      roles: ['admin','gerente','coordenador','supervisor','lideranca'] },
   { id: 'admin',      icon: 'shield',     label: 'Admin',          roles: ['admin'] },
 ];
 
