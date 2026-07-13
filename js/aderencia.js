@@ -728,7 +728,9 @@ function adhRenderDetalhe(el, base, showBack) {
       <div class="adh-det-header">
         <div style="display:flex;align-items:center;gap:12px">
           ${showBack ? `<button class="adh-back-btn" onclick="pageAderencia(document.getElementById('page-content'))">
-            <i class="ti ti-arrow-left" aria-hidden="true"></i>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
+            </svg>
           </button>` : ''}
           <div>
             <h1 class="adh-full-title">
