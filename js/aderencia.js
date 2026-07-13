@@ -262,8 +262,13 @@ function adhBuildKPI(mes) {
     const h = horByKey.get(nk);
     const min_prog = h ? (adhMinDiff(adhTimeToMin(h.ent1), adhTimeToMin(h.sai1))
       + (h.ent2 && h.sai2 ? adhMinDiff(adhTimeToMin(h.ent2), adhTimeToMin(h.sai2)) : 0)) : 0;
+    // Marcação frequentemente perde a batida de 00:00 (bug de exportação).
+    // Se planejado começa às 00:00 e existe qualquer outra batida naquele
+    // dia (prova de presença), recupera a entrada usando o planejado.
+    const temOutraBatida = m.bat2||m.bat3||m.bat4||m.bat5||m.bat6||m.bat7||m.bat8;
+    const bat1 = (!m.bat1 && h?.ent1 === '00:00' && temOutraBatida) ? '00:00' : m.bat1;
     let min_trab = 0;
-    [[m.bat1,m.bat2],[m.bat3,m.bat4],[m.bat5,m.bat6],[m.bat7,m.bat8]]
+    [[bat1,m.bat2],[m.bat3,m.bat4],[m.bat5,m.bat6],[m.bat7,m.bat8]]
       .forEach(([e,s]) => { if (e && s) min_trab += adhMinDiff(adhTimeToMin(e), adhTimeToMin(s)); });
 
     const ck = `${filial}|${mat}`;
@@ -1245,6 +1250,19 @@ function adhBuildPanelContent(mat, filial, nome, cargo, compact = false) {
   const [anoM, mesM] = mesAtual.split('-').map(Number);
   const diasNoMes = adhDaysInMonth(mesAtual);
 
+  // Marcação frequentemente perde a primeira batida do dia quando ela cai
+  // exatamente às 00:00 (bug de exportação do arquivo, não falta real). Se a
+  // pessoa estava programada pra entrar às 00:00 e existe QUALQUER outra
+  // batida naquele dia (prova de que ela esteve presente), recupera a
+  // entrada usando o horário planejado em vez de contar como falta.
+  function adhResolveBat1(ent1, marc) {
+    if (!marc) return { valor: null, recuperado: false };
+    if (marc.bat1) return { valor: marc.bat1, recuperado: false };
+    const temOutraBatida = marc.bat2||marc.bat3||marc.bat4||marc.bat5||marc.bat6||marc.bat7||marc.bat8;
+    if (ent1 === '00:00' && temOutraBatida) return { valor: '00:00', recuperado: true };
+    return { valor: marc.bat1, recuperado: false };
+  }
+
   const days = [];
   for (let dia = 1; dia <= diasNoMes; dia++) {
     const dstr = `${String(dia).padStart(2,'0')}/${String(mesM).padStart(2,'0')}/${anoM}`;
@@ -1252,8 +1270,9 @@ function adhBuildPanelContent(mat, filial, nome, cargo, compact = false) {
     const h    = pontoHorarios.get(key);
     const marc = pontoMarcacao.get(key);
     const minP = h ? diff(h.ent1,h.sai1) + (h.ent2&&h.sai2?diff(h.ent2,h.sai2):0) : 0;
+    const { valor: bat1, recuperado: bat1Recuperado } = adhResolveBat1(h?.ent1, marc);
     let minT=0;
-    if (marc) [[marc.bat1,marc.bat2],[marc.bat3,marc.bat4],[marc.bat5,marc.bat6],[marc.bat7,marc.bat8]]
+    if (marc) [[bat1,marc.bat2],[marc.bat3,marc.bat4],[marc.bat5,marc.bat6],[marc.bat7,marc.bat8]]
       .forEach(([a,b])=>{ minT+=diff(a,b); });
     const diaIsento = isento && minT === 0; // sem nenhuma marcação neste dia
     const he = diaIsento ? 0 : Math.max(0,minT-minP);
@@ -1264,7 +1283,7 @@ function adhBuildPanelContent(mat, filial, nome, cargo, compact = false) {
     const diaSemana = new Date(anoM, mesM-1, dia).getDay();
     const finalDeSemana = diaSemana === 0 || diaSemana === 6;
     days.push({dstr,ent1:h?.ent1,sai1:h?.sai1,ent2:h?.ent2,sai2:h?.sai2,
-      bat1:marc?.bat1,bat2:marc?.bat2,bat3:marc?.bat3,bat4:marc?.bat4,
+      bat1,bat1Recuperado,bat2:marc?.bat2,bat3:marc?.bat3,bat4:marc?.bat4,
       minP,minT,he,falta,pct,folga,trabalhouNaFolga,finalDeSemana});
   }
 
@@ -1337,6 +1356,9 @@ function adhBuildPanelContent(mat, filial, nome, cargo, compact = false) {
   const tableRows = compact ? '' : days.map(d => {
     const c2 = pctClr(d.pct);
     const rowClass = d.finalDeSemana ? ' class="adh-tip-weekend"' : '';
+    const bat1Cell = d.bat1Recuperado
+      ? `<span title="Marcação não registrou a batida de 00:00 (falha comum do arquivo) — recuperado a partir do horário planejado">${d.bat1}*</span>`
+      : (d.bat1||'—');
 
     if (d.folga) {
       const aviso = d.trabalhouNaFolga
@@ -1345,7 +1367,7 @@ function adhBuildPanelContent(mat, filial, nome, cargo, compact = false) {
       return `<tr${rowClass}>
         <td>${d.dstr}</td>
         <td colspan="4" style="color:var(--text-muted);font-style:italic">Folga programada${aviso}</td>
-        <td style="color:#48bb78">${d.bat1||'—'}</td>
+        <td style="color:#48bb78">${bat1Cell}</td>
         <td style="color:#48bb78">${d.bat2||'—'}</td>
         <td style="color:#48bb78">${d.bat3||'—'}</td>
         <td style="color:#48bb78">${d.bat4||'—'}</td>
@@ -1361,7 +1383,7 @@ function adhBuildPanelContent(mat, filial, nome, cargo, compact = false) {
       <td style="color:#00a0d2">${d.sai1||'—'}</td>
       <td style="color:#00a0d2">${d.ent2||'—'}</td>
       <td style="color:#00a0d2">${d.sai2||'—'}</td>
-      <td style="color:#48bb78">${d.bat1||'—'}</td>
+      <td style="color:#48bb78">${bat1Cell}</td>
       <td style="color:#48bb78">${d.bat2||'—'}</td>
       <td style="color:#48bb78">${d.bat3||'—'}</td>
       <td style="color:#48bb78">${d.bat4||'—'}</td>

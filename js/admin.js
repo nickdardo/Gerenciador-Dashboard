@@ -1571,8 +1571,13 @@ async function adminPrecomputeAderencia(mes) {
     const nk = `${filial}|${mat}|${data}`;
     const h = horByKey.get(nk);
     const minP = h ? (dfc(h.ent1,h.sai1) + (h.ent2 && h.sai2 ? dfc(h.ent2,h.sai2) : 0)) : 0;
+    // Marcação frequentemente perde a batida de 00:00 (bug de exportação).
+    // Se planejado começa às 00:00 e existe qualquer outra batida naquele
+    // dia (prova de presença), recupera a entrada usando o planejado.
+    const temOutraBatida = m.bat2||m.bat3||m.bat4||m.bat5||m.bat6||m.bat7||m.bat8;
+    const bat1 = (!m.bat1 && h?.ent1 === '00:00' && temOutraBatida) ? '00:00' : m.bat1;
     let minT = 0;
-    [[m.bat1,m.bat2],[m.bat3,m.bat4],[m.bat5,m.bat6],[m.bat7,m.bat8]]
+    [[bat1,m.bat2],[m.bat3,m.bat4],[m.bat5,m.bat6],[m.bat7,m.bat8]]
       .forEach(([a,b]) => { minT += dfc(a,b); });
 
     const ck = `${filial}|${mat}`;
