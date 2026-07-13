@@ -228,6 +228,14 @@ function adhBuildKPI() {
     acc.falta    += Math.max(0, min_prog - min_trab);
   }
 
+  // Desligados (HRCL106) saem do cálculo por completo.
+  if (window.eoDesligados?.size) {
+    for (const ck of [...colabAcc.keys()]) {
+      const mat = ck.split('|')[1];
+      if (window.eoDesligados.has(mat)) colabAcc.delete(ck);
+    }
+  }
+
   // Cargos isentos de bater ponto (Gerentes e Coordenadores) — não entram no
   // cálculo acima (sem marcação), mas mostramos explicitamente como 100% na
   // lista em vez de sumir, sem afetar a média da base.
@@ -248,6 +256,7 @@ function adhBuildKPI() {
   for (const [ck, t] of totalMpByPerson) {
     if (colabAcc.has(ck) || t.mp <= 0) continue;
     const [filial, mat] = ck.split('|');
+    if (window.eoDesligados?.has(mat)) continue; // desligado — fora do cálculo
     if (!adhCargoIsento(window.eoColabs?.get(mat)?.funcao)) continue;
     colabAcc.set(ck, { filial, mat, nome: t.nome, min_prog: t.mp, min_trab: 0, desvio: 0, he: 0, falta: 0, isento: true });
   }

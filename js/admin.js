@@ -1436,6 +1436,24 @@ async function adminPrecomputeAderencia() {
     await adhEnsureRoster();
   }
 
+  // Garante que os desligados também estejam carregados (usados para
+  // excluir essas matrículas do cálculo de aderência).
+  if (!window.eoDesligados) {
+    try {
+      const { data } = await db.from('colaboradores_desligados').select('matricula,data_demissao,causa_texto');
+      if (data?.length) {
+        const byMat = new Map();
+        for (const r of data) {
+          const prev = byMat.get(r.matricula);
+          if (!prev || (r.data_demissao||'') > (prev.data_demissao||'')) byMat.set(r.matricula, r);
+        }
+        window.eoDesligados = byMat;
+      } else {
+        window.eoDesligados = new Map();
+      }
+    } catch(e) { console.warn('[precompute] desligados:', e.message); }
+  }
+
   console.log('[precompute] Calculando KPI de aderência...');
   const ADH_EXCL = new Set(['HQ2','SEDE','GSE']);
 
@@ -1480,6 +1498,16 @@ async function adminPrecomputeAderencia() {
     acc.falta  += Math.max(0, minP - minT);
   }
 
+  // Desligados (HRCL106) saem do cálculo por completo — continuam aparecendo
+  // na lista com o badge "Desligado", mas não entram na aderência nem contam
+  // como isenção de gestão (evita "falsas faltas" de gente que já saiu).
+  if (window.eoDesligados?.size) {
+    for (const ck of [...colabAcc.keys()]) {
+      const mat = ck.split('|')[1];
+      if (window.eoDesligados.has(mat)) colabAcc.delete(ck);
+    }
+  }
+
   // Cargos isentos de bater ponto (Gerentes e Coordenadores) — não entram no
   // cálculo acima porque não têm marcação, mas mostramos explicitamente como
   // 100% na lista (em vez de simplesmente sumir), já que estruturalmente não
@@ -1500,6 +1528,7 @@ async function adminPrecomputeAderencia() {
   for (const [ck, t] of totalMpByPerson) {
     if (colabAcc.has(ck) || t.mp <= 0) continue; // já tem marcação real, ou nada programado
     const [filial, mat] = ck.split('|');
+    if (window.eoDesligados?.has(mat)) continue; // desligado — fora do cálculo
     if (!adminCargoIsento(window.eoColabs?.get(mat)?.funcao)) continue; // só isenta gestão
     colabAcc.set(ck, { filial, mat, nome: t.nome, mp: t.mp, mt: 0, desvio: 0, he: 0, falta: 0, isento: true });
   }
