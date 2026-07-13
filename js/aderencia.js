@@ -190,90 +190,80 @@ function adhBuildKPI() {
   const baseKPI  = new Map();
   const colabKPI = new Map();
 
-  // Step 1: Build horario minutes per key
-  const horMin = new Map(); // key → min_prog
+  // Index horarios by "FILIAL|mat|data" so we can look up "what was planned
+  // that specific day" while iterating marcação.
+  const horByKey = new Map();
   for (const [key, h] of pontoHorarios) {
-    if (ADH_EXCLUDE.has((h.filial||'').toUpperCase())) continue;
-    let min_prog = 0;
-    min_prog += adhMinDiff(adhTimeToMin(h.ent1), adhTimeToMin(h.sai1));
-    if (h.ent2 && h.sai2)
-      min_prog += adhMinDiff(adhTimeToMin(h.ent2), adhTimeToMin(h.sai2));
-    horMin.set(key, { min_prog, filial: h.filial, mat: h.mat, nome: h.nome });
+    const [filialRaw, mat, data] = key.split('|');
+    horByKey.set(`${(filialRaw||'').toUpperCase()}|${mat}|${data}`, h);
   }
 
-  // Step 2: Init colabAcc from horarios (all planned colabs), then cross with marcacao
-  const colabAcc = new Map(); // "filial|mat" → accum
-
-  for (const [key, h] of horMin) {
-    const filial = (h.filial||'').toUpperCase();
-    const ck = `${filial}|${h.mat}`;
-    if (!colabAcc.has(ck)) {
-      colabAcc.set(ck, { filial, mat: h.mat, nome: h.nome||'', min_prog:0, min_trab:0, desvio:0, he:0, falta:0 });
-    }
-    colabAcc.get(ck).min_prog += h.min_prog;
-  }
-
+  // The aderência ratio is driven PURELY by marcação rows — matching the
+  // official Excel calculation (validated directly against it). A day
+  // scheduled in Horários with NO row at all in Marcação (~45% of scheduled
+  // days system-wide) does not count toward either side of the ratio.
+  const colabAcc = new Map(); // "FILIAL|mat" → accum
   for (const [key, m] of pontoMarcacao) {
-    const filial = (m.filial||'').toUpperCase();
+    const [filialRaw, mat, data] = key.split('|');
+    const filial = (filialRaw||'').toUpperCase();
     if (ADH_EXCLUDE.has(filial)) continue;
 
-    // Compute min trabalhados from all batidas
+    const nk = `${filial}|${mat}|${data}`;
+    const h = horByKey.get(nk);
+    const min_prog = h ? (adhMinDiff(adhTimeToMin(h.ent1), adhTimeToMin(h.sai1))
+      + (h.ent2 && h.sai2 ? adhMinDiff(adhTimeToMin(h.ent2), adhTimeToMin(h.sai2)) : 0)) : 0;
     let min_trab = 0;
-    const bats = [
-      [m.bat1, m.bat2],
-      [m.bat3, m.bat4],
-      [m.bat5, m.bat6],
-      [m.bat7, m.bat8],
-    ];
-    for (const [e, s] of bats) {
-      if (e && s) min_trab += adhMinDiff(adhTimeToMin(e), adhTimeToMin(s));
-    }
+    [[m.bat1,m.bat2],[m.bat3,m.bat4],[m.bat5,m.bat6],[m.bat7,m.bat8]]
+      .forEach(([e,s]) => { if (e && s) min_trab += adhMinDiff(adhTimeToMin(e), adhTimeToMin(s)); });
 
-    const hor = horMin.get(key);
-    const min_prog = hor ? hor.min_prog : 0;
-
-    const ck = `${filial}|${m.mat}`;
+    const ck = `${filial}|${mat}`;
     if (!colabAcc.has(ck)) {
-      const nome = hor?.nome || m.nome || '';
-      colabAcc.set(ck, { filial, mat: m.mat, nome, min_prog: 0, min_trab: 0, desvio: 0, he: 0, falta: 0 });
+      colabAcc.set(ck, { filial, mat, nome: h?.nome || m.nome || '', min_prog:0, min_trab:0, desvio:0, he:0, falta:0 });
     }
     const acc = colabAcc.get(ck);
+    acc.min_prog += min_prog;
     acc.min_trab += min_trab;
     acc.desvio   += Math.abs(min_trab - min_prog);
     acc.he       += Math.max(0, min_trab - min_prog);
     acc.falta    += Math.max(0, min_prog - min_trab);
   }
 
-  // For colabs only in horarios (no marcacao at all), falta = all planned time
-  for (const [ck, acc] of colabAcc) {
-    if (acc.min_trab === 0 && acc.min_prog > 0) {
-      acc.falta = acc.min_prog; acc.desvio = acc.min_prog; acc.he = 0;
-    }
-  }
-
-  // Cargos isentos de bater ponto (Gerentes e Coordenadores) — tratamos como
-  // 100% de aderência SE não houver nenhuma marcação registrada no período.
+  // Cargos isentos de bater ponto (Gerentes e Coordenadores) — não entram no
+  // cálculo acima (sem marcação), mas mostramos explicitamente como 100% na
+  // lista em vez de sumir, sem afetar a média da base.
   function adhCargoIsento(funcao) {
     const f = String(funcao || '').toUpperCase();
     return f.includes('GERENTE') || f.includes('COORDENADOR');
   }
+  const totalMpByPerson = new Map(); // "FILIAL|mat" → { mp, nome }
+  for (const [key, h] of pontoHorarios) {
+    const filial = (h.filial||'').toUpperCase();
+    if (ADH_EXCLUDE.has(filial)) continue;
+    const ck = `${filial}|${h.mat}`;
+    const minP = adhMinDiff(adhTimeToMin(h.ent1), adhTimeToMin(h.sai1))
+      + (h.ent2 && h.sai2 ? adhMinDiff(adhTimeToMin(h.ent2), adhTimeToMin(h.sai2)) : 0);
+    if (!totalMpByPerson.has(ck)) totalMpByPerson.set(ck, { mp: 0, nome: h.nome || '' });
+    totalMpByPerson.get(ck).mp += minP;
+  }
+  for (const [ck, t] of totalMpByPerson) {
+    if (colabAcc.has(ck) || t.mp <= 0) continue;
+    const [filial, mat] = ck.split('|');
+    if (!adhCargoIsento(window.eoColabs?.get(mat)?.funcao)) continue;
+    colabAcc.set(ck, { filial, mat, nome: t.nome, min_prog: t.mp, min_trab: 0, desvio: 0, he: 0, falta: 0, isento: true });
+  }
 
-  // Step 3: Build colab KPI list + aggregate per base. People with marcação
-  // but no horarios entry still get a row (pct=null, no baseline to compare
-  // against), but don't count toward the base's % aderência totals.
+  // Step 3: Build colab KPI list + aggregate per base. Exempted management
+  // (isento) shows 100% in the list but doesn't count toward the base's %
+  // aderência, matching the official Excel calculation exactly.
   for (const [ck, c] of colabAcc) {
     if (!c.min_prog && !c.min_trab) continue; // truly nothing at all
-
-    if (c.min_prog > 0 && c.min_trab === 0 && adhCargoIsento(window.eoColabs?.get(c.mat)?.funcao)) {
-      c.desvio = 0; c.he = 0; c.falta = 0;
-    }
 
     const pct = c.min_prog > 0
       ? Math.max(0, Math.round((100 - c.desvio / c.min_prog * 100) * 10) / 10)
       : null;
     colabKPI.set(ck, { ...c, pct, he_h: Math.round(c.he/60*10)/10, falta_h: Math.round(c.falta/60*10)/10 });
 
-    if (c.min_prog > 0) {
+    if (c.min_prog > 0 && !c.isento) {
       const base = c.filial;
       if (!baseKPI.has(base)) {
         baseKPI.set(base, { min_prog: 0, desvio: 0, he: 0, falta: 0, colabs: 0 });

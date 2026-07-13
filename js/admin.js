@@ -1157,66 +1157,69 @@ async function adminPrecomputeAderencia() {
   console.log('[precompute] Calculando KPI de aderência...');
   const ADH_EXCL = new Set(['HQ2','SEDE','GSE']);
 
-  // Build horario minutes per key
-  const horMin = new Map();
-  for (const [key, h] of pontoHorarios) {
-    if (ADH_EXCL.has((h.filial||'').toUpperCase())) continue;
-    let mp = 0;
-    const tm = (t) => { if(!t)return 0; const p=String(t).split(':'); return parseInt(p[0])*60+parseInt(p[1]||0); };
-    const diff = (a,b) => { if(!a||!b)return 0; const d=tm(b)-tm(a); return d<0?d+1440:d; };
-    mp += diff(h.ent1, h.sai1);
-    if (h.ent2&&h.sai2) mp += diff(h.ent2, h.sai2);
-    horMin.set(key, { min_prog: mp, filial: h.filial, mat: h.mat, nome: h.nome });
-  }
-
-  // Build colabAcc from ALL horarios first (not just those with marcacao)
-  const colabAcc = new Map();
   const tmc = t => { if(!t)return 0; const p=String(t).split(':'); return parseInt(p[0])*60+parseInt(p[1]||0); };
   const dfc = (a,b) => { if(!a||!b)return 0; const d=tmc(b)-tmc(a); return d<0?d+1440:d; };
 
-  // Init from horarios (all planned colabs)
-  for (const [key, h] of horMin) {
-    const filial = (h.filial||'').toUpperCase();
-    const ck = `${filial}|${h.mat}`;
-    if (!colabAcc.has(ck)) {
-      colabAcc.set(ck, { filial, mat: h.mat, nome: h.nome||'', mp:0, mt:0, desvio:0, he:0, falta:0 });
-    }
-    colabAcc.get(ck).mp += h.min_prog;
+  // Index horarios by "FILIAL|mat|data" (uppercase filial) so we can look up
+  // "what was planned that specific day" while iterating marcação.
+  const horByKey = new Map();
+  for (const [key, h] of pontoHorarios) {
+    const [filialRaw, mat, data] = key.split('|');
+    horByKey.set(`${(filialRaw||'').toUpperCase()}|${mat}|${data}`, h);
   }
 
-  // Cross with marcacao
+  // The aderência ratio is driven PURELY by marcação rows — matching the
+  // official Excel calculation (validated against it directly). A day
+  // scheduled in Horários with NO row at all in Marcação (a very common
+  // case — ~45% of scheduled days system-wide) does not count toward either
+  // side of the ratio, exactly like the Excel formula treats it.
+  const colabAcc = new Map(); // "FILIAL|mat" → accum
   for (const [key, m] of pontoMarcacao) {
-    const filial = (m.filial||'').toUpperCase();
+    const [filialRaw, mat, data] = key.split('|');
+    const filial = (filialRaw||'').toUpperCase();
     if (ADH_EXCL.has(filial)) continue;
-    let mt = 0;
+
+    const nk = `${filial}|${mat}|${data}`;
+    const h = horByKey.get(nk);
+    const minP = h ? (dfc(h.ent1,h.sai1) + (h.ent2 && h.sai2 ? dfc(h.ent2,h.sai2) : 0)) : 0;
+    let minT = 0;
     [[m.bat1,m.bat2],[m.bat3,m.bat4],[m.bat5,m.bat6],[m.bat7,m.bat8]]
-      .forEach(([a,b]) => { mt += dfc(a,b); });
-    const hor = horMin.get(key);
-    const mp  = hor ? hor.min_prog : 0;
-    const ck  = `${filial}|${m.mat}`;
+      .forEach(([a,b]) => { minT += dfc(a,b); });
+
+    const ck = `${filial}|${mat}`;
     if (!colabAcc.has(ck)) {
-      colabAcc.set(ck, { filial, mat: m.mat, nome: hor?.nome||m.nome||'', mp:0, mt:0, desvio:0, he:0, falta:0 });
+      colabAcc.set(ck, { filial, mat, nome: h?.nome || m.nome || '', mp:0, mt:0, desvio:0, he:0, falta:0 });
     }
     const acc = colabAcc.get(ck);
-    acc.mt += mt;
-    // desvio/he/falta computed per day, but for summary use total
-    const dev = Math.abs(mt - mp), he2 = Math.max(0,mt-mp), fat = Math.max(0,mp-mt);
-    acc.desvio += dev; acc.he += he2; acc.falta += fat;
+    acc.mp     += minP;
+    acc.mt     += minT;
+    acc.desvio += Math.abs(minT - minP);
+    acc.he     += Math.max(0, minT - minP);
+    acc.falta  += Math.max(0, minP - minT);
   }
 
-  // For colabs only in horarios (no marcacao), falta = all planned hours
-  for (const [ck, acc] of colabAcc) {
-    if (acc.mt === 0 && acc.mp > 0) {
-      acc.falta = acc.mp; acc.desvio = acc.mp; acc.he = 0;
-    }
-  }
-
-  // Cargos isentos de bater ponto (Gerentes e Coordenadores) — tratamos como
-  // 100% de aderência SE não houver nenhuma marcação registrada no período.
-  // Se a pessoa tiver algum ponto batido, respeitamos o cálculo real.
+  // Cargos isentos de bater ponto (Gerentes e Coordenadores) — não entram no
+  // cálculo acima porque não têm marcação, mas mostramos explicitamente como
+  // 100% na lista (em vez de simplesmente sumir), já que estruturalmente não
+  // batem ponto. Não afeta a média da base (só quem tem marcação entra nela).
   function adminCargoIsento(funcao) {
     const f = String(funcao || '').toUpperCase();
     return f.includes('GERENTE') || f.includes('COORDENADOR');
+  }
+  const totalMpByPerson = new Map(); // "FILIAL|mat" → { mp, nome }
+  for (const [key, h] of pontoHorarios) {
+    const filial = (h.filial||'').toUpperCase();
+    if (ADH_EXCL.has(filial)) continue;
+    const ck = `${filial}|${h.mat}`;
+    const minP = dfc(h.ent1,h.sai1) + (h.ent2 && h.sai2 ? dfc(h.ent2,h.sai2) : 0);
+    if (!totalMpByPerson.has(ck)) totalMpByPerson.set(ck, { mp: 0, nome: h.nome || '' });
+    totalMpByPerson.get(ck).mp += minP;
+  }
+  for (const [ck, t] of totalMpByPerson) {
+    if (colabAcc.has(ck) || t.mp <= 0) continue; // já tem marcação real, ou nada programado
+    const [filial, mat] = ck.split('|');
+    if (!adminCargoIsento(window.eoColabs?.get(mat)?.funcao)) continue; // só isenta gestão
+    colabAcc.set(ck, { filial, mat, nome: t.nome, mp: t.mp, mt: 0, desvio: 0, he: 0, falta: 0, isento: true });
   }
 
   // Build per-colaborador rows + aggregate per base (BUGFIX: baseAcc/colabRows
@@ -1255,8 +1258,10 @@ async function adminPrecomputeAderencia() {
     });
 
     // Base-level totals only count colaboradores who actually had a planned
-    // schedule, so unscheduled worked hours don't skew the base's % aderência.
-    if (acc.mp > 0) {
+    // schedule AND real marcação data — exempted management (isento, no
+    // marcação at all) shows 100% in the list but doesn't skew the base's
+    // % aderência, matching the official Excel calculation exactly.
+    if (acc.mp > 0 && !acc.isento) {
       if (!baseAcc.has(acc.filial)) {
         baseAcc.set(acc.filial, { mp: 0, desvio: 0, he: 0, falta: 0, colabs: 0 });
       }
