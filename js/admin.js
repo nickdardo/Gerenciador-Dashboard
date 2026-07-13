@@ -1472,6 +1472,7 @@ async function _adminLoadFileOnDemandRun(folder, onProgress) {
           bat1:r.bat1, bat2:r.bat2, bat3:r.bat3, bat4:r.bat4,
           bat5:r.bat5, bat6:r.bat6, bat7:r.bat7, bat8:r.bat8 });
       });
+      if (typeof adhSplitOvernightMarcacao === 'function') adhSplitOvernightMarcacao(pontoMarcacao);
       adminFiles.marcacao = { count: data.length, date: 'banco' };
       adhBaseKPI = null; adhColabKPI = null; // force recompute
       console.log(`[onDemand] marcacao: ${pontoMarcacao.size} keys`);

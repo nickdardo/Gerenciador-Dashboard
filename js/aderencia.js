@@ -131,7 +131,60 @@ function pontoParseMarcacao(wb, base) {
       bat7: adhFmtTime(r[10]), bat8: adhFmtTime(r[11]),
     });
   }
+  adhSplitOvernightMarcacao(pontoMarcacao);
   console.log(`[aderencia] Marcacao parsed: ${pontoMarcacao.size} keys`);
+}
+
+// Quando um turno começa tarde da noite (ex: 23:45) e continua depois da
+// meia-noite, o arquivo de Marcação às vezes registra TUDO na linha do dia
+// em que o turno começou, jogando as batidas 5-8 (a continuação) pra dentro
+// do dia anterior — e o dia seguinte, que é onde a maior parte do turno de
+// fato acontece, fica com "sem marcação nenhuma". Aqui a gente identifica
+// esse padrão (uma 5ª+ batida tarde da noite) e realoca esse par pro dia
+// seguinte, onde ele realmente pertence.
+function adhSplitOvernightMarcacao(map) {
+  const LIMIAR_HORA = 22; // batida a partir dessa hora é considerada "virada de turno"
+  const mudancas = [];
+
+  for (const [key, m] of map) {
+    if (!m.bat5) continue;
+    const hora = parseInt(String(m.bat5).split(':')[0], 10);
+    if (isNaN(hora) || hora < LIMIAR_HORA) continue;
+
+    const [filial, mat, dstr] = key.split('|');
+    const [d, mo, y] = dstr.split('/').map(Number);
+    const prox = new Date(y, mo - 1, d + 1);
+    const proxDstr = `${String(prox.getDate()).padStart(2,'0')}/${String(prox.getMonth()+1).padStart(2,'0')}/${prox.getFullYear()}`;
+    const proxKey = `${filial}|${mat}|${proxDstr}`;
+
+    mudancas.push({
+      key, proxKey, filial, mat, nome: m.nome,
+      bat1: m.bat5, bat2: m.bat6, bat3: m.bat7, bat4: m.bat8,
+    });
+  }
+
+  for (const c of mudancas) {
+    // Remove as batidas 5-8 do dia original (ficam só as 1-4 de fato daquele dia)
+    const original = map.get(c.key);
+    if (original) {
+      delete original.bat5; delete original.bat6; delete original.bat7; delete original.bat8;
+    }
+    // Move essas batidas para o dia seguinte
+    const destino = map.get(c.proxKey);
+    if (destino) {
+      // já existe marcação no dia seguinte — anexa como batidas extras (5-8),
+      // só se ainda não estiverem ocupadas
+      if (!destino.bat5) {
+        destino.bat5 = c.bat1; destino.bat6 = c.bat2; destino.bat7 = c.bat3; destino.bat8 = c.bat4;
+      }
+    } else {
+      map.set(c.proxKey, {
+        filial: c.filial, mat: c.mat, nome: c.nome,
+        bat1: c.bat1, bat2: c.bat2, bat3: c.bat3, bat4: c.bat4,
+      });
+    }
+  }
+  if (mudancas.length) console.log(`[aderencia] ${mudancas.length} viradas de turno realocadas para o dia seguinte`);
 }
 
 // ══════════════════════════════════════════════════════
