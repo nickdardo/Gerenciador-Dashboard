@@ -33,6 +33,9 @@ const adminFiles = {
   horarios:      null,  // { count, period, date }
   marcacao:      null,  // { count, period, date }
   malha:         null,  // { count, bases, period, date }
+  ferias:        null,  // { count, date, data: Map<mat, {data_inicio,data_fim,dias}> }
+  desligados:    null,  // { count, date, data: Map<mat, {data_demissao,causa_texto}> }
+  pcd:           null,  // { count, date, data: Map<mat, {deficiencia,base}> }
 };
 
 // ── Entry point ───────────────────────────────────────
@@ -242,6 +245,42 @@ function adminFilesTab() {
         ? `${adminFiles.malha.count.toLocaleString()} voos · ${adminFiles.malha.bases} bases · ${adminFiles.malha.period}`
         : null,
     },
+    {
+      key: 'ferias',
+      icon: 'ti-beach',
+      color: '#38bdf8',
+      name: 'Férias',
+      desc: 'HRCL107.xls · colaboradores em férias',
+      accept: '.xls,.xlsx',
+      fn: 'adminLoadFerias',
+      info: adminFiles.ferias
+        ? `${adminFiles.ferias.count.toLocaleString()} registros`
+        : null,
+    },
+    {
+      key: 'desligados',
+      icon: 'ti-user-x',
+      color: '#ef4444',
+      name: 'Desligamentos',
+      desc: 'HRCL106.xls · histórico de desligados',
+      accept: '.xls,.xlsx',
+      fn: 'adminLoadDesligados',
+      info: adminFiles.desligados
+        ? `${adminFiles.desligados.count.toLocaleString()} registros`
+        : null,
+    },
+    {
+      key: 'pcd',
+      icon: 'ti-wheelchair',
+      color: '#a78bfa',
+      name: 'PCD',
+      desc: 'HRCL114.xls · colaboradores PCD',
+      accept: '.xls,.xlsx',
+      fn: 'adminLoadPcd',
+      info: adminFiles.pcd
+        ? `${adminFiles.pcd.count.toLocaleString()} colaboradores`
+        : null,
+    },
   ];
 
   return `
@@ -356,6 +395,212 @@ async function adminLoadColabs(input) {
     } catch(err) {
       adminSetFileStatus('colaboradores', 'Erro: ' + err.message, 'err');
       console.error('[adminLoadColabs]', err);
+    }
+  };
+  r.readAsArrayBuffer(file);
+}
+
+// Converte data do Excel (Date object, serial numérico ou string "DD/MM/YYYY")
+// para ISO "YYYY-MM-DD", de forma defensiva já que cada relatório HR exporta
+// datas de um jeito diferente.
+function adminXlsToISODate(v) {
+  if (v === null || v === undefined || v === '') return null;
+  if (v instanceof Date && !isNaN(v)) return v.toISOString().slice(0, 10);
+  if (typeof v === 'number') {
+    const d = new Date(Date.UTC(1899, 11, 30) + v * 86400000);
+    if (!isNaN(d)) return d.toISOString().slice(0, 10);
+  }
+  const s = String(v).trim();
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+  return null;
+}
+
+// ── Férias (HRCL107) ──────────────────────────────────
+// Colunas: 0 Cadastro, 1 Nome, 2 Cargo, 3 C.Horária, 4 Filial, 5 Admissão,
+// 6 Afastam.(início), 7 código, 8 "-", 9 Situação(texto), 10 Dias, 11 Término(fim)
+async function adminLoadFerias(input) {
+  const file = input.files[0];
+  if (!file) return;
+  adminSetFileStatus('ferias', 'Lendo arquivo...', 'load');
+
+  const r = new FileReader();
+  r.onload = async e => {
+    try {
+      const wb   = XLSX.read(e.target.result, { type:'array' });
+      const ws   = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:true });
+
+      const records = [];
+      rows.forEach((row, i) => {
+        if (i===0 || !row || !row[0]) return;
+        const matRaw = String(row[0]).trim();
+        if (!matRaw || isNaN(parseInt(matRaw))) return;
+        const mat = matRaw.padStart(6, '0');
+        const nome        = String(row[1]||'').trim();
+        const cargo       = String(row[2]||'').trim();
+        const filial      = String(row[4]||'').trim().toUpperCase();
+        const data_inicio = adminXlsToISODate(row[6]);
+        const dias        = parseInt(row[10]) || 0;
+        const data_fim     = adminXlsToISODate(row[11]);
+        if (!data_inicio) return;
+        records.push({ matricula: mat, nome, cargo, filial, data_inicio, data_fim, dias, updated_at: new Date() });
+      });
+
+      const total = records.length;
+      adminSetFileStatus('ferias', `Gravando ${total.toLocaleString()} no banco...`, 'load');
+
+      const BATCH = 500;
+      let saved = 0;
+      for (let i = 0; i < records.length; i += BATCH) {
+        const batch = records.slice(i, i + BATCH);
+        const { error } = await db.from('colaboradores_ferias')
+          .upsert(batch, { onConflict: 'matricula,data_inicio' });
+        if (error) throw new Error(error.message);
+        saved += batch.length;
+        adminSetFileStatus('ferias', `Gravando... ${saved}/${total}`, 'load');
+      }
+
+      adminFiles.ferias = {
+        count: total,
+        date: new Date().toLocaleDateString('pt-BR'),
+        data: new Map(records.map(r => [r.matricula, r])),
+      };
+      adminSetFileStatus('ferias', `✓ ${total.toLocaleString()} registros de férias`, 'ok');
+      adminAddHistory('ferias', file.name);
+      input.value = '';
+    } catch(err) {
+      adminSetFileStatus('ferias', 'Erro: ' + err.message, 'err');
+      console.error('[adminLoadFerias]', err);
+    }
+  };
+  r.readAsArrayBuffer(file);
+}
+
+// ── Desligamentos (HRCL106) ───────────────────────────
+// Relatório concatenado com marcadores de seção ("FILIAL:", cabeçalhos
+// repetidos) — filtramos mantendo só linhas cujo Cadastro é numérico.
+// Colunas: 0 Cadastro, 1 Nome, 2 C.H., 3 Filial, 4 Admissão, 5 Demissão,
+// 6 Cargo, 7 código causa, 8 Causa Demissão(texto)
+async function adminLoadDesligados(input) {
+  const file = input.files[0];
+  if (!file) return;
+  adminSetFileStatus('desligados', 'Lendo arquivo...', 'load');
+
+  const r = new FileReader();
+  r.onload = async e => {
+    try {
+      const wb   = XLSX.read(e.target.result, { type:'array' });
+      const ws   = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:true });
+
+      const records = [];
+      rows.forEach((row) => {
+        if (!row || !row[0]) return;
+        const matRaw = String(row[0]).trim();
+        if (!matRaw || isNaN(parseInt(matRaw))) return; // pula marcadores/cabeçalhos
+        const mat = matRaw.padStart(6, '0');
+        const nome          = String(row[1]||'').trim();
+        const filial        = String(row[3]||'').trim().toUpperCase();
+        const data_admissao = adminXlsToISODate(row[4]);
+        const data_demissao = adminXlsToISODate(row[5]);
+        const cargo         = String(row[6]||'').trim();
+        const causa_codigo  = String(row[7]||'').trim();
+        const causa_texto   = String(row[8]||'').trim();
+        if (!data_demissao) return;
+        records.push({ matricula: mat, nome, filial, cargo, data_admissao, data_demissao, causa_codigo, causa_texto, updated_at: new Date() });
+      });
+
+      const total = records.length;
+      adminSetFileStatus('desligados', `Gravando ${total.toLocaleString()} no banco...`, 'load');
+
+      const BATCH = 500;
+      let saved = 0;
+      for (let i = 0; i < records.length; i += BATCH) {
+        const batch = records.slice(i, i + BATCH);
+        const { error } = await db.from('colaboradores_desligados')
+          .upsert(batch, { onConflict: 'matricula,data_demissao' });
+        if (error) throw new Error(error.message);
+        saved += batch.length;
+        adminSetFileStatus('desligados', `Gravando... ${saved}/${total}`, 'load');
+      }
+
+      // Mantém só o desligamento mais recente por matrícula em memória
+      const byMat = new Map();
+      for (const rec of records) {
+        const prev = byMat.get(rec.matricula);
+        if (!prev || rec.data_demissao > prev.data_demissao) byMat.set(rec.matricula, rec);
+      }
+
+      adminFiles.desligados = {
+        count: total,
+        date: new Date().toLocaleDateString('pt-BR'),
+        data: byMat,
+      };
+      adminSetFileStatus('desligados', `✓ ${total.toLocaleString()} registros históricos`, 'ok');
+      adminAddHistory('desligados', file.name);
+      input.value = '';
+    } catch(err) {
+      adminSetFileStatus('desligados', 'Erro: ' + err.message, 'err');
+      console.error('[adminLoadDesligados]', err);
+    }
+  };
+  r.readAsArrayBuffer(file);
+}
+
+// ── PCD (HRCL114) ──────────────────────────────────────
+// Colunas: 0 Cadastro, 1 Nome, 2 Admissão, 3 Cargo, 4 Deficiência, 5 Base ("REC - RECIFE")
+async function adminLoadPcd(input) {
+  const file = input.files[0];
+  if (!file) return;
+  adminSetFileStatus('pcd', 'Lendo arquivo...', 'load');
+
+  const r = new FileReader();
+  r.onload = async e => {
+    try {
+      const wb   = XLSX.read(e.target.result, { type:'array' });
+      const ws   = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:true });
+
+      const records = [];
+      rows.forEach((row) => {
+        if (!row || !row[0]) return;
+        const matRaw = String(row[0]).trim();
+        if (!matRaw || isNaN(parseInt(matRaw))) return;
+        const mat = matRaw.padStart(6, '0');
+        const nome        = String(row[1]||'').trim();
+        const cargo       = String(row[3]||'').trim();
+        const deficiencia = String(row[4]||'').trim();
+        const baseRaw     = String(row[5]||'').trim();
+        const base        = baseRaw.split(' - ')[0].trim().toUpperCase();
+        records.push({ matricula: mat, nome, cargo, deficiencia, base, updated_at: new Date() });
+      });
+
+      const total = records.length;
+      adminSetFileStatus('pcd', `Gravando ${total.toLocaleString()} no banco...`, 'load');
+
+      const BATCH = 500;
+      let saved = 0;
+      for (let i = 0; i < records.length; i += BATCH) {
+        const batch = records.slice(i, i + BATCH);
+        const { error } = await db.from('colaboradores_pcd')
+          .upsert(batch, { onConflict: 'matricula' });
+        if (error) throw new Error(error.message);
+        saved += batch.length;
+        adminSetFileStatus('pcd', `Gravando... ${saved}/${total}`, 'load');
+      }
+
+      adminFiles.pcd = {
+        count: total,
+        date: new Date().toLocaleDateString('pt-BR'),
+        data: new Map(records.map(r => [r.matricula, r])),
+      };
+      adminSetFileStatus('pcd', `✓ ${total.toLocaleString()} colaboradores PCD`, 'ok');
+      adminAddHistory('pcd', file.name);
+      input.value = '';
+    } catch(err) {
+      adminSetFileStatus('pcd', 'Erro: ' + err.message, 'err');
+      console.error('[adminLoadPcd]', err);
     }
   };
   r.readAsArrayBuffer(file);
@@ -1017,6 +1262,43 @@ async function adminAutoLoadFiles() {
     if (cMal > 0) {
       adminFiles.malha = { count: cMal, date: 'banco', period: '' };
       console.log(`[autoLoad] malha: ${cMal} registros no banco`);
+    }
+
+    // ── Férias, Desligamentos, PCD (pequenos — carrega tudo de uma vez) ──
+    const [feriasRes, desligRes, pcdRes] = await Promise.all([
+      db.from('colaboradores_ferias').select('matricula,data_inicio,data_fim,dias'),
+      db.from('colaboradores_desligados').select('matricula,data_demissao,causa_texto'),
+      db.from('colaboradores_pcd').select('matricula,deficiencia,base'),
+    ]);
+
+    if (feriasRes.data?.length) {
+      // Mantém, por matrícula, o período de férias mais relevante (o que
+      // termina mais tarde — cobre o caso de estar em férias agora).
+      const byMat = new Map();
+      for (const r of feriasRes.data) {
+        const prev = byMat.get(r.matricula);
+        if (!prev || (r.data_fim||'') > (prev.data_fim||'')) byMat.set(r.matricula, r);
+      }
+      window.eoFerias = byMat;
+      adminFiles.ferias = { count: feriasRes.data.length, date: 'banco' };
+      console.log(`[autoLoad] ferias: ${feriasRes.data.length} registros no banco`);
+    }
+
+    if (desligRes.data?.length) {
+      const byMat = new Map();
+      for (const r of desligRes.data) {
+        const prev = byMat.get(r.matricula);
+        if (!prev || (r.data_demissao||'') > (prev.data_demissao||'')) byMat.set(r.matricula, r);
+      }
+      window.eoDesligados = byMat;
+      adminFiles.desligados = { count: desligRes.data.length, date: 'banco' };
+      console.log(`[autoLoad] desligados: ${desligRes.data.length} registros no banco`);
+    }
+
+    if (pcdRes.data?.length) {
+      window.eoPcd = new Map(pcdRes.data.map(r => [r.matricula, r]));
+      adminFiles.pcd = { count: pcdRes.data.length, date: 'banco' };
+      console.log(`[autoLoad] pcd: ${pcdRes.data.length} colaboradores no banco`);
     }
 
   } catch(err) {

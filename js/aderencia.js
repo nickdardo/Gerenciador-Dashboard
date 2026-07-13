@@ -688,6 +688,7 @@ function adhRenderDetalhe(el, base, showBack) {
   window._adhSearchQuery = '';
   window._adhCargoFilter = new Set();
   window._adhChFilter    = new Set();
+  window._adhPcdFilter   = false;
   window._adhSortField = 'desvio';
   window._adhSortDir   = -1;
 
@@ -791,6 +792,9 @@ function adhRenderDetalhe(el, base, showBack) {
             <button class="adh-sort-btn adh-situ-filter-btn active" onclick="adhFilterSituacao('all',this)">Todos</button>
             <button class="adh-sort-btn adh-situ-filter-btn" onclick="adhFilterSituacao('ativo',this)">Ativos</button>
             <button class="adh-sort-btn adh-situ-filter-btn" onclick="adhFilterSituacao('afastado',this)">Afastados</button>
+            <button class="adh-sort-btn" onclick="adhTogglePcdFilter(this)" title="Mostrar só colaboradores PCD">
+              <i class="ti ti-wheelchair" style="font-size:12px;vertical-align:middle"></i> PCD
+            </button>
             <span class="adh-filter-divider"></span>
             <button class="adh-sort-btn active" data-quick onclick="adhSort('desvio',this)">Maior desvio</button>
             <button class="adh-sort-btn" data-quick onclick="adhSort('he',this)">Mais HE</button>
@@ -881,6 +885,21 @@ function adhIsAtivo(situacao) {
   return String(situacao || '').trim().toLowerCase() === 'trabalhando';
 }
 
+// Cruza Desligamentos (HRCL106) e Férias (HRCL107) com a situação bruta do
+// cadastro (HRCL204), aplicando prioridade: Desligado > Férias > bruta.
+// Retorna null quando não há nada para sobrepor (usar a situação bruta).
+function adhSituacaoEfetiva(mat) {
+  const desl = window.eoDesligados?.get(mat);
+  if (desl) return { texto: 'Desligado', tipo: 'desligado' };
+
+  const fer = window.eoFerias?.get(mat);
+  if (fer && fer.data_fim) {
+    const [y, m, d] = fer.data_fim.split('-');
+    return { texto: `Férias (até ${d}/${m})`, tipo: 'ferias' };
+  }
+  return null;
+}
+
 // Groups varied cargo/função strings into broad categories for quick
 // filtering. Order matters — checked top to bottom, first match wins.
 function adhCargoCategoria(funcao) {
@@ -902,13 +921,22 @@ function adhCargoCategoria(funcao) {
 
 function adhRenderColabRows(list, base) {
   return list.map(c => {
-    const mat     = c.mat || c.matricula || '';
-    const cargo   = c.funcao   || window.eoColabs?.get(mat)?.funcao   || '';
-    const situacao= c.situacao || window.eoColabs?.get(mat)?.situacao || '';
+    const mat        = c.mat || c.matricula || '';
+    const cargo      = c.funcao   || window.eoColabs?.get(mat)?.funcao   || '';
+    const rawSituacao= c.situacao || window.eoColabs?.get(mat)?.situacao || '';
+    const efetiva    = adhSituacaoEfetiva(mat);
+    const situacao   = efetiva ? efetiva.texto : rawSituacao;
+    const ativo      = efetiva ? false : adhIsAtivo(rawSituacao);
+    const situClass  = efetiva?.tipo === 'desligado' ? 'adh-situ-desligado'
+                      : efetiva?.tipo === 'ferias'    ? 'adh-situ-ferias'
+                      : (ativo ? 'adh-situ-ativo' : 'adh-situ-afastado');
     const ch      = c.ch ?? window.eoColabs?.get(mat)?.ch ?? 0;
-    const ativo   = adhIsAtivo(situacao);
     const situBadge = situacao
-      ? `<span class="adh-situ-badge ${ativo ? 'adh-situ-ativo' : 'adh-situ-afastado'}">${situacao}</span>`
+      ? `<span class="adh-situ-badge ${situClass}">${situacao}</span>`
+      : '';
+    const pcdInfo = window.eoPcd?.get(mat);
+    const pcdBadge = pcdInfo
+      ? `<i class="ti ti-wheelchair" style="color:#a78bfa;font-size:12px;margin-left:6px;vertical-align:middle" title="PCD: ${pcdInfo.deficiencia||''}" aria-hidden="true"></i>`
       : '';
     const rowClass = 'adh-colab-row' + (c.semDados ? ' adh-colab-row-nodata' : '');
     // Flag deviations from people who aren't actually "Trabalhando" this
@@ -930,7 +958,7 @@ function adhRenderColabRows(list, base) {
       onmouseenter="adhShowTooltip(event,this,false).catch(console.warn)"
       onmouseleave="adhHideTooltip()">
       <td style="font-family:monospace;font-size:11px">${mat}</td>
-      <td style="font-weight:500">${c.nome}</td>
+      <td style="font-weight:500">${c.nome}${pcdBadge}</td>
       <td style="color:var(--text-muted);font-size:11px">${cargo}</td>
       <td style="text-align:center">${situBadge}</td>
       <td class="r" style="color:var(--text-muted)">${ch ? ch+'h' : '—'}</td>
@@ -950,7 +978,11 @@ function adhSortColabs(list, field, dir) {
       case 'mat':      return c.mat || c.matricula || '';
       case 'nome':     return (c.nome || '').toLowerCase();
       case 'cargo':    return (c.funcao || window.eoColabs?.get(c.mat)?.funcao || '').toLowerCase();
-      case 'situacao': return (c.situacao || window.eoColabs?.get(c.mat)?.situacao || '').toLowerCase();
+      case 'situacao': {
+        const mat = c.mat || c.matricula || '';
+        const efetiva = adhSituacaoEfetiva(mat);
+        return (efetiva ? efetiva.texto : (c.situacao || window.eoColabs?.get(mat)?.situacao || '')).toLowerCase();
+      }
       case 'ch':       return c.ch ?? window.eoColabs?.get(c.mat)?.ch ?? 0;
       case 'prog':     return c.min_prog || 0;
       case 'he':       return c.he || 0;
@@ -974,6 +1006,10 @@ function adhRerenderColabTable() {
   let list = (window._adhColabListFull || []).slice();
   if (window._adhSituacaoFilter === 'ativo')    list = list.filter(c => adhIsAtivo(c.situacao));
   if (window._adhSituacaoFilter === 'afastado') list = list.filter(c => !adhIsAtivo(c.situacao));
+
+  if (window._adhPcdFilter) {
+    list = list.filter(c => window.eoPcd?.has(c.mat || c.matricula));
+  }
 
   if (window._adhCargoFilter?.size) {
     list = list.filter(c => {
@@ -1048,6 +1084,13 @@ function adhFilterSituacao(mode, btn) {
   document.querySelectorAll('.adh-situ-filter-btn').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
   window._adhSituacaoFilter = mode;
+  adhRerenderColabTable();
+}
+
+// PCD toggle — independent from the situação filters (combinable)
+function adhTogglePcdFilter(btn) {
+  window._adhPcdFilter = !window._adhPcdFilter;
+  if (btn) btn.classList.toggle('active', window._adhPcdFilter);
   adhRerenderColabTable();
 }
 
