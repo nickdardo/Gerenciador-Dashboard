@@ -24,7 +24,7 @@ const adminFileHistory = {
 
 function adminAddHistory(key, name) {
   const entry = { name, date: new Date().toLocaleDateString('pt-BR') + ' ' + new Date().toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}) };
-  adminFileHistory[key] = [entry, ...(adminFileHistory[key]||[]).slice(0,4)];
+  adminFileHistory[key] = [entry, ...(adminFileHistory[key]||[]).slice(0,5)];
   try { localStorage.setItem('adm_hist_'+key, JSON.stringify(adminFileHistory[key])); } catch(_){}
 }
 
@@ -78,7 +78,7 @@ async function adminRender() {
   ] = await Promise.all([
     db.from('profiles').select('*').order('created_at', { ascending: false }),
     db.from('escalas').select('base,status,updated_at'),
-    db.from('access_log').select('*').order('created_at', { ascending: false }).limit(200),
+    db.from('access_log').select('*').order('created_at', { ascending: false }).limit(100),
   ]);
 
   const totalUsers = users?.length || 0;
@@ -344,7 +344,7 @@ function adminFilesTab() {
             ${hist.length ? `
               <div class="adm-file-history">
                 <div class="adm-file-history-title">Histórico de uploads</div>
-                ${hist.slice(0,3).map(h => `
+                ${hist.slice(0,6).map(h => `
                   <div class="adm-hist-row">
                     <span>${h.name}</span>
                     <span>${h.date}</span>
@@ -1123,18 +1123,31 @@ function adminMalhaTab() {
 // ══════════════════════════════════════════════════════
 // TAB: LOG
 // ══════════════════════════════════════════════════════
-function adminLogsTab(logs) {
+function adminLogsTab(logs, page) {
   const ACTION = {
     login: 'Login', logout: 'Logout',
     view_escala:'Ver escala', edit_escala:'Editar escala', publish_escala:'Publicar escala',
   };
+
+  const PAGE_SIZE = 20;
+  const capped = logs.slice(0, 100); // limite máximo de 100 registros no total
+  const totalPages = Math.max(1, Math.ceil(capped.length / PAGE_SIZE));
+  page = Math.min(Math.max(1, page || 1), totalPages);
+  const start = (page - 1) * PAGE_SIZE;
+  const pageLogs = capped.slice(start, start + PAGE_SIZE);
+
+  let pageBtns = '';
+  for (let p = 1; p <= totalPages; p++) {
+    pageBtns += `<button class="adm-page-btn ${p===page?'active':''}" onclick="adminGoToLogPage(${p})">${p}</button>`;
+  }
+
   return `
-    <div class="adm-section-header"><span>${logs.length} registros recentes</span></div>
+    <div class="adm-section-header"><span>${capped.length} registros recentes${capped.length>=100?' (máx. 100)':''}</span></div>
     <div class="adm-table-wrap">
       <table class="adm-table">
         <thead><tr><th>Data / Hora</th><th>Email</th><th>Base</th><th>Ação</th></tr></thead>
         <tbody>
-          ${logs.slice(0,100).map(l=>`
+          ${pageLogs.map(l=>`
             <tr>
               <td style="font-size:11px;color:var(--text-muted)">${new Date(l.created_at).toLocaleString('pt-BR')}</td>
               <td>${l.email||'—'}</td>
@@ -1143,7 +1156,18 @@ function adminLogsTab(logs) {
             </tr>`).join('')}
         </tbody>
       </table>
-    </div>`;
+    </div>
+    ${totalPages > 1 ? `
+    <div class="adm-pagination">
+      <span class="adm-page-info">Página ${page} de ${totalPages}</span>
+      <div class="adm-page-btns">${pageBtns}</div>
+    </div>` : ''}`;
+}
+
+function adminGoToLogPage(page) {
+  const el = document.getElementById('adm-tab-content');
+  if (!el) return;
+  el.innerHTML = adminLogsTab(window._adminData?.logs || [], page);
 }
 
 // ══════════════════════════════════════════════════════
