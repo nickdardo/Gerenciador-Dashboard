@@ -245,41 +245,40 @@ function adminFilesTab() {
         ? `${adminFiles.malha.count.toLocaleString()} voos · ${adminFiles.malha.bases} bases · ${adminFiles.malha.period}`
         : null,
     },
+  ];
+
+  // Arquivos complementares de colaboradores — renderizados como sub-linhas
+  // dentro do próprio card "Colaboradores", em vez de cards separados.
+  const colabExtras = [
     {
       key: 'ferias',
       icon: 'ti-beach',
       color: '#38bdf8',
       name: 'Férias',
-      desc: 'HRCL107.xls · colaboradores em férias',
+      desc: 'HRCL107.xls',
       accept: '.xls,.xlsx',
       fn: 'adminLoadFerias',
-      info: adminFiles.ferias
-        ? `${adminFiles.ferias.count.toLocaleString()} registros`
-        : null,
+      info: adminFiles.ferias ? `${adminFiles.ferias.count.toLocaleString()} registros` : null,
     },
     {
       key: 'desligados',
       icon: 'ti-user-x',
       color: '#ef4444',
       name: 'Desligamentos',
-      desc: 'HRCL106.xls · histórico de desligados',
+      desc: 'HRCL106.xls',
       accept: '.xls,.xlsx',
       fn: 'adminLoadDesligados',
-      info: adminFiles.desligados
-        ? `${adminFiles.desligados.count.toLocaleString()} registros`
-        : null,
+      info: adminFiles.desligados ? `${adminFiles.desligados.count.toLocaleString()} registros` : null,
     },
     {
       key: 'pcd',
       icon: 'ti-wheelchair',
       color: '#a78bfa',
       name: 'PCD',
-      desc: 'HRCL114.xls · colaboradores PCD',
+      desc: 'HRCL114.xls',
       accept: '.xls,.xlsx',
       fn: 'adminLoadPcd',
-      info: adminFiles.pcd
-        ? `${adminFiles.pcd.count.toLocaleString()} colaboradores`
-        : null,
+      info: adminFiles.pcd ? `${adminFiles.pcd.count.toLocaleString()} colaboradores` : null,
     },
   ];
 
@@ -292,7 +291,7 @@ function adminFilesTab() {
       ${files.map(f => {
         const hist = adminFileHistory[f.key] || [];
         return `
-          <div class="adm-file-card">
+          <div class="adm-file-card" ${f.key==='colaboradores' ? 'style="grid-column:1 / -1"' : ''}>
             <div class="adm-file-header">
               <div class="adm-file-icon" style="background:${f.color}18;color:${f.color}">
                 <i class="ti ${f.icon}" style="font-size:18px" aria-hidden="true"></i>
@@ -318,6 +317,29 @@ function adminFilesTab() {
                   onchange="${f.fn}(this)">
               </label>
             </div>
+
+            ${f.key === 'colaboradores' ? `
+              <div class="adm-file-subsection">
+                ${colabExtras.map(x => `
+                  <div class="adm-file-subrow">
+                    <div class="adm-file-subicon" style="background:${x.color}18;color:${x.color}">
+                      <i class="ti ${x.icon}" style="font-size:13px" aria-hidden="true"></i>
+                    </div>
+                    <div class="adm-file-submeta">
+                      <div class="adm-file-subname">${x.name}</div>
+                      <div class="adm-file-subdesc">${x.desc}</div>
+                    </div>
+                    <span id="adm-status-${x.key}" class="${x.info?'adm-file-badge-ok':'adm-file-badge-no'}">
+                      ${x.info || 'Não carregado'}
+                    </span>
+                    <label class="adm-upload-btn adm-upload-btn-sm">
+                      <i class="ti ti-upload" style="font-size:10px" aria-hidden="true"></i>
+                      ${x.info ? 'Atualizar' : 'Carregar'}
+                      <input type="file" accept="${x.accept}" style="display:none"
+                        onchange="${x.fn}(this)">
+                    </label>
+                  </div>`).join('')}
+              </div>` : ''}
 
             ${hist.length ? `
               <div class="adm-file-history">
