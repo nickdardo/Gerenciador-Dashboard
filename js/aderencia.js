@@ -1348,7 +1348,7 @@ function adhBuildPanelContent(mat, filial, nome, cargo, compact = false) {
     const diaIsento = isento && minT === 0; // sem nenhuma marcação neste dia
     const he = (diaIsento || futuro || semMarcacao) ? 0 : Math.max(0,minT-minP);
     const falta = (diaIsento || futuro || semMarcacao) ? 0 : Math.max(0,minP-minT);
-    const pct = (futuro || semMarcacao || !minP) ? null : Math.max(0,Math.round((1-falta/minP)*100));
+    const pct = (futuro || semMarcacao || !minP) ? null : Math.max(0,Math.round((1-(he+falta)/minP)*100));
     const trabalhouNaFolga = folga && minT > 0;
     const diaSemana = new Date(anoM, mesM-1, dia).getDay();
     const finalDeSemana = diaSemana === 0 || diaSemana === 6;
@@ -1362,7 +1362,7 @@ function adhBuildPanelContent(mat, filial, nome, cargo, compact = false) {
   const totP = days.reduce((s,d)=>s+((d.futuro||d.semMarcacao)?0:d.minP),0);
   const totHE = days.reduce((s,d)=>s+d.he,0);
   const totF  = days.reduce((s,d)=>s+d.falta,0);
-  const totPct = totP>0 ? Math.max(0,Math.round((1-totF/totP)*100)) : null;
+  const totPct = totP>0 ? Math.max(0,Math.round((1-(totHE+totF)/totP)*100)) : null;
   const pctClr = p => p==null ? 'var(--text-muted)' : (p>=88?'#48bb78':p>=70?'#f6ad55':'#fc8181');
   const fmtH = m => m>0?(m/60).toFixed(1)+'h':'—';
 
@@ -1512,6 +1512,7 @@ function adhBuildPanelContent(mat, filial, nome, cargo, compact = false) {
         <div class="adh-tip-chart-svg" style="height:46px;overflow:hidden">${chartBars}</div>
       </div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;padding:0 12px 8px;font-size:11px">
+        <span style="color:#8896aa">Carga <b style="color:#e8edf5">${window.eoColabs?.get(mat)?.ch ? window.eoColabs.get(mat).ch+'h' : '—'}</b></span>
         <span style="color:#8896aa">Prog <b style="color:#e8edf5">${fmtH(totP)}</b></span>
         <span style="color:#f6ad55">HE <b>${fmtH(totHE)}</b></span>
         <span style="color:#fc8181">Falta <b>${fmtH(totF)}</b></span>
@@ -1527,6 +1528,7 @@ function adhBuildPanelContent(mat, filial, nome, cargo, compact = false) {
         <div class="adh-panel-sub">${mat} · ${cargo}</div>
       </div>
       <div class="adh-panel-summary">
+        <span style="color:#8896aa">Carga: <strong style="color:#e8edf5">${window.eoColabs?.get(mat)?.ch ? window.eoColabs.get(mat).ch+'h' : '—'}</strong></span>
         <span style="color:#8896aa">Prog: <strong style="color:#e8edf5">${fmtH(totP)}</strong></span>
         <span style="color:#f6ad55">HE: <strong>${fmtH(totHE)}</strong></span>
         <span style="color:#fc8181">Falta: <strong>${fmtH(totF)}</strong></span>
