@@ -1550,6 +1550,18 @@ a { color: inherit; text-decoration: none; }
 .adh-refresh-btn:hover { border-color: var(--blue); color: var(--blue); background: rgba(0,160,210,.08); }
 .adh-refresh-btn i { font-size: 14px; }
 
+.adh-month-select {
+  padding: 8px 14px;
+  background: var(--adh-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--adh-radius-sm);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.adh-month-select:focus { outline: none; border-color: var(--blue); }
+
 /* ── Multi-base overview header ── */
 .adh-full-wrap { display: flex; flex-direction: column; gap: 22px; padding: 24px 28px 32px; }
 
@@ -2004,3 +2016,5 @@ a { color: inherit; text-decoration: none; }
 .adh-tip-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
 .adh-tip-table tr:last-child td { border-bottom: none; }
 .adh-tip-table tr:hover td { background: rgba(255,255,255,.02); }
+.adh-tip-table tr.adh-tip-weekend td { background: rgba(148,163,184,.06); }
+.adh-tip-table tr.adh-tip-weekend td:first-child { color: #94a3b8; font-weight: 700; }

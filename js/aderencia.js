@@ -151,6 +151,33 @@ function pontoParseMarcacao(wb, base) {
 
 const ADH_EXCLUDE = new Set(['HQ2', 'SEDE', 'GSE']);
 
+// ── Corte por mês ──────────────────────────────────────
+// O cálculo de aderência considera só o mês selecionado (por padrão, o mês
+// corrente real). Isso evita que sobras de meses antigos nas tabelas de
+// Horários/Marcação misturem-se com o período atual.
+function adhCurrentMonth() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+}
+
+function adhMesDaData(dstr) {
+  const p = String(dstr||'').split('/');
+  if (p.length !== 3) return null;
+  return `${p[2]}-${p[1]}`;
+}
+
+const ADH_MESES_PT = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+function adhMonthLabel(mes) {
+  const [y,m] = String(mes||'').split('-');
+  const idx = parseInt(m,10) - 1;
+  return (ADH_MESES_PT[idx] || mes) + '/' + y;
+}
+
+function adhDaysInMonth(mes) {
+  const [y,m] = mes.split('-').map(Number);
+  return new Date(y, m, 0).getDate();
+}
+
 // Ensure the full colaborador roster (window.eoColabs) is loaded, so the
 // Aderência table can show everyone at a base — not just who has ponto data.
 // Usually already populated by adminAutoLoadFiles() shortly after login; this
@@ -204,8 +231,9 @@ function adhMinDiff(start, end) {
 }
 
 // ── Build KPI from parsed files ───────────────────────
-function adhBuildKPI() {
+function adhBuildKPI(mes) {
   if (!pontoHorarios?.size || !pontoMarcacao?.size) return false;
+  if (!mes) mes = adhCurrentMonth();
 
   const baseKPI  = new Map();
   const colabKPI = new Map();
@@ -215,6 +243,7 @@ function adhBuildKPI() {
   const horByKey = new Map();
   for (const [key, h] of pontoHorarios) {
     const [filialRaw, mat, data] = key.split('|');
+    if (adhMesDaData(data) !== mes) continue; // fora do mês alvo
     horByKey.set(`${(filialRaw||'').toUpperCase()}|${mat}|${data}`, h);
   }
 
@@ -225,6 +254,7 @@ function adhBuildKPI() {
   const colabAcc = new Map(); // "FILIAL|mat" → accum
   for (const [key, m] of pontoMarcacao) {
     const [filialRaw, mat, data] = key.split('|');
+    if (adhMesDaData(data) !== mes) continue; // fora do mês alvo
     const filial = (filialRaw||'').toUpperCase();
     if (ADH_EXCLUDE.has(filial)) continue;
 
@@ -267,6 +297,8 @@ function adhBuildKPI() {
   for (const [key, h] of pontoHorarios) {
     const filial = (h.filial||'').toUpperCase();
     if (ADH_EXCLUDE.has(filial)) continue;
+    const [, , data] = key.split('|');
+    if (adhMesDaData(data) !== mes) continue; // fora do mês alvo
     const ck = `${filial}|${h.mat}`;
     const minP = adhMinDiff(adhTimeToMin(h.ent1), adhTimeToMin(h.sai1))
       + (h.ent2 && h.sai2 ? adhMinDiff(adhTimeToMin(h.ent2), adhTimeToMin(h.sai2)) : 0);
@@ -344,6 +376,27 @@ async function adhForceRefresh() {
   if (el) await pageAderencia(el);
 }
 
+// Força atualização, além de trocar o mês selecionado.
+async function adhChangeMonth(mes) {
+  window._adhMes = mes;
+  adhBaseKPI = null; adhColabKPI = null;
+  const el = window._adhCurrentEl;
+  if (el) await pageAderencia(el);
+}
+
+function adhMonthSelectorHTML() {
+  const mes = window._adhMes || adhCurrentMonth();
+  const atual = adhCurrentMonth();
+  const [y,m] = atual.split('-').map(Number);
+  const prevDate = new Date(y, m-2, 1); // mês anterior ao atual
+  const prevMes = `${prevDate.getFullYear()}-${String(prevDate.getMonth()+1).padStart(2,'0')}`;
+  const opts = [atual, prevMes];
+  return `
+    <select class="adh-month-select" onchange="adhChangeMonth(this.value)" title="Mês de referência">
+      ${opts.map(o => `<option value="${o}" ${o===mes?'selected':''}>${adhMonthLabel(o)}${o===atual?' (atual)':''}</option>`).join('')}
+    </select>`;
+}
+
 // ══════════════════════════════════════════════════════
 // ENTRY POINT
 // ══════════════════════════════════════════════════════
@@ -352,6 +405,9 @@ async function pageAderencia(el) {
   const role  = currentUserProfile?.role;
   const bases = currentUserProfile?.bases || [];
   const ROLES_OK = ['admin','gerente','coordenador','supervisor','lideranca'];
+
+  if (!window._adhMes) window._adhMes = adhCurrentMonth();
+  const mes = window._adhMes;
 
   if (!ROLES_OK.includes(role)) {
     el.innerHTML = `
@@ -369,7 +425,7 @@ async function pageAderencia(el) {
   el.innerHTML = `
     <div class="page-header">
       <div><h1 class="page-title">Aderência ao Ponto</h1>
-        <p class="page-sub">Planejado vs realizado · fórmula: MAX(0, 100 - Desvio/Programado × 100)</p>
+        <p class="page-sub">Planejado vs realizado · fórmula: MAX(0, 100 - Desvio/Programado × 100) · ${adhMonthLabel(mes)}</p>
       </div>
     </div>
     <div class="adm-progress-wrap" id="adh-load-progress">
@@ -392,9 +448,9 @@ async function pageAderencia(el) {
   // KPI cache paths below) — awaited right before rendering the base detail.
   const rosterPromise = adhEnsureRoster();
 
-  // ── LAYER 1: localStorage cache (instantâneo) ──────
-  const CACHE_KEY = 'adh_kpi_cache';
-  const CACHE_TS  = 'adh_kpi_ts';
+  // ── LAYER 1: localStorage cache (instantâneo) — uma cache por mês ──
+  const CACHE_KEY = 'adh_kpi_cache_' + mes;
+  const CACHE_TS  = 'adh_kpi_ts_' + mes;
   const CACHE_MAX = 8 * 60 * 60 * 1000; // 8 hours
 
   try {
@@ -406,7 +462,7 @@ async function pageAderencia(el) {
         const cached = JSON.parse(raw);
         adhBaseKPI  = new Map(cached.baseKPI.map(r => [r.filial, r]));
         adhColabKPI = new Map(cached.colabKPI.map(r => [r.filial+'|'+r.matricula, {...r, mat: r.matricula}]));
-        console.log('[aderencia] Loaded from localStorage cache');
+        console.log(`[aderencia] Loaded from localStorage cache (${mes})`);
         // Skip loading, go straight to render
         await rosterPromise;
         if (role === 'admin') { adhRenderMultiBase(el); return; }
@@ -417,18 +473,18 @@ async function pageAderencia(el) {
     }
   } catch(_) {}
 
-  // ── LAYER 2: banco aderencia_kpi (rápido ~30 rows) ──
+  // ── LAYER 2: banco aderencia_kpi (rápido ~30 rows), filtrado pelo mês ──
   setMsg('Carregando KPI do banco...');
   try {
     // aderencia_colab pode ter milhares de linhas — o Supabase corta em 1000
     // por página independente do .limit() pedido, então paginamos com .range().
     async function fetchAllColabRows() {
       const PAGE = 1000;
-      const { count, error: eCount } = await db.from('aderencia_colab').select('*', { count:'exact', head:true });
+      const { count, error: eCount } = await db.from('aderencia_colab').select('*', { count:'exact', head:true }).eq('mes', mes);
       if (eCount || !count) return [];
       const all = [];
       for (let from = 0; from < count; from += PAGE) {
-        const { data, error } = await db.from('aderencia_colab').select('*').range(from, from + PAGE - 1);
+        const { data, error } = await db.from('aderencia_colab').select('*').eq('mes', mes).range(from, from + PAGE - 1);
         if (error) throw new Error(error.message);
         if (data) all.push(...data);
       }
@@ -436,7 +492,7 @@ async function pageAderencia(el) {
     }
 
     const [{ data: kpiRows, error: e1 }, colabRows] = await Promise.all([
-      db.from('aderencia_kpi').select('*'),
+      db.from('aderencia_kpi').select('*').eq('mes', mes),
       fetchAllColabRows(),
     ]);
     if (e1) console.warn('[aderencia] DB KPI query error', e1);
@@ -454,7 +510,7 @@ async function pageAderencia(el) {
         falta_h: parseFloat(r.falta_h), min_prog: r.min_prog,
         he: r.he, falta: r.falta
       }]));
-      console.log(`[aderencia] Loaded ${kpiRows.length} bases, ${colabRows.length} colaboradores from DB KPI`);
+      console.log(`[aderencia] Loaded ${kpiRows.length} bases, ${colabRows.length} colaboradores from DB KPI (${mes})`);
 
       // Save to localStorage cache
       try {
@@ -475,8 +531,8 @@ async function pageAderencia(el) {
     console.warn('[aderencia] DB KPI error:', e.message);
   }
 
-  // ── LAYER 3: calcular na hora (só 1ª vez ou se banco vazio) ──
-  setMsg('Primeira vez: baixando dados para calcular...');
+  // ── LAYER 3: calcular na hora (só 1ª vez, banco vazio, ou mês sem dado salvo ainda) ──
+  setMsg('Baixando dados para calcular este mês...');
   if (!pontoHorarios?.size) {
     setMsg('Baixando Horários...');
     await adminLoadFileOnDemand('horarios', setProg);
@@ -501,11 +557,12 @@ async function pageAderencia(el) {
   await new Promise(r => setTimeout(r, 20));
   await rosterPromise; // precisa do roster carregado p/ isenção de cargo (gerente/coordenador)
   adhBaseKPI = null; adhColabKPI = null;
-  adhBuildKPI();
+  adhBuildKPI(mes);
 
-  // Trigger precompute to save for next time
-  if (typeof adminPrecomputeAderencia === 'function') {
-    adminPrecomputeAderencia().catch(console.warn);
+  // Trigger precompute to save for next time (só faz sentido persistir o mês
+  // corrente — meses anteriores são só consulta, não sobrescrevem nada novo)
+  if (mes === adhCurrentMonth() && typeof adminPrecomputeAderencia === 'function') {
+    adminPrecomputeAderencia(mes).catch(console.warn);
   }
 
   if (role === 'admin') {
@@ -545,6 +602,7 @@ function adhRenderMultiBase(el) {
           <p class="adh-full-sub">Todas as bases · clique em uma base para detalhar</p>
         </div>
         <div style="display:flex;align-items:center;gap:12px">
+          ${adhMonthSelectorHTML()}
           <button class="adh-refresh-btn" onclick="adhForceRefresh()" title="Atualizar dados agora (ignora cache local)">
             <i class="ti ti-refresh" aria-hidden="true"></i> Atualizar
           </button>
@@ -760,9 +818,12 @@ function adhRenderDetalhe(el, base, showBack) {
             <p class="adh-full-sub">Horas trabalhadas ÷ horas programadas</p>
           </div>
         </div>
-        <button class="adh-refresh-btn" onclick="adhForceRefresh()" title="Atualizar dados agora (ignora cache local)">
-          <i class="ti ti-refresh" aria-hidden="true"></i> Atualizar
-        </button>
+        <div style="display:flex;align-items:center;gap:12px">
+          ${adhMonthSelectorHTML()}
+          <button class="adh-refresh-btn" onclick="adhForceRefresh()" title="Atualizar dados agora (ignora cache local)">
+            <i class="ti ti-refresh" aria-hidden="true"></i> Atualizar
+          </button>
+        </div>
       </div>
 
       <!-- KPIs -->
@@ -1178,12 +1239,15 @@ function adhBuildPanelContent(mat, filial, nome, cargo, compact = false) {
   const tm = t => { if(!t)return 0; const p=String(t).split(':'); return parseInt(p[0])*60+parseInt(p[1]||0); };
   const diff = (a,b) => { if(!a||!b)return 0; const d=tm(b)-tm(a); return d<0?d+1440:d; };
 
-  const dateSet = new Set();
-  for (const key of pontoHorarios.keys()) { if (key.startsWith(prefix)) dateSet.add(key.split('|')[2]); }
-  for (const key of pontoMarcacao.keys()) { if (key.startsWith(prefix)) dateSet.add(key.split('|')[2]); }
+  // Percorre TODOS os dias do mês selecionado (não só os que têm registro),
+  // para mostrar folgas programadas e diferenciar finais de semana.
+  const mesAtual = window._adhMes || adhCurrentMonth();
+  const [anoM, mesM] = mesAtual.split('-').map(Number);
+  const diasNoMes = adhDaysInMonth(mesAtual);
 
   const days = [];
-  for (const dstr of dateSet) {
+  for (let dia = 1; dia <= diasNoMes; dia++) {
+    const dstr = `${String(dia).padStart(2,'0')}/${String(mesM).padStart(2,'0')}/${anoM}`;
     const key  = prefix + dstr;
     const h    = pontoHorarios.get(key);
     const marc = pontoMarcacao.get(key);
@@ -1195,11 +1259,14 @@ function adhBuildPanelContent(mat, filial, nome, cargo, compact = false) {
     const he = diaIsento ? 0 : Math.max(0,minT-minP);
     const falta = diaIsento ? 0 : Math.max(0,minP-minT);
     const pct = minP>0 ? Math.max(0,Math.round((1-falta/minP)*100)) : null; // no schedule to compare against
+    const folga = !h; // sem horário programado neste dia = folga programada
+    const trabalhouNaFolga = folga && minT > 0;
+    const diaSemana = new Date(anoM, mesM-1, dia).getDay();
+    const finalDeSemana = diaSemana === 0 || diaSemana === 6;
     days.push({dstr,ent1:h?.ent1,sai1:h?.sai1,ent2:h?.ent2,sai2:h?.sai2,
       bat1:marc?.bat1,bat2:marc?.bat2,bat3:marc?.bat3,bat4:marc?.bat4,
-      minP,minT,he,falta,pct});
+      minP,minT,he,falta,pct,folga,trabalhouNaFolga,finalDeSemana});
   }
-  days.sort((a,b)=>a.dstr.split('/').reverse().join('').localeCompare(b.dstr.split('/').reverse().join('')));
 
   const totP = days.reduce((s,d)=>s+d.minP,0);
   const totHE = days.reduce((s,d)=>s+d.he,0);
@@ -1269,7 +1336,26 @@ function adhBuildPanelContent(mat, filial, nome, cargo, compact = false) {
   // Table rows (skipped for the compact hover card — full detail only on click)
   const tableRows = compact ? '' : days.map(d => {
     const c2 = pctClr(d.pct);
-    return `<tr>
+    const rowClass = d.finalDeSemana ? ' class="adh-tip-weekend"' : '';
+
+    if (d.folga) {
+      const aviso = d.trabalhouNaFolga
+        ? `<i class="ti ti-alert-triangle" style="color:#f59e0b;font-size:12px;margin-left:6px" title="Trabalhou em um dia de folga programada" aria-hidden="true"></i>`
+        : '';
+      return `<tr${rowClass}>
+        <td>${d.dstr}</td>
+        <td colspan="4" style="color:var(--text-muted);font-style:italic">Folga programada${aviso}</td>
+        <td style="color:#48bb78">${d.bat1||'—'}</td>
+        <td style="color:#48bb78">${d.bat2||'—'}</td>
+        <td style="color:#48bb78">${d.bat3||'—'}</td>
+        <td style="color:#48bb78">${d.bat4||'—'}</td>
+        <td style="text-align:right;color:#f6ad55">${fmtH(d.he)}</td>
+        <td style="text-align:right;color:var(--text-muted)">—</td>
+        <td style="text-align:right;color:var(--text-muted)">—</td>
+      </tr>`;
+    }
+
+    return `<tr${rowClass}>
       <td>${d.dstr}</td>
       <td style="color:#00a0d2">${d.ent1||'—'}</td>
       <td style="color:#00a0d2">${d.sai1||'—'}</td>

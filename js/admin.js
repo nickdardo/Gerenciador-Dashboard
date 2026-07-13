@@ -1497,10 +1497,24 @@ async function _adminLoadFileOnDemandRun(folder, onProgress) {
 // PRÉ-CÁLCULO DE ADERÊNCIA — roda após upload de arquivos
 // Salva resultado no banco + invalida localStorage cache
 // ══════════════════════════════════════════════════════
-async function adminPrecomputeAderencia() {
+// mes: 'YYYY-MM' — por padrão, o mês corrente real (hoje). Passe um mês
+// anterior explicitamente para recalcular/gravar esse mês específico.
+async function adminPrecomputeAderencia(mes) {
   if (!pontoHorarios?.size || !pontoMarcacao?.size) {
     console.warn('[precompute] horarios ou marcacao não carregados');
     return;
+  }
+
+  if (!mes) {
+    const now = new Date();
+    mes = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  }
+
+  // "DD/MM/YYYY" → "YYYY-MM"
+  function adminMesDaData(dstr) {
+    const p = String(dstr||'').split('/');
+    if (p.length !== 3) return null;
+    return `${p[2]}-${p[1]}`;
   }
 
   // Precisamos do cadastro completo (cargo de cada matrícula) para aplicar a
@@ -1527,7 +1541,7 @@ async function adminPrecomputeAderencia() {
     } catch(e) { console.warn('[precompute] desligados:', e.message); }
   }
 
-  console.log('[precompute] Calculando KPI de aderência...');
+  console.log(`[precompute] Calculando KPI de aderência para ${mes}...`);
   const ADH_EXCL = new Set(['HQ2','SEDE','GSE']);
 
   const tmc = t => { if(!t)return 0; const p=String(t).split(':'); return parseInt(p[0])*60+parseInt(p[1]||0); };
@@ -1538,6 +1552,7 @@ async function adminPrecomputeAderencia() {
   const horByKey = new Map();
   for (const [key, h] of pontoHorarios) {
     const [filialRaw, mat, data] = key.split('|');
+    if (adminMesDaData(data) !== mes) continue; // fora do mês alvo
     horByKey.set(`${(filialRaw||'').toUpperCase()}|${mat}|${data}`, h);
   }
 
@@ -1549,6 +1564,7 @@ async function adminPrecomputeAderencia() {
   const colabAcc = new Map(); // "FILIAL|mat" → accum
   for (const [key, m] of pontoMarcacao) {
     const [filialRaw, mat, data] = key.split('|');
+    if (adminMesDaData(data) !== mes) continue; // fora do mês alvo
     const filial = (filialRaw||'').toUpperCase();
     if (ADH_EXCL.has(filial)) continue;
 
@@ -1593,6 +1609,8 @@ async function adminPrecomputeAderencia() {
   for (const [key, h] of pontoHorarios) {
     const filial = (h.filial||'').toUpperCase();
     if (ADH_EXCL.has(filial)) continue;
+    const [, , data] = key.split('|');
+    if (adminMesDaData(data) !== mes) continue; // fora do mês alvo
     const ck = `${filial}|${h.mat}`;
     const minP = dfc(h.ent1,h.sai1) + (h.ent2 && h.sai2 ? dfc(h.ent2,h.sai2) : 0);
     if (!totalMpByPerson.has(ck)) totalMpByPerson.set(ck, { mp: 0, nome: h.nome || '' });
@@ -1630,6 +1648,7 @@ async function adminPrecomputeAderencia() {
       filial:   acc.filial,
       matricula:acc.mat,
       nome:     acc.nome,
+      mes,
       min_prog: acc.mp,
       min_trab: acc.mt,
       desvio:   acc.desvio,
@@ -1664,13 +1683,13 @@ async function adminPrecomputeAderencia() {
     if (!b.mp) continue;
     const pct = Math.max(0, Math.round((100-b.desvio/b.mp*100)*10)/10);
     baseRows.push({
-      filial, min_prog:b.mp, desvio:b.desvio, he:b.he, falta:b.falta, colabs:b.colabs,
+      filial, mes, min_prog:b.mp, desvio:b.desvio, he:b.he, falta:b.falta, colabs:b.colabs,
       pct, he_h:Math.round(b.he/60*10)/10, falta_h:Math.round(b.falta/60*10)/10,
       prog_h:Math.round(b.mp/60*10)/10, updated_at: new Date()
     });
   }
 
-  console.log(`[precompute] ${baseRows.length} bases, ${colabRows.length} colaboradores`);
+  console.log(`[precompute] ${baseRows.length} bases, ${colabRows.length} colaboradores (${mes})`);
 
   const errors = [];
 
@@ -1679,14 +1698,14 @@ async function adminPrecomputeAderencia() {
   const BATCH = 500;
   for (let i=0; i<baseRows.length; i+=BATCH) {
     const { error } = await db.from('aderencia_kpi')
-      .upsert(baseRows.slice(i,i+BATCH), { onConflict:'filial' });
+      .upsert(baseRows.slice(i,i+BATCH), { onConflict:'filial,mes' });
     if (error) { console.error('[precompute] base KPI error:', error.message); errors.push('base:'+error.message); }
   }
 
   // Save colab KPI to DB
   for (let i=0; i<colabRows.length; i+=BATCH) {
     const { error } = await db.from('aderencia_colab')
-      .upsert(colabRows.slice(i,i+BATCH), { onConflict:'filial,matricula' });
+      .upsert(colabRows.slice(i,i+BATCH), { onConflict:'filial,matricula,mes' });
     if (error) { console.error('[precompute] colab KPI error:', error.message); errors.push('colab:'+error.message); }
   }
 
@@ -1701,5 +1720,5 @@ async function adminPrecomputeAderencia() {
   } catch(_){}
 
   console.log('[precompute] ✓ KPI salvo no banco e cache invalidado');
-  return { baseCount: baseRows.length, colabCount: colabRows.length, errors };
+  return { baseCount: baseRows.length, colabCount: colabRows.length, errors, mes };
 }
