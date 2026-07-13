@@ -668,6 +668,15 @@ async function adminLoadHorarios(input) {
             return year+'-'+b.padStart(2,'0')+'-'+a.padStart(2,'0');
           }
         }
+        // Purely-numeric string (serial date stored as text, e.g. "46174")
+        if (/^\d{4,6}$/.test(s)) {
+          const ms = Math.round((parseInt(s) - 25569) * 86400 * 1000);
+          const dt = new Date(ms);
+          if (!isNaN(dt)) {
+            const y=dt.getUTCFullYear(), m=String(dt.getUTCMonth()+1).padStart(2,'0'), d=String(dt.getUTCDate()).padStart(2,'0');
+            return `${y}-${m}-${d}`;
+          }
+        }
         return null;
       }
       function fmtT(v) {
@@ -769,6 +778,15 @@ async function adminLoadMarcacao(input) {
             return year+'-'+b.padStart(2,'0')+'-'+a.padStart(2,'0');
           }
         }
+        // Purely-numeric string (serial date stored as text, e.g. "46174")
+        if (/^\d{4,6}$/.test(s)) {
+          const ms = Math.round((parseInt(s) - 25569) * 86400 * 1000);
+          const dt = new Date(ms);
+          if (!isNaN(dt)) {
+            const y=dt.getUTCFullYear(), m=String(dt.getUTCMonth()+1).padStart(2,'0'), d=String(dt.getUTCDate()).padStart(2,'0');
+            return `${y}-${m}-${d}`;
+          }
+        }
         return null;
       }
       function fmtT(v) {
@@ -863,6 +881,15 @@ async function adminLoadMalha(input) {
             return year+'-'+a.padStart(2,'0')+'-'+b.padStart(2,'0');
           } else { // a=DD, b=MM (BR format)
             return year+'-'+b.padStart(2,'0')+'-'+a.padStart(2,'0');
+          }
+        }
+        // Purely-numeric string (serial date stored as text, e.g. "46174")
+        if (/^\d{4,6}$/.test(s)) {
+          const ms = Math.round((parseInt(s) - 25569) * 86400 * 1000);
+          const dt = new Date(ms);
+          if (!isNaN(dt)) {
+            const y=dt.getUTCFullYear(), m=String(dt.getUTCMonth()+1).padStart(2,'0'), d=String(dt.getUTCDate()).padStart(2,'0');
+            return `${y}-${m}-${d}`;
           }
         }
         return null;

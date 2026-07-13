@@ -15,11 +15,31 @@ function adhFmtDate(d) {
            String(d.getMonth()+1).padStart(2,'0') + '/' +
            d.getFullYear();
   }
+  // Excel serial date number (cell wasn't recognized/formatted as a date by
+  // the reader) — e.g. 46174 → 01/06/2026. Without this, raw serials leak
+  // straight into the UI as-is (shows "46174" instead of a real date).
+  if (typeof d === 'number') {
+    const ms = Math.round((d - 25569) * 86400 * 1000);
+    const dt = new Date(ms);
+    return String(dt.getUTCDate()).padStart(2,'0') + '/' +
+           String(dt.getUTCMonth()+1).padStart(2,'0') + '/' +
+           dt.getUTCFullYear();
+  }
   // Already a string like "2026-06-01"
   const s = String(d);
   if (s.includes('-') && s.length >= 10) {
     const [y,m,dd] = s.split('T')[0].split('-');
     return `${dd}/${m}/${y}`;
+  }
+  // String that's actually just digits (serial date stored/passed as text)
+  if (/^\d{4,6}$/.test(s.trim())) {
+    const ms = Math.round((parseInt(s.trim()) - 25569) * 86400 * 1000);
+    const dt = new Date(ms);
+    if (!isNaN(dt)) {
+      return String(dt.getUTCDate()).padStart(2,'0') + '/' +
+             String(dt.getUTCMonth()+1).padStart(2,'0') + '/' +
+             dt.getUTCFullYear();
+    }
   }
   return s;
 }
