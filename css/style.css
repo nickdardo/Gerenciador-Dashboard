@@ -2115,6 +2115,45 @@ a { color: inherit; text-decoration: none; }
 }
 .adh-search-wrap input::placeholder { color: var(--text-muted); }
 
+.adh-filter-pills-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.adh-filter-pills-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  margin-right: 2px;
+  flex-shrink: 0;
+}
+.adh-cat-pill {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all .15s;
+}
+.adh-cat-pill:hover { border-color: var(--border-strong); }
+.adh-cat-pill.active {
+  background: rgba(0,160,210,.14);
+  border-color: #00a0d2;
+  color: #4ab8e8;
+}
+.adh-pill-count {
+  font-size: 9px;
+  opacity: .7;
+}
+
 .adh-sort-btns {
   display: flex;
   gap: 4px;

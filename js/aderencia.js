@@ -696,8 +696,24 @@ function adhRenderDetalhe(el, base, showBack) {
   window._adhColabListFull  = colabListFull;
   window._adhSituacaoFilter = 'all';
   window._adhSearchQuery = '';
+  window._adhCargoFilter = new Set();
+  window._adhChFilter    = new Set();
   window._adhSortField = 'desvio';
   window._adhSortDir   = -1;
+
+  // Group cargos into broad categories, and collect distinct carga horária
+  // values — both used to build the quick-filter pills below.
+  const catCounts = new Map();
+  const chCounts  = new Map();
+  for (const c of colabListFull) {
+    const funcao = c.funcao || window.eoColabs?.get(c.mat)?.funcao;
+    const cat = adhCargoCategoria(funcao);
+    catCounts.set(cat, (catCounts.get(cat) || 0) + 1);
+    const chVal = c.ch ?? window.eoColabs?.get(c.mat)?.ch ?? 0;
+    if (chVal) chCounts.set(chVal, (chCounts.get(chVal) || 0) + 1);
+  }
+  const catList = [...catCounts.entries()].sort((a,b) => b[1]-a[1]);
+  const chList  = [...chCounts.entries()].sort((a,b) => a[0]-b[0]);
   const colabList = adhSortColabs(colabListFull.slice(), 'desvio', -1);
 
   // Total colaboradores: full roster count when we have one for this base,
@@ -758,6 +774,21 @@ function adhRenderDetalhe(el, base, showBack) {
         <div class="adh-search-wrap">
           <i class="ti ti-search" aria-hidden="true"></i>
           <input type="text" id="adh-search-input" placeholder="Buscar por nome ou matrícula..." oninput="adhSearchColab(this.value)">
+        </div>
+
+        <div class="adh-filter-pills-row">
+          <span class="adh-filter-pills-label">Função</span>
+          ${catList.map(([cat,n]) => `
+            <button class="adh-cat-pill" onclick="adhToggleCargoFilter('${cat.replace(/'/g,"\\'")}',this)">
+              ${cat} <span class="adh-pill-count">${n}</span>
+            </button>`).join('')}
+        </div>
+        <div class="adh-filter-pills-row">
+          <span class="adh-filter-pills-label">Carga horária</span>
+          ${chList.map(([ch,n]) => `
+            <button class="adh-cat-pill" onclick="adhToggleChFilter(${ch},this)">
+              ${ch}h <span class="adh-pill-count">${n}</span>
+            </button>`).join('')}
         </div>
 
         <div class="adh-colab-header-row">
@@ -858,6 +889,25 @@ function adhIsAtivo(situacao) {
   return String(situacao || '').trim().toLowerCase() === 'trabalhando';
 }
 
+// Groups varied cargo/função strings into broad categories for quick
+// filtering. Order matters — checked top to bottom, first match wins.
+function adhCargoCategoria(funcao) {
+  const f = String(funcao || '').toUpperCase();
+  if (!f) return 'Sem cargo';
+  if (f.includes('RAMPA'))                              return 'Rampa';
+  if (f.includes('LIMPEZA'))                             return 'Limpeza';
+  if (f.includes('GERENTE'))                             return 'Gestão';
+  if (f.includes('COORDENADOR'))                         return 'Coordenação';
+  if (f.includes('SUPERVISOR') || f.includes('LIDER'))   return 'Supervisão';
+  if (f.includes('MECANIC') || f.includes('ELETRIC') || f.includes('MANUTEN')) return 'Manutenção';
+  if (f.includes('SEGURAN'))                             return 'Segurança';
+  if (f.includes('PASSAGEIRO') || f.includes('AGENTE'))  return 'Atendimento';
+  if (f.includes('APRENDIZ'))                            return 'Aprendiz';
+  if (f.includes('ADMINISTRATIVO') || f.includes('ANALISTA') || f.includes('ESPECIALISTA') || f.includes('PLAN')) return 'Administrativo';
+  if (f.includes('OPERADOR') || f.includes('OPERA'))     return 'Operações';
+  return 'Outros';
+}
+
 function adhRenderColabRows(list, base) {
   return list.map(c => {
     const mat     = c.mat || c.matricula || '';
@@ -926,11 +976,22 @@ function adhSortColabs(list, field, dir) {
   });
 }
 
-// Re-applies the current situação filter + search + sort, and redraws just the table.
+// Re-applies the current situação filter + cargo/CH filters + search + sort,
+// and redraws just the table.
 function adhRerenderColabTable() {
   let list = (window._adhColabListFull || []).slice();
   if (window._adhSituacaoFilter === 'ativo')    list = list.filter(c => adhIsAtivo(c.situacao));
   if (window._adhSituacaoFilter === 'afastado') list = list.filter(c => !adhIsAtivo(c.situacao));
+
+  if (window._adhCargoFilter?.size) {
+    list = list.filter(c => {
+      const funcao = c.funcao || window.eoColabs?.get(c.mat)?.funcao;
+      return window._adhCargoFilter.has(adhCargoCategoria(funcao));
+    });
+  }
+  if (window._adhChFilter?.size) {
+    list = list.filter(c => window._adhChFilter.has(c.ch ?? window.eoColabs?.get(c.mat)?.ch ?? 0));
+  }
 
   const q = (window._adhSearchQuery || '').trim().toLowerCase();
   if (q) {
@@ -961,6 +1022,32 @@ function adhRerenderColabTable() {
 // Search box (by nome or matrícula)
 function adhSearchColab(value) {
   window._adhSearchQuery = value;
+  adhRerenderColabTable();
+}
+
+// Função (cargo category) quick-filter pills — multi-select
+function adhToggleCargoFilter(cat, btn) {
+  if (!window._adhCargoFilter) window._adhCargoFilter = new Set();
+  if (window._adhCargoFilter.has(cat)) {
+    window._adhCargoFilter.delete(cat);
+    btn.classList.remove('active');
+  } else {
+    window._adhCargoFilter.add(cat);
+    btn.classList.add('active');
+  }
+  adhRerenderColabTable();
+}
+
+// Carga horária quick-filter pills — multi-select
+function adhToggleChFilter(ch, btn) {
+  if (!window._adhChFilter) window._adhChFilter = new Set();
+  if (window._adhChFilter.has(ch)) {
+    window._adhChFilter.delete(ch);
+    btn.classList.remove('active');
+  } else {
+    window._adhChFilter.add(ch);
+    btn.classList.add('active');
+  }
   adhRerenderColabTable();
 }
 
