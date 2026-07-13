@@ -375,7 +375,14 @@ function adhFmtH(h) {
 // Force a fresh reload of aderência data, bypassing the localStorage cache —
 // gives users a one-click way to refresh instead of clearing cache manually.
 async function adhForceRefresh() {
-  try { localStorage.removeItem('adh_kpi_cache'); localStorage.removeItem('adh_kpi_ts'); } catch(_){}
+  try {
+    const toRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && (k.startsWith('adh_kpi_cache') || k.startsWith('adh_kpi_ts'))) toRemove.push(k);
+    }
+    toRemove.forEach(k => localStorage.removeItem(k));
+  } catch(_){}
   adhBaseKPI = null; adhColabKPI = null;
   const el = window._adhCurrentEl;
   if (el) await pageAderencia(el);

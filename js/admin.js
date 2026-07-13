@@ -952,8 +952,16 @@ async function adminTriggerPrecompute() {
     }
     if (btn) btn.textContent = 'Calculando...';
     const result = await adminPrecomputeAderencia();
-    // Invalidate localStorage cache
-    try { localStorage.removeItem('adh_kpi_cache'); localStorage.removeItem('adh_kpi_ts'); } catch(_){}
+    // Invalidate localStorage cache (all months) — adminPrecomputeAderencia
+    // already does this internally, but repeated here for safety.
+    try {
+      const toRemove = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && (k.startsWith('adh_kpi_cache') || k.startsWith('adh_kpi_ts'))) toRemove.push(k);
+      }
+      toRemove.forEach(k => localStorage.removeItem(k));
+    } catch(_){}
     if (result?.errors?.length) {
       alert(`Recalculado com ${result.errors.length} erro(s) ao salvar no banco. Alguns colaboradores podem não aparecer. Veja o console para detalhes.`);
     }
@@ -1718,10 +1726,16 @@ async function adminPrecomputeAderencia(mes) {
     console.warn(`[precompute] ${errors.length} lote(s) falharam ao salvar:`, errors);
   }
 
-  // Invalidate localStorage cache
+  // Invalidate localStorage cache — remove EVERY adh_kpi_cache/_ts key,
+  // regardless of month suffix (adh_kpi_cache_2026-07 etc.), not just the
+  // old bare names. Missing this was leaving stale per-month caches behind.
   try {
-    localStorage.removeItem('adh_kpi_cache');
-    localStorage.removeItem('adh_kpi_ts');
+    const toRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && (k.startsWith('adh_kpi_cache') || k.startsWith('adh_kpi_ts'))) toRemove.push(k);
+    }
+    toRemove.forEach(k => localStorage.removeItem(k));
   } catch(_){}
 
   console.log('[precompute] ✓ KPI salvo no banco e cache invalidado');
