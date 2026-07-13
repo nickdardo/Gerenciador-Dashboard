@@ -1263,31 +1263,36 @@ function adhBuildPanelContent(mat, filial, nome, cargo, compact = false) {
     return { valor: marc.bat1, recuperado: false };
   }
 
+  const hoje = new Date();
+  const hojeYMD = `${hoje.getFullYear()}${String(hoje.getMonth()+1).padStart(2,'0')}${String(hoje.getDate()).padStart(2,'0')}`;
+
   const days = [];
   for (let dia = 1; dia <= diasNoMes; dia++) {
     const dstr = `${String(dia).padStart(2,'0')}/${String(mesM).padStart(2,'0')}/${anoM}`;
     const key  = prefix + dstr;
     const h    = pontoHorarios.get(key);
     const marc = pontoMarcacao.get(key);
+    const diaYMD = `${anoM}${String(mesM).padStart(2,'0')}${String(dia).padStart(2,'0')}`;
+    const futuro = diaYMD > hojeYMD; // dia ainda não aconteceu — não julgar como falta
     const minP = h ? diff(h.ent1,h.sai1) + (h.ent2&&h.sai2?diff(h.ent2,h.sai2):0) : 0;
     const { valor: bat1, recuperado: bat1Recuperado } = adhResolveBat1(h?.ent1, marc);
     let minT=0;
     if (marc) [[bat1,marc.bat2],[marc.bat3,marc.bat4],[marc.bat5,marc.bat6],[marc.bat7,marc.bat8]]
       .forEach(([a,b])=>{ minT+=diff(a,b); });
     const diaIsento = isento && minT === 0; // sem nenhuma marcação neste dia
-    const he = diaIsento ? 0 : Math.max(0,minT-minP);
-    const falta = diaIsento ? 0 : Math.max(0,minP-minT);
-    const pct = minP>0 ? Math.max(0,Math.round((1-falta/minP)*100)) : null; // no schedule to compare against
+    const he = (diaIsento || futuro) ? 0 : Math.max(0,minT-minP);
+    const falta = (diaIsento || futuro) ? 0 : Math.max(0,minP-minT);
+    const pct = (futuro || !minP) ? null : Math.max(0,Math.round((1-falta/minP)*100)); // dia futuro ou sem programação → sem % a julgar
     const folga = !h; // sem horário programado neste dia = folga programada
     const trabalhouNaFolga = folga && minT > 0;
     const diaSemana = new Date(anoM, mesM-1, dia).getDay();
     const finalDeSemana = diaSemana === 0 || diaSemana === 6;
     days.push({dstr,ent1:h?.ent1,sai1:h?.sai1,ent2:h?.ent2,sai2:h?.sai2,
       bat1,bat1Recuperado,bat2:marc?.bat2,bat3:marc?.bat3,bat4:marc?.bat4,
-      minP,minT,he,falta,pct,folga,trabalhouNaFolga,finalDeSemana});
+      minP,minT,he,falta,pct,folga,trabalhouNaFolga,finalDeSemana,futuro});
   }
 
-  const totP = days.reduce((s,d)=>s+d.minP,0);
+  const totP = days.reduce((s,d)=>s+(d.futuro?0:d.minP),0);
   const totHE = days.reduce((s,d)=>s+d.he,0);
   const totF  = days.reduce((s,d)=>s+d.falta,0);
   const totPct = totP>0 ? Math.max(0,Math.round((1-totF/totP)*100)) : null;
@@ -1359,6 +1364,20 @@ function adhBuildPanelContent(mat, filial, nome, cargo, compact = false) {
     const bat1Cell = d.bat1Recuperado
       ? `<span title="Marcação não registrou a batida de 00:00 (falha comum do arquivo) — recuperado a partir do horário planejado">${d.bat1}*</span>`
       : (d.bat1||'—');
+
+    if (d.futuro) {
+      return `<tr${rowClass} style="opacity:.45">
+        <td>${d.dstr}</td>
+        <td style="color:#00a0d2">${d.ent1||'—'}</td>
+        <td style="color:#00a0d2">${d.sai1||'—'}</td>
+        <td style="color:#00a0d2">${d.ent2||'—'}</td>
+        <td style="color:#00a0d2">${d.sai2||'—'}</td>
+        <td colspan="4" style="color:var(--text-muted);font-style:italic">Ainda não ocorreu</td>
+        <td style="text-align:right;color:var(--text-muted)">—</td>
+        <td style="text-align:right;color:var(--text-muted)">—</td>
+        <td style="text-align:right;color:var(--text-muted)">—</td>
+      </tr>`;
+    }
 
     if (d.folga) {
       const aviso = d.trabalhouNaFolga
