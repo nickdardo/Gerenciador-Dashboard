@@ -381,12 +381,13 @@ async function adminLoadColabs(input) {
         const mat      = matRaw.padStart(6, '0');
         const nome    = String(row[1]||'').trim();
         const station = String(row[2]||'').trim().toUpperCase();
+        const admissao= adminXlsToISODate(row[3]);
         const hmês    = String(row[4]||'').trim();
         const situacao= String(row[10]||'').trim();
         const funcao  = String(row[12]||'').trim();
         const ch      = parseInt(hmês) || 0;
         if (station) basesSet.add(station);
-        records.push({ matricula: mat, nome, station, funcao, ch, situacao, ativo: true, updated_at: new Date() });
+        records.push({ matricula: mat, nome, station, funcao, ch, situacao, admissao, ativo: true, updated_at: new Date() });
       });
 
       const total = records.length;
@@ -1306,7 +1307,7 @@ async function adminAutoLoadFiles() {
       const PAGE = 1000;
       for (let from = 0; from < totalColabs; from += PAGE) {
         const { data: page } = await db.from('colaboradores')
-          .select('matricula,nome,station,funcao,ch,situacao')
+          .select('matricula,nome,station,funcao,ch,situacao,admissao')
           .eq('ativo', true)
           .range(from, from + PAGE - 1);
         if (page) allColabs.push(...page);

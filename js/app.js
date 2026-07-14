@@ -10,6 +10,7 @@ const ALL_ROLES = ['admin','gerente','coordenador','supervisor','lideranca','ope
 const NAV_ITEMS = [
   { id: 'escala',     icon: 'calendar',   label: 'Escala Online',  roles: ALL_ROLES },
   { id: 'aderencia',  icon: 'clock',      label: 'Aderência',      roles: ['admin','gerente','coordenador','supervisor','lideranca'] },
+  { id: 'headcount',  icon: 'users',      label: 'Headcount',      roles: ['admin','gerente','coordenador','supervisor','lideranca'] },
   { id: 'gerador',    icon: 'settings',   label: 'Gerador',        roles: ['admin','gerente','coordenador','supervisor','lideranca'] },
   { id: 'comparador', icon: 'bar-chart',  label: 'Comparador',     roles: ['admin','gerente','coordenador','supervisor'] },
   { id: 'admin',      icon: 'shield',     label: 'Admin',          roles: ['admin'] },
@@ -166,6 +167,7 @@ function navigateTo(pageId) {
     case 'gerador':    pageGerador(content);    break;
     case 'comparador': pageComparador(content); break;
     case 'aderencia':  pageAderencia(content);  break;
+    case 'headcount':  pageHeadcount(content);  break;
     case 'admin':      pageAdmin(content);      break;
     default: content.innerHTML = '<div class="page-empty">Em breve</div>';
   }

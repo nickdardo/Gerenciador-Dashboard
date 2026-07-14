@@ -244,7 +244,7 @@ async function adhEnsureRoster() {
     const PAGE = 1000;
     for (let from = 0; from < count; from += PAGE) {
       const { data, error } = await db.from('colaboradores')
-        .select('matricula,nome,station,funcao,ch,situacao')
+        .select('matricula,nome,station,funcao,ch,situacao,admissao')
         .range(from, from + PAGE - 1);
       if (error) throw new Error(error.message);
       if (data) all.push(...data);

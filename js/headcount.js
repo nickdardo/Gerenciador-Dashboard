@@ -1,0 +1,525 @@
+// ══════════════════════════════════════════════════════
+// HEADCOUNT — visão de quadro de pessoal
+// Cruza Colaboradores (HRCL204) + Férias (HRCL107) +
+// Desligamentos (HRCL106) + PCD (HRCL114)
+// ══════════════════════════════════════════════════════
+
+const HC_EXCLUDE_BASES = new Set(['HQ2', 'SEDE', 'GSE']); // mesma exclusão da Aderência
+
+// Agrupa cargos em categorias amplas (mesma ideia da Aderência, mas com os
+// nomes de grupo do modelo de referência).
+function hcCargoGrupo(funcao) {
+  const f = String(funcao || '').toUpperCase();
+  if (!f) return 'OTHERS';
+  if (f.includes('RAMPA'))                                 return 'RAMP';
+  if (f.includes('LIMPEZA'))                                return 'CLEANING';
+  if (f.includes('MECANIC') || f.includes('ELETRIC') || f.includes('GSE')) return 'GSE';
+  if (f.includes('PASSAGEIRO'))                             return 'PAX';
+  if (f.includes('SUPERVISOR'))                             return 'SUPERVISION';
+  if (f.includes('SEGURAN'))                                return 'SECURITY';
+  if (f.includes('GERENTE') || f.includes('COORDENADOR') || f.includes('LIDER')) return 'LEADERSHIP';
+  if (f.includes('OPERADOR'))                                return 'OPERATOR';
+  return 'OTHERS';
+}
+
+function hcIsDesligado(mat) {
+  return !!window.eoDesligados?.get(mat);
+}
+
+function hcIsFeriasAtiva(mat) {
+  const f = window.eoFerias?.get(mat);
+  if (!f || !f.data_inicio) return false;
+  const hoje = new Date().toISOString().slice(0,10);
+  const fim = f.data_fim || '9999-12-31';
+  return f.data_inicio <= hoje && hoje <= fim;
+}
+
+function hcIsAtestado(situacao) {
+  const s = String(situacao || '').toLowerCase();
+  return s.includes('auxílio') || s.includes('auxilio') || s.includes('atestado');
+}
+
+// Carga horária mensal → "equivalente diário" (180h/mês ≈ 6h/dia), usado só
+// para rotular a tabela de Função × Carga, igual o modelo de referência.
+function hcChDiario(ch) {
+  if (!ch) return null;
+  return Math.max(1, Math.round(ch / 30));
+}
+
+function hcAllBases() {
+  const set = new Set();
+  if (window.eoColabs) {
+    for (const [, r] of window.eoColabs) {
+      const st = (r.station || '').toUpperCase();
+      if (st && !HC_EXCLUDE_BASES.has(st)) set.add(st);
+    }
+  }
+  return [...set].sort();
+}
+
+// Garante que os 4 datasets estejam carregados (roster, férias, desligados, pcd)
+async function hcEnsureData() {
+  if (typeof adhEnsureRoster === 'function') await adhEnsureRoster();
+  if (!window.eoFerias) {
+    try {
+      const { data } = await db.from('colaboradores_ferias').select('matricula,data_inicio,data_fim,dias');
+      const byMat = new Map();
+      for (const r of (data||[])) {
+        const prev = byMat.get(r.matricula);
+        if (!prev || (r.data_fim||'') > (prev.data_fim||'')) byMat.set(r.matricula, r);
+      }
+      window.eoFerias = byMat;
+    } catch(e) { console.warn('[headcount] ferias:', e.message); window.eoFerias = new Map(); }
+  }
+  if (!window.eoDesligados) {
+    try {
+      const { data } = await db.from('colaboradores_desligados').select('matricula,filial,nome,cargo,ch,data_demissao,causa_texto');
+      const byMat = new Map();
+      for (const r of (data||[])) {
+        const prev = byMat.get(r.matricula);
+        if (!prev || (r.data_demissao||'') > (prev.data_demissao||'')) byMat.set(r.matricula, r);
+      }
+      window.eoDesligados = byMat;
+      window.eoDesligadosAll = data || []; // histórico completo (pode ter + de um desligamento por matrícula)
+    } catch(e) { console.warn('[headcount] desligados:', e.message); window.eoDesligados = new Map(); window.eoDesligadosAll = []; }
+  }
+  if (!window.eoPcd) {
+    try {
+      const { data } = await db.from('colaboradores_pcd').select('matricula,nome,cargo,deficiencia,base');
+      window.eoPcd = new Map((data||[]).map(r => [r.matricula, r]));
+    } catch(e) { console.warn('[headcount] pcd:', e.message); window.eoPcd = new Map(); }
+  }
+}
+
+// ── Cálculo principal ──────────────────────────────────
+function hcComputeStats(base) {
+  const roster = [];
+  if (window.eoColabs) {
+    for (const [mat, r] of window.eoColabs) {
+      const st = (r.station || '').toUpperCase();
+      if (HC_EXCLUDE_BASES.has(st)) continue;
+      if (base && st !== base.toUpperCase()) continue;
+      roster.push({ mat, ...r });
+    }
+  }
+
+  const headcount = roster.length;
+  let inativos = 0, pcd = 0, atestados = 0, feriasAtivas = 0;
+  let fullTime = 0, partTime = 0, somaCh = 0;
+
+  const grupos = new Map(); // grupo -> { staff, ferias }
+  const funcoes = new Map(); // funcao -> Map(chDiario -> count)
+  const chSet = new Set();
+
+  for (const r of roster) {
+    const desligado = hcIsDesligado(r.mat);
+    if (desligado) { inativos++; continue; } // não conta pro resto (só ativos abaixo)
+
+    if (window.eoPcd?.has(r.mat)) pcd++;
+    if (hcIsAtestado(r.situacao)) atestados++;
+    const emFerias = hcIsFeriasAtiva(r.mat);
+    if (emFerias) feriasAtivas++;
+
+    const ch = r.ch || 0;
+    somaCh += ch;
+    if (ch >= 180) fullTime++; else partTime++;
+
+    const grupo = hcCargoGrupo(r.funcao);
+    if (!grupos.has(grupo)) grupos.set(grupo, { staff: 0, ferias: 0 });
+    const g = grupos.get(grupo);
+    g.staff++;
+    if (emFerias) g.ferias++;
+
+    const funcao = String(r.funcao || 'SEM FUNÇÃO').trim();
+    const chd = hcChDiario(ch);
+    if (chd) chSet.add(chd);
+    if (!funcoes.has(funcao)) funcoes.set(funcao, new Map());
+    const fm = funcoes.get(funcao);
+    fm.set(chd, (fm.get(chd)||0) + 1);
+  }
+
+  const ativos = headcount - inativos;
+
+  // Desligados nos últimos 12 meses (olha o histórico completo, não só
+  // quem ainda aparece no cadastro — a maioria já nem está mais lá)
+  const hoje = new Date();
+  const ha12m = new Date(hoje.getFullYear(), hoje.getMonth()-12, hoje.getDate());
+  let desligados12m = 0;
+  for (const r of (window.eoDesligadosAll || [])) {
+    if (base && (r.filial||'').toUpperCase() !== base.toUpperCase()) continue;
+    if (!r.data_demissao) continue;
+    const d = new Date(r.data_demissao);
+    if (d >= ha12m && d <= hoje) desligados12m++;
+  }
+
+  const fte = somaCh > 0 ? Math.round(somaCh / 220 * 10) / 10 : 0;
+  const ftPct = (fullTime+partTime) > 0 ? Math.round(fullTime/(fullTime+partTime)*1000)/10 : 0;
+
+  // Meta = 10% do staff de cada grupo (regra de rotatividade de férias)
+  for (const [, g] of grupos) {
+    g.meta = Math.round(g.staff * 0.10);
+    g.delta = g.ferias - g.meta;
+  }
+
+  return {
+    headcount, ativos, inativos, pcd, atestados, feriasAtivas, desligados12m,
+    fullTime, partTime, ftPct, fte, grupos, funcoes, chList: [...chSet].sort((a,b)=>a-b),
+  };
+}
+
+// ══════════════════════════════════════════════════════
+// ENTRY POINT
+// ══════════════════════════════════════════════════════
+async function pageHeadcount(el) {
+  window._hcCurrentEl = el;
+  const role = currentUserProfile?.role;
+  const ROLES_OK = ['admin','gerente','coordenador','supervisor','lideranca'];
+  if (!ROLES_OK.includes(role)) {
+    el.innerHTML = `
+      <div class="page-header"><div>
+        <h1 class="page-title">Headcount</h1>
+        <p class="page-sub">Acesso restrito</p>
+      </div></div>
+      <div class="adh-denied">
+        <i class="ti ti-lock" style="font-size:36px;opacity:.2" aria-hidden="true"></i>
+        <p>Seu perfil não tem acesso a este módulo.</p>
+      </div>`;
+    return;
+  }
+
+  el.innerHTML = `
+    <div class="adm-progress-wrap" id="hc-load-progress">
+      <i class="ti ti-loader-2" style="font-size:26px;opacity:.5;animation:spin 1s linear infinite" aria-hidden="true"></i>
+      <div class="adm-progress-label">Carregando dados de headcount...</div>
+    </div>`;
+
+  await hcEnsureData();
+
+  const bases = currentUserProfile?.bases || [];
+  if (!window._hcBase) {
+    window._hcBase = (bases.includes('*') || role === 'admin') ? null : (bases[0] || null);
+  }
+  if (!window._hcSituFilter) window._hcSituFilter = 'todos';
+  if (!window._hcSearch) window._hcSearch = '';
+
+  hcRenderMain(el);
+}
+
+async function hcForceRefresh() {
+  window.eoColabs = null; window.eoFerias = null; window.eoDesligados = null; window.eoPcd = null;
+  const el = window._hcCurrentEl;
+  if (el) await pageHeadcount(el);
+}
+
+function hcChangeBase(base) {
+  window._hcBase = base || null;
+  hcRenderMain(window._hcCurrentEl);
+}
+
+function hcFilterSitu(mode, btn) {
+  document.querySelectorAll('.hc-situ-filter-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  window._hcSituFilter = mode;
+  hcRerenderColabTable();
+}
+
+function hcSearch(value) {
+  window._hcSearch = value;
+  hcRerenderColabTable();
+}
+
+// ── Main dashboard ─────────────────────────────────────
+function hcRenderMain(el) {
+  const base = window._hcBase;
+  const stats = hcComputeStats(base);
+  window._hcStats = stats;
+  window._hcColabListFull = hcBuildColabList(base);
+
+  const bases = hcAllBases();
+
+  const gruposOrdenados = [...stats.grupos.entries()].sort((a,b) => b[1].staff - a[1].staff);
+  const totalStaff  = gruposOrdenados.reduce((s,[,g])=>s+g.staff,0);
+  const totalFerias = gruposOrdenados.reduce((s,[,g])=>s+g.ferias,0);
+  const totalMeta   = gruposOrdenados.reduce((s,[,g])=>s+g.meta,0);
+  const totalDelta  = totalFerias - totalMeta;
+
+  const funcoesOrdenadas = [...stats.funcoes.entries()].sort((a,b) => {
+    const totalA = [...a[1].values()].reduce((x,y)=>x+y,0);
+    const totalB = [...b[1].values()].reduce((x,y)=>x+y,0);
+    return totalB - totalA;
+  });
+
+  const ftDeg = stats.ftPct * 3.6;
+
+  el.innerHTML = `
+    <div class="hc-wrap">
+      <div class="hc-header">
+        <div>
+          <h1 class="page-title">Headcount</h1>
+          <p class="page-sub">Quadro de pessoal · cruza Colaboradores, Férias, Desligamentos e PCD</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <select class="adh-month-select" onchange="hcChangeBase(this.value||null)">
+            <option value="">Todas as bases</option>
+            ${bases.map(b => `<option value="${b}" ${b===base?'selected':''}>${b}</option>`).join('')}
+          </select>
+          <button class="adh-refresh-btn" onclick="hcForceRefresh()">
+            <i class="ti ti-refresh" aria-hidden="true"></i> Atualizar
+          </button>
+        </div>
+      </div>
+
+      <div class="hc-kpi-row">
+        <div class="hc-kpi hc-kpi-blue">
+          <div class="hc-kpi-v">${stats.headcount.toLocaleString('pt-BR')}</div>
+          <div class="hc-kpi-l">Headcount</div>
+        </div>
+        <div class="hc-kpi hc-kpi-blue2">
+          <div class="hc-kpi-v">${stats.ativos.toLocaleString('pt-BR')}</div>
+          <div class="hc-kpi-l">Ativos</div>
+        </div>
+        <div class="hc-kpi hc-kpi-gray">
+          <div class="hc-kpi-v">${stats.inativos.toLocaleString('pt-BR')}</div>
+          <div class="hc-kpi-l">Inativos</div>
+        </div>
+        <div class="hc-kpi hc-kpi-yellow">
+          <div class="hc-kpi-v">${stats.pcd.toLocaleString('pt-BR')}</div>
+          <div class="hc-kpi-l">PCD</div>
+        </div>
+        <div class="hc-kpi hc-kpi-orange">
+          <div class="hc-kpi-v">${stats.atestados.toLocaleString('pt-BR')}</div>
+          <div class="hc-kpi-l">Atestados</div>
+        </div>
+        <div class="hc-kpi hc-kpi-green">
+          <div class="hc-kpi-v">${stats.feriasAtivas.toLocaleString('pt-BR')}</div>
+          <div class="hc-kpi-l">Férias</div>
+        </div>
+        <div class="hc-kpi hc-kpi-red" style="cursor:pointer" onclick="hcOpenDesligados()" title="Clique para ver a lista de desligados">
+          <div class="hc-kpi-v">${stats.desligados12m.toLocaleString('pt-BR')}</div>
+          <div class="hc-kpi-l">Desligados (-12m)</div>
+        </div>
+      </div>
+
+      <div class="hc-main-layout">
+
+        <div class="hc-left-col">
+          <div class="hc-panel">
+            <div style="display:flex;align-items:center;gap:16px">
+              <div class="hc-donut" style="background:conic-gradient(#00a0d2 0deg ${ftDeg}deg, #72c02c ${ftDeg}deg 360deg)">
+                <div class="hc-donut-hole">
+                  <div class="hc-donut-v">${stats.fte}</div>
+                  <div class="hc-donut-l">FTE</div>
+                </div>
+              </div>
+              <div style="font-size:11px">
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px"><span class="adh-leg-dot" style="background:#00a0d2"></span>Full Time — ${stats.ftPct}%</div>
+                <div style="display:flex;align-items:center;gap:6px"><span class="adh-leg-dot" style="background:#72c02c"></span>Part Time — ${(100-stats.ftPct).toFixed(1)}%</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="hc-panel">
+            <div class="hc-panel-title">Grupo</div>
+            <table class="hc-table">
+              <thead><tr><th>Grupo</th><th class="r">Staff</th><th class="r">Férias</th><th class="r">Meta</th><th class="r">Delta</th></tr></thead>
+              <tbody>
+                ${gruposOrdenados.map(([nome,g]) => `
+                  <tr>
+                    <td>${nome}</td>
+                    <td class="r">${g.staff}</td>
+                    <td class="r">${g.ferias}</td>
+                    <td class="r" style="color:var(--text-muted)">${g.meta}</td>
+                    <td class="r" style="color:${g.delta<0?'#fc8181':g.delta>0?'#72c02c':'var(--text-muted)'}">${g.delta>0?'+':''}${g.delta}</td>
+                  </tr>`).join('')}
+              </tbody>
+              <tfoot><tr>
+                <td>TOTAL</td><td class="r">${totalStaff}</td><td class="r">${totalFerias}</td>
+                <td class="r">${totalMeta}</td>
+                <td class="r" style="color:${totalDelta<0?'#fc8181':totalDelta>0?'#72c02c':'var(--text-muted)'}">${totalDelta>0?'+':''}${totalDelta}</td>
+              </tr></tfoot>
+            </table>
+            <div style="font-size:9px;color:var(--text-muted);margin-top:8px">Meta = 10% do staff (rotatividade mensal de férias) · Delta = Férias − Meta</div>
+          </div>
+
+          <div class="hc-panel">
+            <div class="hc-panel-title">Função × Carga horária</div>
+            <table class="hc-table">
+              <thead><tr>
+                <th>Função</th>
+                ${stats.chList.map(c => `<th class="r">${c}h</th>`).join('')}
+                <th class="r">Total</th>
+              </tr></thead>
+              <tbody>
+                ${funcoesOrdenadas.map(([funcao, chMap]) => {
+                  const total = [...chMap.values()].reduce((a,b)=>a+b,0);
+                  return `<tr>
+                    <td>${funcao}</td>
+                    ${stats.chList.map(c => `<td class="r">${chMap.get(c) || ''}</td>`).join('')}
+                    <td class="r" style="font-weight:700">${total}</td>
+                  </tr>`;
+                }).join('')}
+              </tbody>
+              <tfoot><tr>
+                <td>TOTAL</td>
+                ${stats.chList.map(c => `<td class="r">${funcoesOrdenadas.reduce((s,[,m])=>s+(m.get(c)||0),0)}</td>`).join('')}
+                <td class="r">${stats.ativos}</td>
+              </tr></tfoot>
+            </table>
+          </div>
+        </div>
+
+        <div class="hc-right-col">
+          <div class="hc-panel" style="height:100%">
+            <div class="adh-search-wrap" style="margin-bottom:12px">
+              <i class="ti ti-search" aria-hidden="true"></i>
+              <input type="text" id="hc-search-input" placeholder="Buscar por nome ou matrícula..." oninput="hcSearch(this.value)">
+            </div>
+            <div class="adh-colab-header-row">
+              <span id="hc-colab-count" style="font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted)">
+                ${window._hcColabListFull.length} colaboradores
+              </span>
+              <div class="adh-sort-btns">
+                <button class="adh-sort-btn hc-situ-filter-btn active" onclick="hcFilterSitu('todos',this)">Todos</button>
+                <button class="adh-sort-btn hc-situ-filter-btn" onclick="hcFilterSitu('ativo',this)">Ativos</button>
+                <button class="adh-sort-btn hc-situ-filter-btn" onclick="hcFilterSitu('inativo',this)">Inativos</button>
+              </div>
+            </div>
+            <div class="adh-colab-table-wrap" style="max-height:640px;overflow-y:auto">
+              <table class="adh-colab-table" id="hc-colab-table">
+                <thead>
+                  <tr>
+                    <th>Matrícula</th><th>Filial</th><th>Nome</th><th>Função</th>
+                    <th class="r">CH</th><th>Situação</th><th>Admissão</th><th>Observação</th>
+                  </tr>
+                </thead>
+                <tbody id="hc-colab-tbody">${hcRenderColabRows(window._hcColabListFull)}</tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>`;
+}
+
+// Build the base colaborador list (roster only, cross-referenced)
+function hcBuildColabList(base) {
+  const out = [];
+  if (!window.eoColabs) return out;
+  for (const [mat, r] of window.eoColabs) {
+    const st = (r.station || '').toUpperCase();
+    if (HC_EXCLUDE_BASES.has(st)) continue;
+    if (base && st !== base.toUpperCase()) continue;
+    const desligado = hcIsDesligado(mat);
+    const desligInfo = window.eoDesligados?.get(mat);
+    const feriasInfo = window.eoFerias?.get(mat);
+    const emFerias = hcIsFeriasAtiva(mat);
+    out.push({
+      mat, nome: r.nome, filial: st, funcao: r.funcao, ch: r.ch,
+      situacao: r.situacao, admissao: r.admissao || null,
+      desligado, demissao: desligInfo?.data_demissao || null,
+      emFerias, feriasFim: feriasInfo?.data_fim || null,
+      pcd: !!window.eoPcd?.get(mat),
+    });
+  }
+  return out.sort((a,b) => (a.nome||'').localeCompare(b.nome||''));
+}
+
+function hcFmtISODate(iso) {
+  if (!iso) return null;
+  const s = String(iso).split('T')[0];
+  const [y,m,d] = s.split('-');
+  if (!y || !m || !d) return iso;
+  return `${d}/${m}/${y}`;
+}
+
+function hcRenderColabRows(list) {
+  return list.map(c => {
+    const situClass = c.desligado ? 'adh-situ-desligado' : c.emFerias ? 'adh-situ-ferias' : hcIsAtestado(c.situacao) ? 'adh-situ-afastado' : (String(c.situacao||'').trim().toLowerCase()==='trabalhando' ? 'adh-situ-ativo' : 'adh-situ-afastado');
+    const situTxt = c.desligado ? 'Desligado' : (c.situacao || '—');
+    const obs = c.desligado ? hcFmtISODate(c.demissao) : (c.emFerias ? `Férias até ${hcFmtISODate(c.feriasFim)}` : '');
+    const pcdBadge = c.pcd ? `<i class="ti ti-wheelchair" style="color:#a78bfa;font-size:12px;margin-left:5px" title="PCD" aria-hidden="true"></i>` : '';
+    return `<tr class="adh-colab-row">
+      <td style="font-family:monospace;font-size:11px">${c.mat}</td>
+      <td>${c.filial}</td>
+      <td style="font-weight:500">${c.nome||''}${pcdBadge}</td>
+      <td style="color:var(--text-muted);font-size:11px">${c.funcao||''}</td>
+      <td class="r">${c.ch?c.ch+'h':'—'}</td>
+      <td><span class="adh-situ-badge ${situClass}">${situTxt}</span></td>
+      <td style="font-size:11px;color:var(--text-muted)">${hcFmtISODate(c.admissao)||'—'}</td>
+      <td style="font-size:11px;color:var(--text-muted)">${obs||'—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function hcRerenderColabTable() {
+  let list = (window._hcColabListFull || []).slice();
+  if (window._hcSituFilter === 'ativo')   list = list.filter(c => !c.desligado);
+  if (window._hcSituFilter === 'inativo') list = list.filter(c => c.desligado);
+  const q = (window._hcSearch||'').trim().toLowerCase();
+  if (q) list = list.filter(c => String(c.mat).includes(q) || String(c.nome||'').toLowerCase().includes(q));
+
+  const tbody = document.getElementById('hc-colab-tbody');
+  if (tbody) tbody.innerHTML = hcRenderColabRows(list);
+  const countEl = document.getElementById('hc-colab-count');
+  const total = (window._hcColabListFull||[]).length;
+  if (countEl) countEl.textContent = list.length===total ? `${total} colaboradores` : `${list.length} de ${total} colaboradores`;
+}
+
+// ── Drill-down: Desligados ─────────────────────────────
+function hcOpenDesligados() {
+  hcRenderDesligados(window._hcCurrentEl);
+}
+
+function hcRenderDesligados(el) {
+  const base = window._hcBase;
+  const hoje = new Date();
+  const ha12m = new Date(hoje.getFullYear(), hoje.getMonth()-12, hoje.getDate());
+
+  let rows = (window.eoDesligadosAll || []).filter(r => {
+    if (base && (r.filial||'').toUpperCase() !== base.toUpperCase()) return false;
+    if (!r.data_demissao) return false;
+    const d = new Date(r.data_demissao);
+    return d >= ha12m && d <= hoje;
+  });
+  rows = rows.sort((a,b) => (b.data_demissao||'').localeCompare(a.data_demissao||''));
+
+  el.innerHTML = `
+    <div class="hc-wrap">
+      <div class="hc-header">
+        <div style="display:flex;align-items:center;gap:12px">
+          <button class="adh-back-btn" onclick="hcRenderMain(window._hcCurrentEl)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
+            </svg>
+          </button>
+          <div>
+            <h1 class="page-title">Desligamentos ${base?`<span class="adh-base-badge">${base}</span>`:''}</h1>
+            <p class="page-sub">Últimos 12 meses · ${rows.length.toLocaleString('pt-BR')} registros</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="hc-panel">
+        <div class="adh-colab-table-wrap">
+          <table class="adh-colab-table">
+            <thead><tr>
+              <th>Matrícula</th><th>Filial</th><th>Nome</th><th>Cargo</th>
+              <th class="r">CH</th><th>Demissão</th><th>Causa</th>
+            </tr></thead>
+            <tbody>
+              ${rows.map(r => `<tr class="adh-colab-row">
+                <td style="font-family:monospace;font-size:11px">${r.matricula}</td>
+                <td>${r.filial}</td>
+                <td style="font-weight:500">${r.nome||''}</td>
+                <td style="color:var(--text-muted);font-size:11px">${r.cargo||''}</td>
+                <td class="r">${r.ch?r.ch+'h':'—'}</td>
+                <td style="font-size:11px">${hcFmtISODate(r.data_demissao)||'—'}</td>
+                <td style="font-size:11px;color:var(--text-muted)">${r.causa_texto||'—'}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+}
