@@ -3,7 +3,21 @@
 // Abas: Usuários | Arquivos | Aderência | Malha | Log
 // ══════════════════════════════════════════════════════
 
-const BASES_DISPONIVEIS = ['BEL','GRU','GIG','CGH','REC','FOR','SSA','CWB','POA','BSB','MAO','NAT','AJU','FLN','MCZ','SLZ','BVB','STM','JPA','CPV'];
+// Lista de bases disponíveis — calculada dinamicamente a partir do cadastro
+// de colaboradores (window.eoColabs), em vez de uma lista fixa que ficava
+// desatualizada. Fallback pequeno só pro caso raro do cadastro ainda não
+// ter carregado quando a tela abre.
+const BASES_FALLBACK = ['BEL','GRU','GIG','CGH','REC','FOR','SSA','CWB','POA','BSB','MAO','NAT','AJU','FLN','MCZ','SLZ','BVB','STM','JPA','CPV'];
+function adminAllBases() {
+  const set = new Set();
+  if (window.eoColabs?.size) {
+    for (const [, r] of window.eoColabs) {
+      const st = (r.station || '').trim().toUpperCase();
+      if (st && !['HQ2','SEDE','GSE'].includes(st)) set.add(st);
+    }
+  }
+  return set.size ? [...set].sort() : BASES_FALLBACK;
+}
 
 const ROLES = {
   admin:       { label: 'Admin Master', color: '#ef4444' },
@@ -75,10 +89,12 @@ async function adminRender() {
     { data: users },
     { data: escalas },
     { data: logs },
+    { data: preconfig },
   ] = await Promise.all([
     db.from('profiles').select('*').order('created_at', { ascending: false }),
     db.from('escalas').select('base,status,updated_at'),
     db.from('access_log').select('*').order('created_at', { ascending: false }).limit(100),
+    db.from('usuarios_preconfigurados').select('*').order('created_at', { ascending: false }),
   ]);
 
   const totalUsers = users?.length || 0;
@@ -123,7 +139,7 @@ async function adminRender() {
     <div id="adm-tab-content"></div>
   `;
 
-  window._adminData = { users: users||[], escalas: escalas||[], logs: logs||[] };
+  window._adminData = { users: users||[], escalas: escalas||[], logs: logs||[], preconfig: preconfig||[] };
   adminTabSwitch('users', document.querySelector('.adm-tab-btn'));
 }
 
@@ -131,11 +147,11 @@ async function adminRender() {
 function adminTabSwitch(tab, btn) {
   document.querySelectorAll('.adm-tab-btn').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
-  const { users, escalas, logs } = window._adminData || {};
+  const { users, escalas, logs, preconfig } = window._adminData || {};
   const el = document.getElementById('adm-tab-content');
   if (!el) return;
   switch(tab) {
-    case 'users':    el.innerHTML = adminUsersTab(users||[]);   break;
+    case 'users':    el.innerHTML = adminUsersTab(users||[], preconfig||[]); break;
     case 'files':    el.innerHTML = adminFilesTab();            break;
     case 'aderencia':adminAderenciaTab(el);                    break;
     case 'malha':    el.innerHTML = adminMalhaTab();            break;
@@ -156,11 +172,13 @@ function adminKpi(label, value, color, icon) {
 // ══════════════════════════════════════════════════════
 // TAB: USUÁRIOS
 // ══════════════════════════════════════════════════════
-function adminUsersTab(users) {
+function adminUsersTab(users, preconfig = []) {
+  const pendentes = preconfig.filter(p => !p.usado);
+
   return `
     <div class="adm-section-header">
       <span>${users.length} usuários cadastrados</span>
-      <button class="adm-btn-primary" onclick="adminNewUser()">+ Novo usuário</button>
+      <button class="adm-btn-primary" onclick="adminNewPreconfig()">+ Pré-configurar acesso</button>
     </div>
     <div class="adm-table-wrap">
       <table class="adm-table">
@@ -189,7 +207,40 @@ function adminUsersTab(users) {
             </tr>`).join('')}
         </tbody>
       </table>
-    </div>`;
+    </div>
+
+    <div class="adm-section-header" style="margin-top:24px">
+      <span>${pendentes.length} pré-configurados aguardando cadastro</span>
+    </div>
+    ${pendentes.length ? `
+    <div class="adm-table-wrap">
+      <table class="adm-table">
+        <thead><tr><th>Email</th><th>Nome</th><th>Perfil</th><th>Bases</th><th>Criado em</th><th></th></tr></thead>
+        <tbody>
+          ${pendentes.map(p => `
+            <tr>
+              <td style="color:var(--text-muted)">${p.email}</td>
+              <td style="font-weight:500">${p.nome||'—'}</td>
+              <td><span class="adm-role-badge" style="background:${ROLES[p.role]?.color||'#666'}22;color:${ROLES[p.role]?.color||'#666'}">${ROLES[p.role]?.label||p.role}</span></td>
+              <td>
+                ${p.bases?.includes('*')
+                  ? '<span style="color:#ef4444;font-size:11px;font-weight:600">Todas</span>'
+                  : (p.bases?.length
+                    ? p.bases.map(b=>`<span class="adm-base-tag">${b}</span>`).join('')
+                    : '<span style="color:var(--text-muted);font-size:11px">Nenhuma</span>')}
+              </td>
+              <td style="color:var(--text-muted);font-size:11px">${new Date(p.created_at).toLocaleDateString('pt-BR')}</td>
+              <td>
+                <button class="adm-btn-edit" onclick="adminEditPreconfig(${p.id})">Editar</button>
+                <button class="adm-btn-edit" style="color:#fc8181" onclick="adminDeletePreconfig(${p.id})">Remover</button>
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>` : `
+    <div style="padding:24px;text-align:center;color:var(--text-muted);font-size:12px;border:1px dashed var(--border);border-radius:10px">
+      Nenhum e-mail pré-configurado. Clique em "+ Pré-configurar acesso" pra deixar o perfil e as bases já prontos antes da pessoa criar a conta.
+    </div>`}`;
 }
 
 // ══════════════════════════════════════════════════════
@@ -1212,6 +1263,9 @@ function adminGoToLogPage(page) {
 async function adminEditUser(userId) {
   const { data: u } = await db.from('profiles').select('*').eq('id', userId).single();
   if (!u) return;
+  if (!window.eoColabs?.size && typeof adhEnsureRoster === 'function') {
+    await adhEnsureRoster();
+  }
 
   const overlay = document.createElement('div');
   overlay.className = 'adm-overlay';
@@ -1245,7 +1299,7 @@ async function adminEditUser(userId) {
                 onchange="adminToggleAllBases(this)"> Todas as bases
             </label>
             <div class="adm-bases-grid" id="edit-bases-grid">
-              ${BASES_DISPONIVEIS.map(b=>`
+              ${adminAllBases().map(b=>`
                 <label class="adm-base-chk">
                   <input type="checkbox" name="edit-base" value="${b}"
                     ${u.bases?.includes('*')||u.bases?.includes(b)?'checked':''}
@@ -1288,8 +1342,117 @@ async function adminSaveUser(userId) {
   adminRender();
 }
 
-function adminNewUser() {
-  alert('Para adicionar um usuário, peça que ele crie a conta na tela de login com um email @dnata.com.br. Após o cadastro, configure o perfil aqui.');
+// ══════════════════════════════════════════════════════
+// PRÉ-CONFIGURAÇÃO DE ACESSO (por e-mail, antes do cadastro)
+// ══════════════════════════════════════════════════════
+async function adminNewPreconfig() {
+  if (!window.eoColabs?.size && typeof adhEnsureRoster === 'function') {
+    await adhEnsureRoster();
+  }
+  adminPreconfigModal(null);
+}
+
+async function adminEditPreconfig(id) {
+  const { data: p } = await db.from('usuarios_preconfigurados').select('*').eq('id', id).single();
+  if (!p) return;
+  if (!window.eoColabs?.size && typeof adhEnsureRoster === 'function') {
+    await adhEnsureRoster();
+  }
+  adminPreconfigModal(p);
+}
+
+function adminPreconfigModal(p) {
+  const isEdit = !!p;
+  const overlay = document.createElement('div');
+  overlay.className = 'adm-overlay';
+  overlay.innerHTML = `
+    <div class="adm-modal">
+      <div class="adm-modal-header">
+        <span>${isEdit ? 'Editar pré-configuração' : 'Pré-configurar acesso'}</span>
+        <button onclick="this.closest('.adm-overlay').remove()">
+          <i class="ti ti-x" aria-hidden="true"></i>
+        </button>
+      </div>
+      <div class="adm-modal-body">
+        <p style="font-size:11px;color:var(--text-muted);margin:-4px 0 4px">
+          Cadastre o e-mail com o perfil e as bases certas antes da pessoa criar a conta —
+          quando ela se cadastrar com esse e-mail, tudo já entra configurado automaticamente.
+        </p>
+        <div class="adm-field"><label>Email</label>
+          <input id="pre-email" class="adm-input" type="email" placeholder="nome@dnata.com.br"
+            value="${p?.email||''}" ${isEdit?'disabled style="opacity:.5"':''}></div>
+        <div class="adm-field"><label>Nome (opcional)</label>
+          <input id="pre-nome" class="adm-input" placeholder="Ex: João Silva" value="${p?.nome||''}"></div>
+        <div class="adm-field"><label>Perfil de acesso</label>
+          <select id="pre-role" class="adm-input">
+            <option value="admin"       ${p?.role==='admin'       ?'selected':''}>Admin Master</option>
+            <option value="gerente"     ${!p||p?.role==='gerente' ?'selected':''}>Gerente</option>
+            <option value="coordenador" ${p?.role==='coordenador' ?'selected':''}>Coordenador</option>
+            <option value="supervisor"  ${p?.role==='supervisor'  ?'selected':''}>Supervisor</option>
+            <option value="lideranca"   ${p?.role==='lideranca'   ?'selected':''}>Liderança</option>
+            <option value="operador"    ${p?.role==='operador'    ?'selected':''}>Operador</option>
+          </select>
+        </div>
+        <div class="adm-field"><label>Bases autorizadas</label>
+          <div class="adm-bases-picker">
+            <label class="adm-base-chk" style="color:#ef4444;font-weight:600">
+              <input type="checkbox" id="edit-base-all" ${p?.bases?.includes('*')?'checked':''}
+                onchange="adminToggleAllBases(this)"> Todas as bases
+            </label>
+            <div class="adm-bases-grid" id="edit-bases-grid">
+              ${adminAllBases().map(b=>`
+                <label class="adm-base-chk">
+                  <input type="checkbox" name="edit-base" value="${b}"
+                    ${p?.bases?.includes('*')||p?.bases?.includes(b)?'checked':''}
+                    ${p?.bases?.includes('*')?'disabled':''}>
+                  ${b}
+                </label>`).join('')}
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="adm-modal-footer">
+        <button class="adm-btn-sec" onclick="this.closest('.adm-overlay').remove()">Cancelar</button>
+        <button class="adm-btn-primary" onclick="adminSavePreconfig(${p?.id||'null'})">Salvar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function adminSavePreconfig(id) {
+  const email = document.getElementById('pre-email').value.trim().toLowerCase();
+  const nome  = document.getElementById('pre-nome').value.trim();
+  const role  = document.getElementById('pre-role').value;
+  const allBases = document.getElementById('edit-base-all').checked;
+  const bases = allBases
+    ? ['*']
+    : [...document.querySelectorAll('input[name="edit-base"]:checked')].map(c=>c.value);
+
+  if (!email || !email.endsWith('@dnata.com.br')) {
+    alert('Informe um email @dnata.com.br válido.');
+    return;
+  }
+
+  const payload = { email, nome, role, bases, updated_at: new Date() };
+  const { error } = id
+    ? await db.from('usuarios_preconfigurados').update(payload).eq('id', id)
+    : await db.from('usuarios_preconfigurados').insert(payload);
+
+  if (error) {
+    alert(error.message.includes('duplicate') || error.message.includes('unique')
+      ? 'Esse email já está pré-configurado. Edite o registro existente na lista.'
+      : 'Erro: ' + error.message);
+    return;
+  }
+  document.querySelector('.adm-overlay')?.remove();
+  adminRender();
+}
+
+async function adminDeletePreconfig(id) {
+  if (!confirm('Remover essa pré-configuração? A pessoa vai entrar com o perfil padrão (Operador, sem bases) se se cadastrar depois.')) return;
+  const { error } = await db.from('usuarios_preconfigurados').delete().eq('id', id);
+  if (error) { alert('Erro: '+error.message); return; }
+  adminRender();
 }
 
 // ══════════════════════════════════════════════════════
