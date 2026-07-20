@@ -453,6 +453,7 @@ async function adhForceRefresh() {
   if (typeof pontoHorarios !== 'undefined') pontoHorarios = new Map();
   if (typeof pontoMarcacao !== 'undefined') pontoMarcacao = new Map();
   adhBaseKPI = null; adhColabKPI = null;
+  window._adhHistData = null; window._adhHistPage = 1;
   const el = window._adhCurrentEl;
   if (el) await pageAderencia(el);
 }
@@ -663,9 +664,10 @@ function adhPrevMonthOf(mes) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
 }
 
+const ADH_HIST_PAGE_SIZE = 10;
+
 async function adhRenderMultiBase(el) {
   const global  = adhGlobalPct();
-  const gColor  = adhPctColor(global);
   const mes     = window._adhMes || adhCurrentMonth();
 
   const sorted = [...adhBaseKPI.entries()]
@@ -680,8 +682,7 @@ async function adhRenderMultiBase(el) {
     totProg   += d.prog_h;
   }
 
-  // Comparação real com o mês anterior (não é estimado) — busca direto do
-  // banco, é uma tabela pequena (uma linha por base).
+  // Comparação real com o mês anterior — busca direto do banco (tabela pequena).
   let prevByBase = new Map();
   let prevGlobal = null;
   try {
@@ -694,6 +695,36 @@ async function adhRenderMultiBase(el) {
       if (prevMp > 0) prevGlobal = Math.max(0, Math.round((1-prevDv/prevMp)*1000)/10);
     }
   } catch(e) { console.warn('[aderencia] comparação c/ mês anterior:', e.message); }
+
+  // Histórico completo (todos os meses já calculados até hoje) — usado no
+  // gráfico de evolução e na tabela multi-mês. Cresce sozinho com o tempo,
+  // conforme os meses forem sendo recalculados; sem dado retroativo inventado.
+  if (!window._adhHistData) {
+    try {
+      const { data } = await db.from('aderencia_kpi').select('filial,mes,pct,min_prog,desvio');
+      const rows = (data || []).filter(r => r.mes && r.mes !== 'antigo');
+      const meses = [...new Set(rows.map(r=>r.mes))].sort();
+      const porBase = new Map();
+      const acumPorMes = new Map();
+      rows.forEach(r => {
+        if (!porBase.has(r.filial)) porBase.set(r.filial, new Map());
+        porBase.get(r.filial).set(r.mes, parseFloat(r.pct));
+        if (!acumPorMes.has(r.mes)) acumPorMes.set(r.mes, { mp:0, dv:0 });
+        const pm = acumPorMes.get(r.mes);
+        pm.mp += r.min_prog || 0; pm.dv += r.desvio || 0;
+      });
+      const mediaPorMes = new Map();
+      for (const [m, pm] of acumPorMes) mediaPorMes.set(m, pm.mp > 0 ? Math.max(0, Math.round((1-pm.dv/pm.mp)*1000)/10) : null);
+      window._adhHistData = meses.length ? { meses, porBase, mediaPorMes } : { meses:[mes], porBase:new Map(), mediaPorMes:new Map([[mes,global]]) };
+    } catch(e) {
+      console.warn('[aderencia] histórico:', e.message);
+      window._adhHistData = { meses:[mes], porBase:new Map(), mediaPorMes:new Map([[mes,global]]) };
+    }
+  }
+  const hist = window._adhHistData;
+  const mediaNMeses = hist.meses.length
+    ? Math.round(hist.meses.reduce((s,m)=>s+(hist.mediaPorMes.get(m) ?? 0),0) / hist.meses.length * 10) / 10
+    : global;
 
   const deltaHTML = (atual, anterior, unidade='pp') => {
     if (anterior == null) return `<span style="color:var(--text-muted);font-size:10px">sem dado anterior</span>`;
@@ -710,6 +741,18 @@ async function adhRenderMultiBase(el) {
     return `<i class="ti ti-flag-3" style="color:#b56666" title="Crítico" aria-hidden="true"></i>`;
   };
 
+  // Paginação da tabela multi-mês
+  if (!window._adhHistPage) window._adhHistPage = 1;
+  const totalPages = Math.max(1, Math.ceil(sorted.length / ADH_HIST_PAGE_SIZE));
+  window._adhHistPage = Math.min(Math.max(1, window._adhHistPage), totalPages);
+  const pgStart = (window._adhHistPage - 1) * ADH_HIST_PAGE_SIZE;
+  const pageSorted = sorted.slice(pgStart, pgStart + ADH_HIST_PAGE_SIZE);
+
+  let pageBtns = '';
+  for (let p = 1; p <= totalPages; p++) {
+    pageBtns += `<button class="adm-page-btn ${p===window._adhHistPage?'active':''}" onclick="adhGoToHistPage(${p})">${p}</button>`;
+  }
+
   el.innerHTML = `
     <div class="adh-full-wrap adh-exec">
 
@@ -721,66 +764,158 @@ async function adhRenderMultiBase(el) {
         </div>
         <div style="display:flex;align-items:center;gap:12px">
           ${adhMonthSelectorHTML()}
-          <button class="adh-refresh-btn" onclick="adhForceRefresh()" title="Atualizar dados agora (ignora cache local)">
-            <i class="ti ti-refresh" aria-hidden="true"></i> Atualizar
+          <button class="adh-refresh-btn" onclick="adhExportExcel()" title="Exportar histórico para Excel">
+            <i class="ti ti-download" aria-hidden="true"></i> Exportar Excel
           </button>
+          <div style="position:relative">
+            <button class="adh-refresh-btn" onclick="adhToggleAcoesMenu(this)">
+              <i class="ti ti-dots" aria-hidden="true"></i> Ações
+            </button>
+            <div class="adh-acoes-menu" style="display:none">
+              <button onclick="adhForceRefresh()"><i class="ti ti-refresh" aria-hidden="true"></i> Atualizar</button>
+              <button onclick="document.getElementById('adh-evolucao-section').scrollIntoView({behavior:'smooth'})"><i class="ti ti-chart-line" aria-hidden="true"></i> Ver histórico</button>
+            </div>
+          </div>
         </div>
       </div>
 
-      <!-- KPI strip -->
-      <div class="adh-exec-kpis">
-        <div class="adh-exec-kpi">
-          <div class="adh-exec-kpi-l">Escala realizada</div>
-          <div class="adh-exec-kpi-v">${global}%</div>
+      <!-- KPI cards -->
+      <div class="adh-exec-kpis" style="grid-template-columns:repeat(4,1fr)">
+        <div class="adh-exec-kpi" style="border-top:1px solid rgba(56,189,248,.35)">
+          <div style="display:flex;align-items:center;gap:7px;margin-bottom:8px"><i class="ti ti-chart-bar" style="color:#38bdf8;font-size:13px" aria-hidden="true"></i><span class="adh-exec-kpi-l" style="margin:0">Aderência (${hist.meses.length} ${hist.meses.length===1?'mês':'meses'})</span></div>
+          <div class="adh-exec-kpi-v">${mediaNMeses}%</div>
           ${deltaHTML(global, prevGlobal)}
         </div>
-        <div class="adh-exec-kpi">
-          <div class="adh-exec-kpi-l">Horas extras</div>
+        <div class="adh-exec-kpi" style="border-top:1px solid rgba(201,162,74,.35)">
+          <div style="display:flex;align-items:center;gap:7px;margin-bottom:8px"><i class="ti ti-clock-plus" style="color:#c9a24a;font-size:13px" aria-hidden="true"></i><span class="adh-exec-kpi-l" style="margin:0">Total horas extras</span></div>
           <div class="adh-exec-kpi-v">${adhFmtH(totHE)}</div>
         </div>
-        <div class="adh-exec-kpi">
-          <div class="adh-exec-kpi-l">Horas a menos</div>
-          <div class="adh-exec-kpi-v">${adhFmtH(totFalta)}</div>
+        <div class="adh-exec-kpi" style="border-top:1px solid rgba(181,102,102,.35)">
+          <div style="display:flex;align-items:center;gap:7px;margin-bottom:8px"><i class="ti ti-clock-minus" style="color:#b56666;font-size:13px" aria-hidden="true"></i><span class="adh-exec-kpi-l" style="margin:0">Total horas a menos</span></div>
+          <div class="adh-exec-kpi-v">−${adhFmtH(totFalta)}</div>
         </div>
-        <div class="adh-exec-kpi">
-          <div class="adh-exec-kpi-l">Colaboradores</div>
+        <div class="adh-exec-kpi" style="border-top:1px solid rgba(167,139,250,.35)">
+          <div style="display:flex;align-items:center;gap:7px;margin-bottom:8px"><i class="ti ti-users" style="color:#a78bfa;font-size:13px" aria-hidden="true"></i><span class="adh-exec-kpi-l" style="margin:0">Colaboradores ativos</span></div>
           <div class="adh-exec-kpi-v">${(window.eoColabs?.size || totColabs).toLocaleString('pt-BR')}</div>
           <div style="font-size:10px;color:var(--text-muted)">${totColabs.toLocaleString('pt-BR')} com ponto registrado</div>
         </div>
       </div>
 
-      <!-- Base ranking table -->
+      <!-- Evolução -->
+      <div class="adh-exec-panel" id="adh-evolucao-section" style="margin-bottom:16px">
+        <div class="adh-exec-panel-title">Evolução da aderência ${hist.meses.length < 3 ? '<span style="text-transform:none;font-weight:400;opacity:.7">· histórico começou a ser guardado agora, vai crescendo mês a mês</span>' : ''}</div>
+        ${adhBuildEvolutionChart(hist)}
+      </div>
+
+      <!-- Base ranking multi-mês -->
       <div class="adh-exec-panel">
         <div class="adh-exec-panel-title">Ranking por base</div>
+        <div style="overflow-x:auto">
         <table class="adh-exec-table">
           <thead>
             <tr>
-              <th>Base</th><th>Aderência</th><th>Variação</th>
+              <th>Base</th>
+              ${hist.meses.map(m => `<th>${adhMonthLabel(m)}</th>`).join('')}
+              <th>Variação</th>
               <th class="r">Extras</th><th class="r">Déficit</th><th class="r">Colab.</th><th style="text-align:center">Status</th>
             </tr>
           </thead>
           <tbody>
-            ${sorted.map(([base, d]) => `
+            ${pageSorted.map(([base, d]) => {
+              const porMes = hist.porBase.get(base) || new Map();
+              return `
               <tr onclick="adhOpenBase('${base}')">
                 <td style="font-weight:500">${base}</td>
-                <td>
-                  <div style="display:flex;align-items:center;gap:8px">
-                    <div class="adh-exec-bar"><div style="width:${Math.round(d.pct)}%"></div></div>
-                    <span style="font-variant-numeric:tabular-nums">${d.pct}%</span>
-                  </div>
-                </td>
+                ${hist.meses.map(m => {
+                  const v = porMes.get(m);
+                  if (v == null) return `<td style="color:var(--text-muted)">—</td>`;
+                  return `<td><div style="display:flex;align-items:center;gap:6px"><div class="adh-exec-bar" style="width:40px"><div style="width:${Math.round(v)}%"></div></div><span style="font-size:11px">${v}%</span></div></td>`;
+                }).join('')}
                 <td>${deltaHTML(d.pct, prevByBase.get(base))}</td>
                 <td class="r" style="color:var(--text-muted)">+${adhFmtH(d.he_h)}</td>
                 <td class="r" style="color:var(--text-muted)">−${adhFmtH(d.falta_h)}</td>
                 <td class="r" style="color:var(--text-muted)">${d.colabs}</td>
                 <td style="text-align:center">${statusIcon(d.pct)}</td>
-              </tr>`).join('')}
+              </tr>`;
+            }).join('')}
           </tbody>
         </table>
+        </div>
+        ${totalPages > 1 ? `
+        <div class="adm-pagination">
+          <span class="adm-page-info">Página ${window._adhHistPage} de ${totalPages}</span>
+          <div class="adm-page-btns">${pageBtns}</div>
+        </div>` : ''}
       </div>
 
     </div>
   `;
+}
+
+function adhGoToHistPage(page) {
+  window._adhHistPage = page;
+  const el = window._adhCurrentEl;
+  if (el) adhRenderMultiBase(el);
+}
+
+function adhToggleAcoesMenu(btn) {
+  const menu = btn.nextElementSibling;
+  const wasOpen = menu.style.display === 'block';
+  document.querySelectorAll('.adh-acoes-menu').forEach(m => m.style.display = 'none');
+  menu.style.display = wasOpen ? 'none' : 'block';
+}
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.adh-acoes-menu') && !e.target.closest('button')) {
+    document.querySelectorAll('.adh-acoes-menu').forEach(m => m.style.display = 'none');
+  }
+});
+
+function adhBuildEvolutionChart(hist) {
+  const meses = hist.meses;
+  if (!meses.length) return `<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:12px">Sem histórico ainda.</div>`;
+  const vals = meses.map(m => hist.mediaPorMes.get(m) ?? 0);
+  const W = 900, H = 160, PAD = 34;
+  const n = meses.length;
+  const x = i => n > 1 ? PAD + i*(W-PAD*2)/(n-1) : W/2;
+  const y = v => H-24 - (v/100)*(H-44);
+  const pts = vals.map((v,i) => `${x(i)},${y(v)}`).join(' ');
+  const areaPts = `${x(0)},${H-24} ${pts} ${x(n-1)},${H-24}`;
+  const dots = vals.map((v,i) => `<circle cx="${x(i)}" cy="${y(v)}" r="3.5" fill="#5fa87a"><title>${adhMonthLabel(meses[i])}: ${v}%</title></circle>`).join('');
+  const labels = meses.map((m,i) => `<text x="${x(i)}" y="${H-6}" text-anchor="middle" font-size="9" fill="#6b7488">${adhMonthLabel(m)}</text>`).join('');
+  const gridY = [0,25,50,75,100].map(v => `<line x1="${PAD}" y1="${y(v)}" x2="${W-PAD}" y2="${y(v)}" stroke="rgba(255,255,255,.05)"/><text x="4" y="${y(v)+3}" font-size="8" fill="#6b7488">${v}</text>`).join('');
+  return `
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;font-size:10px;color:var(--text-muted)">
+      <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#5fa87a;margin-right:4px"></span>Realizado (média da rede)</span>
+    </div>
+    <svg width="100%" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+      ${gridY}
+      <polygon points="${areaPts}" fill="#5fa87a" opacity="0.08"/>
+      <polyline points="${pts}" fill="none" stroke="#5fa87a" stroke-width="2"/>
+      ${dots}
+      ${labels}
+    </svg>`;
+}
+
+function adhExportExcel() {
+  try {
+    const hist = window._adhHistData;
+    const base = [...adhBaseKPI.entries()].filter(([,d]) => d.min_prog > 0);
+    const rows = base.map(([filial, d]) => {
+      const row = { Base: filial };
+      (hist?.meses || []).forEach(m => { row[adhMonthLabel(m)] = hist.porBase.get(filial)?.get(m) ?? ''; });
+      row['Colaboradores'] = d.colabs;
+      row['Horas extras (h)'] = Math.round(d.he_h*10)/10;
+      row['Horas a menos (h)'] = Math.round(d.falta_h*10)/10;
+      return row;
+    });
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Aderencia');
+    XLSX.writeFile(wb, `aderencia_${window._adhMes || adhCurrentMonth()}.xlsx`);
+  } catch(e) {
+    console.error('[aderencia] export excel:', e);
+    alert('Não foi possível exportar agora: ' + e.message);
+  }
 }
 
 function adhOpenBase(base) {

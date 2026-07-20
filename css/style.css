@@ -1658,6 +1658,35 @@ a { color: inherit; text-decoration: none; }
 }
 .adh-exec-bar div { height: 100%; background: #6b8fb5; border-radius: 3px; }
 
+.adh-acoes-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: var(--adh-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--adh-radius-sm);
+  box-shadow: var(--adh-shadow-card);
+  min-width: 170px;
+  z-index: 50;
+  padding: 4px;
+}
+.adh-acoes-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.adh-acoes-menu button:hover { background: rgba(0,160,210,.08); color: var(--text-primary); }
+.adh-acoes-menu button i { font-size: 14px; }
+
 .adh-full-kpi {
   background: var(--adh-surface);
   border: 1px solid var(--border-strong);
