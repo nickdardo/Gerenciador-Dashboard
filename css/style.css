@@ -1599,6 +1599,65 @@ a { color: inherit; text-decoration: none; }
   gap: 14px;
 }
 
+/* Estilo executivo — mais sóbrio, poucas cores */
+.adh-exec-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border-radius: var(--adh-radius-lg);
+  overflow: hidden;
+  margin-bottom: 20px;
+}
+.adh-exec-kpi {
+  background: var(--adh-surface);
+  padding: 16px 18px;
+}
+.adh-exec-kpi-l { font-size: 11px; color: var(--text-muted); margin-bottom: 6px; }
+.adh-exec-kpi-v { font-size: 24px; font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+
+.adh-exec-panel {
+  background: var(--adh-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--adh-radius-lg);
+  padding: 18px 20px;
+  box-shadow: var(--adh-shadow-card);
+}
+.adh-exec-panel-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  margin-bottom: 12px;
+}
+
+.adh-exec-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.adh-exec-table th {
+  text-align: left;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-strong);
+}
+.adh-exec-table th.r, .adh-exec-table td.r { text-align: right; }
+.adh-exec-table td { padding: 10px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.adh-exec-table tbody tr { cursor: pointer; transition: background .15s; }
+.adh-exec-table tbody tr:hover td { background: rgba(0,160,210,.04); }
+.adh-exec-table tbody tr:last-child td { border-bottom: none; }
+
+.adh-exec-bar {
+  width: 70px; height: 5px;
+  background: var(--border-strong);
+  border-radius: 3px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.adh-exec-bar div { height: 100%; background: #6b8fb5; border-radius: 3px; }
+
 .adh-full-kpi {
   background: var(--adh-surface);
   border: 1px solid var(--border-strong);

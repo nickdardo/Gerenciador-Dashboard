@@ -657,9 +657,16 @@ async function pageAderencia(el) {
 // ══════════════════════════════════════════════════════
 // VIEW 1 — ADMIN: Multi-base overview
 // ══════════════════════════════════════════════════════
-function adhRenderMultiBase(el) {
+function adhPrevMonthOf(mes) {
+  const [y,m] = mes.split('-').map(Number);
+  const d = new Date(y, m-2, 1);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+}
+
+async function adhRenderMultiBase(el) {
   const global  = adhGlobalPct();
   const gColor  = adhPctColor(global);
+  const mes     = window._adhMes || adhCurrentMonth();
 
   const sorted = [...adhBaseKPI.entries()]
     .filter(([,d]) => d.min_prog > 0)
@@ -673,143 +680,105 @@ function adhRenderMultiBase(el) {
     totProg   += d.prog_h;
   }
 
+  // Comparação real com o mês anterior (não é estimado) — busca direto do
+  // banco, é uma tabela pequena (uma linha por base).
+  let prevByBase = new Map();
+  let prevGlobal = null;
+  try {
+    const prevMes = adhPrevMonthOf(mes);
+    const { data } = await db.from('aderencia_kpi').select('filial,pct,min_prog,desvio').eq('mes', prevMes);
+    if (data?.length) {
+      prevByBase = new Map(data.map(r => [r.filial, parseFloat(r.pct)]));
+      const prevMp = data.reduce((s,r)=>s+(r.min_prog||0),0);
+      const prevDv = data.reduce((s,r)=>s+(r.desvio||0),0);
+      if (prevMp > 0) prevGlobal = Math.max(0, Math.round((1-prevDv/prevMp)*1000)/10);
+    }
+  } catch(e) { console.warn('[aderencia] comparação c/ mês anterior:', e.message); }
+
+  const deltaHTML = (atual, anterior, unidade='pp') => {
+    if (anterior == null) return `<span style="color:var(--text-muted);font-size:10px">sem dado anterior</span>`;
+    const d = Math.round((atual-anterior)*10)/10;
+    if (Math.abs(d) < 0.1) return `<span style="color:var(--text-muted);font-size:10px">= vs. mês anterior</span>`;
+    const cor = d > 0 ? '#5fa87a' : '#b56666';
+    const seta = d > 0 ? '↑' : '↓';
+    return `<span style="color:${cor};font-size:10px">${seta} ${Math.abs(d)}${unidade} vs. mês anterior</span>`;
+  };
+
+  const statusIcon = (pct) => {
+    if (pct >= 85) return `<i class="ti ti-check" style="color:#5fa87a" title="Dentro da meta" aria-hidden="true"></i>`;
+    if (pct >= 70) return `<i class="ti ti-alert-triangle" style="color:#c9a24a" title="Atenção" aria-hidden="true"></i>`;
+    return `<i class="ti ti-flag-3" style="color:#b56666" title="Crítico" aria-hidden="true"></i>`;
+  };
+
   el.innerHTML = `
-    <div class="adh-full-wrap">
+    <div class="adh-full-wrap adh-exec">
 
       <!-- Header -->
       <div class="adh-full-header">
         <div>
           <h1 class="adh-full-title">Aderência ao Ponto</h1>
-          <p class="adh-full-sub">Todas as bases · clique em uma base para detalhar</p>
+          <p class="adh-full-sub">Todas as bases · ${adhMonthLabel(mes)}</p>
         </div>
         <div style="display:flex;align-items:center;gap:12px">
           ${adhMonthSelectorHTML()}
           <button class="adh-refresh-btn" onclick="adhForceRefresh()" title="Atualizar dados agora (ignora cache local)">
             <i class="ti ti-refresh" aria-hidden="true"></i> Atualizar
           </button>
-          <span class="adh-global-badge" style="color:${gColor}">${global}% escala realizada</span>
         </div>
       </div>
 
       <!-- KPI strip -->
-      <div class="adh-full-kpis">
-        <div class="adh-full-kpi" style="border-top:3px solid ${gColor}">
-          <div class="adh-full-kpi-v" style="color:${gColor}">${global}%</div>
-          <div class="adh-full-kpi-l">% Escala realizada</div>
-          <div class="adh-full-kpi-bar"><div style="width:${global}%;background:${gColor}"></div></div>
+      <div class="adh-exec-kpis">
+        <div class="adh-exec-kpi">
+          <div class="adh-exec-kpi-l">Escala realizada</div>
+          <div class="adh-exec-kpi-v">${global}%</div>
+          ${deltaHTML(global, prevGlobal)}
         </div>
-        <div class="adh-full-kpi" style="border-top:3px solid #f6ad55">
-          <div class="adh-full-kpi-v" style="color:#f6ad55">${adhFmtH(totHE)}</div>
-          <div class="adh-full-kpi-l">Total horas extras</div>
+        <div class="adh-exec-kpi">
+          <div class="adh-exec-kpi-l">Horas extras</div>
+          <div class="adh-exec-kpi-v">${adhFmtH(totHE)}</div>
         </div>
-        <div class="adh-full-kpi" style="border-top:3px solid #fc8181">
-          <div class="adh-full-kpi-v" style="color:#fc8181">${adhFmtH(totFalta)}</div>
-          <div class="adh-full-kpi-l">Total horas a menos</div>
+        <div class="adh-exec-kpi">
+          <div class="adh-exec-kpi-l">Horas a menos</div>
+          <div class="adh-exec-kpi-v">${adhFmtH(totFalta)}</div>
         </div>
-        <div class="adh-full-kpi" style="border-top:3px solid #8896aa">
-          <div class="adh-full-kpi-v" style="color:#8896aa">${(window.eoColabs?.size || totColabs).toLocaleString('pt-BR')}</div>
-          <div class="adh-full-kpi-l">Colaboradores (total)</div>
-          <div class="adh-full-kpi-sub" style="color:#72c02c">${totColabs.toLocaleString('pt-BR')} com ponto registrado</div>
-        </div>
-        <div class="adh-full-kpi" style="border-top:3px solid #9f7aea">
-          <div class="adh-full-kpi-v" style="color:#9f7aea">${adhFmtH(totProg)}</div>
-          <div class="adh-full-kpi-l">Horas programadas</div>
+        <div class="adh-exec-kpi">
+          <div class="adh-exec-kpi-l">Colaboradores</div>
+          <div class="adh-exec-kpi-v">${(window.eoColabs?.size || totColabs).toLocaleString('pt-BR')}</div>
+          <div style="font-size:10px;color:var(--text-muted)">${totColabs.toLocaleString('pt-BR')} com ponto registrado</div>
         </div>
       </div>
 
-      <!-- Main content: cards + chart side by side -->
-      <div class="adh-main-layout">
-
-        <!-- Left: base cards -->
-        <div class="adh-cards-section">
-          <div class="adh-full-grid-label">% Escala realizada por base</div>
-          <div class="adh-full-grid" id="adh-base-grid">
-            ${(() => {
-              const rosterByBase = new Map();
-              if (window.eoColabs) {
-                for (const [, r] of window.eoColabs) {
-                  const st = (r.station || '').toUpperCase();
-                  rosterByBase.set(st, (rosterByBase.get(st) || 0) + 1);
-                }
-              }
-              return sorted.map(([base, d]) => {
-                const cl = adhPctColor(d.pct);
-                const rosterTotal = rosterByBase.get(base);
-                return `
-                <div class="adh-full-card" onclick="adhOpenBase('${base}')">
-                  <div class="adh-full-card-top">
-                    <span class="adh-full-card-name">${base}</span>
-                    <span class="adh-full-card-pct" style="color:${cl}">${d.pct}%</span>
+      <!-- Base ranking table -->
+      <div class="adh-exec-panel">
+        <div class="adh-exec-panel-title">Ranking por base</div>
+        <table class="adh-exec-table">
+          <thead>
+            <tr>
+              <th>Base</th><th>Aderência</th><th>Variação</th>
+              <th class="r">Extras</th><th class="r">Déficit</th><th class="r">Colab.</th><th style="text-align:center">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${sorted.map(([base, d]) => `
+              <tr onclick="adhOpenBase('${base}')">
+                <td style="font-weight:500">${base}</td>
+                <td>
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <div class="adh-exec-bar"><div style="width:${Math.round(d.pct)}%"></div></div>
+                    <span style="font-variant-numeric:tabular-nums">${d.pct}%</span>
                   </div>
-                  <div class="adh-full-card-bar">
-                    <div style="width:${d.pct}%;background:${cl};height:100%;border-radius:2px"></div>
-                  </div>
-                  <div class="adh-full-card-stats">
-                    <span><span style="color:#f6ad55">+</span>${adhFmtH(d.he_h)}</span>
-                    <span><span style="color:#fc8181">−</span>${adhFmtH(d.falta_h)}</span>
-                    <span title="Colaboradores com ponto registrado${rosterTotal?` / total no cadastro (${rosterTotal})`:''}">
-                      <i class="ti ti-users" style="font-size:9px;opacity:.5" aria-hidden="true"></i>
-                      ${d.colabs}${rosterTotal ? `<span style="opacity:.45">/${rosterTotal}</span>` : ''}
-                    </span>
-                  </div>
-                </div>`;
-              }).join('');
-            })()}
-          </div>
-        </div>
-
-        <!-- Right: analytics chart -->
-        <div class="adh-chart-section">
-          <div class="adh-chart-panel">
-            <div class="adh-chart-panel-title">% Escala realizada por base</div>
-            <div class="adh-chart-panel-sub">Ordenado por aderência</div>
-            <div class="adh-bar-chart" id="adh-bar-chart">
-              ${sorted.map(([base, d]) => {
-                const cl = adhPctColor(d.pct);
-                const w  = Math.round(d.pct);
-                return `
-                  <div class="adh-chart-row" onclick="adhOpenBase('${base}')">
-                    <span class="adh-chart-base">${base}</span>
-                    <div class="adh-chart-track">
-                      <div class="adh-chart-fill" style="width:${w}%;background:${cl}"></div>
-                    </div>
-                    <span class="adh-chart-val" style="color:${cl}">${d.pct}%</span>
-                  </div>`;
-              }).join('')}
-            </div>
-          </div>
-
-          <div class="adh-chart-panel adh-chart-panel-he">
-            <div class="adh-chart-panel-title">HE × Horas a Menos por base</div>
-            <div class="adh-chart-panel-sub">Top 10 por volume total</div>
-            <div class="adh-he-chart" id="adh-he-chart">
-              ${[...sorted].sort((a,b)=>(b[1].he_h+b[1].falta_h)-(a[1].he_h+a[1].falta_h)).slice(0,10).map(([base,d]) => {
-                const maxVal = Math.max(d.he_h, d.falta_h, 1);
-                const totalMax = Math.max(...[...adhBaseKPI.values()].map(x=>x.he_h+x.falta_h), 1);
-                const scale = (v) => Math.round(v / (totalMax * 0.7) * 100);
-                return `
-                  <div class="adh-he-row" onclick="adhOpenBase('${base}')">
-                    <span class="adh-chart-base">${base}</span>
-                    <div class="adh-he-bars">
-                      <div class="adh-he-bar-he"  style="width:${Math.min(scale(d.he_h),100)}%;background:#f6ad55"></div>
-                      <div class="adh-he-bar-gap" style="height:2px"></div>
-                      <div class="adh-he-bar-fat" style="width:${Math.min(scale(d.falta_h),100)}%;background:#fc8181"></div>
-                    </div>
-                    <div class="adh-he-vals">
-                      <span style="color:#f6ad55">+${adhFmtH(d.he_h)}</span>
-                      <span style="color:#fc8181">−${adhFmtH(d.falta_h)}</span>
-                    </div>
-                  </div>`;
-              }).join('')}
-              <div class="adh-he-legend">
-                <span><span class="adh-leg-dot" style="background:#f6ad55"></span>Horas extras</span>
-                <span><span class="adh-leg-dot" style="background:#fc8181"></span>Horas a menos</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
+                </td>
+                <td>${deltaHTML(d.pct, prevByBase.get(base))}</td>
+                <td class="r" style="color:var(--text-muted)">+${adhFmtH(d.he_h)}</td>
+                <td class="r" style="color:var(--text-muted)">−${adhFmtH(d.falta_h)}</td>
+                <td class="r" style="color:var(--text-muted)">${d.colabs}</td>
+                <td style="text-align:center">${statusIcon(d.pct)}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
       </div>
+
     </div>
   `;
 }
@@ -845,7 +814,6 @@ function adhRenderDetalhe(el, base, showBack) {
   const he_h   = bk ? bk.he_h   : [...adhBaseKPI.values()].reduce((a,d)=>a+d.he_h,0);
   const fat_h  = bk ? bk.falta_h: [...adhBaseKPI.values()].reduce((a,d)=>a+d.falta_h,0);
   const prog_h = bk ? bk.prog_h  : [...adhBaseKPI.values()].reduce((a,d)=>a+d.prog_h,0);
-  const pctClr = adhPctColor(pct);
 
   // Build collaborator list for this base — merges the FULL roster
   // (colaboradores table, window.eoColabs) with the computed KPI, so people
@@ -896,7 +864,7 @@ function adhRenderDetalhe(el, base, showBack) {
               Aderência ao Ponto
               ${base ? `<span class="adh-base-badge">${base}</span>` : ''}
             </h1>
-            <p class="adh-full-sub">Horas trabalhadas ÷ horas programadas</p>
+            <p class="adh-full-sub">Horas trabalhadas ÷ horas programadas · ${adhMonthLabel(window._adhMes || adhCurrentMonth())}</p>
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:12px">
@@ -908,28 +876,28 @@ function adhRenderDetalhe(el, base, showBack) {
       </div>
 
       <!-- KPIs -->
-      <div class="adh-det-kpis-row">
-        <div class="adh-det-kpi-card" style="border-top:3px solid ${pctClr}">
-          <div class="adh-det-kpi-v" style="color:${pctClr}">${pct}%</div>
-          <div class="adh-det-kpi-l">% Escala realizada</div>
-          <div class="adh-full-kpi-bar" style="margin-top:8px"><div style="width:${pct}%;background:${pctClr}"></div></div>
+      <div class="adh-exec-kpis">
+        <div class="adh-exec-kpi">
+          <div class="adh-exec-kpi-l">Escala realizada</div>
+          <div class="adh-exec-kpi-v">${pct}%</div>
+          <div class="adh-exec-bar" style="margin-top:6px"><div style="width:${Math.round(pct)}%"></div></div>
         </div>
-        <div class="adh-det-kpi-card" style="border-top:3px solid #f6ad55">
-          <div class="adh-det-kpi-v" style="color:#f6ad55">${adhFmtH(he_h)}</div>
-          <div class="adh-det-kpi-l">Horas extras</div>
+        <div class="adh-exec-kpi">
+          <div class="adh-exec-kpi-l">Horas extras</div>
+          <div class="adh-exec-kpi-v">${adhFmtH(he_h)}</div>
         </div>
-        <div class="adh-det-kpi-card" style="border-top:3px solid #fc8181">
-          <div class="adh-det-kpi-v" style="color:#fc8181">${adhFmtH(fat_h)}</div>
-          <div class="adh-det-kpi-l">Horas a menos</div>
+        <div class="adh-exec-kpi">
+          <div class="adh-exec-kpi-l">Horas a menos</div>
+          <div class="adh-exec-kpi-v">${adhFmtH(fat_h)}</div>
         </div>
-        <div class="adh-det-kpi-card" style="border-top:3px solid #9f7aea">
-          <div class="adh-det-kpi-v" style="color:#9f7aea">${adhFmtH(prog_h)}</div>
-          <div class="adh-det-kpi-l">Horas programadas</div>
+        <div class="adh-exec-kpi">
+          <div class="adh-exec-kpi-l">Horas programadas</div>
+          <div class="adh-exec-kpi-v">${adhFmtH(prog_h)}</div>
         </div>
-        <div class="adh-det-kpi-card" style="border-top:3px solid #8896aa">
-          <div class="adh-det-kpi-v" style="color:#8896aa">${colabs.toLocaleString('pt-BR')}</div>
-          <div class="adh-det-kpi-l">Colaboradores (total)</div>
-          ${bk ? `<div class="adh-full-kpi-sub" style="color:#72c02c">${bk.colabs.toLocaleString('pt-BR')} com ponto registrado</div>` : ''}
+        <div class="adh-exec-kpi">
+          <div class="adh-exec-kpi-l">Colaboradores</div>
+          <div class="adh-exec-kpi-v">${colabs.toLocaleString('pt-BR')}</div>
+          ${bk ? `<div style="font-size:10px;color:var(--text-muted)">${bk.colabs.toLocaleString('pt-BR')} com ponto registrado</div>` : ''}
         </div>
       </div>
 
