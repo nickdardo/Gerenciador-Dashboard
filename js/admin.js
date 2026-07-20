@@ -777,6 +777,7 @@ async function adminLoadHorarios(input) {
       adminAddHistory('horarios',file.name);
       adminSetFileStatus('horarios',`✓ ${total.toLocaleString()} registros · ${period}`,'ok');
       if (typeof pontoParseHorarios==='function') pontoParseHorarios(wb,null);
+      if (typeof pontoDbSave === 'function') pontoDbSave('horarios', records); // atualiza cache local já
       // Auto-recalcular aderência se marcação também já estiver disponível
       if (typeof pontoMarcacao !== 'undefined' && pontoMarcacao?.size > 0 && typeof adminPrecomputeAderencia === 'function') {
         adminSetFileStatus('horarios', 'Recalculando aderência...', 'load');
@@ -882,6 +883,7 @@ async function adminLoadMarcacao(input) {
       adminAddHistory('marcacao',file.name);
       adminSetFileStatus('marcacao',`✓ ${total.toLocaleString()} registros · ${period}`,'ok');
       if (typeof pontoParseMarcacao==='function') pontoParseMarcacao(wb,null);
+      if (typeof pontoDbSave === 'function') pontoDbSave('marcacao', records); // atualiza cache local já
       // Auto-recalcular aderência se horários também já estiver disponível
       if (typeof pontoHorarios !== 'undefined' && pontoHorarios?.size > 0 && typeof adminPrecomputeAderencia === 'function') {
         adminSetFileStatus('marcacao', 'Recalculando aderência...', 'load');
@@ -1589,11 +1591,88 @@ async function adminLoadFileOnDemand(folder, onProgress) {
   }
 }
 
+// ══════════════════════════════════════════════════════
+// CACHE LOCAL (IndexedDB) — evita rebaixar Horários/Marcação (300k+ linhas)
+// toda vez que a página recarrega. O painel só é atualizado ~2x/dia pelo
+// Admin, então guardamos os dados brutos no navegador por algumas horas.
+// ══════════════════════════════════════════════════════
+const PONTO_DB_NAME = 'dnata_ponto_cache';
+const PONTO_DB_TTL  = 8 * 60 * 60 * 1000; // 8 horas
+
+function pontoDbOpen() {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') { reject(new Error('IndexedDB indisponível')); return; }
+    const req = indexedDB.open(PONTO_DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const idb = req.result;
+      if (!idb.objectStoreNames.contains('raw')) idb.createObjectStore('raw', { keyPath: 'type' });
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror   = () => reject(req.error);
+  });
+}
+
+async function pontoDbSave(type, data) {
+  try {
+    const idb = await pontoDbOpen();
+    await new Promise((resolve, reject) => {
+      const tx = idb.transaction('raw', 'readwrite');
+      tx.objectStore('raw').put({ type, data, cachedAt: Date.now() });
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch(e) { console.warn('[pontoDb] save', type, e.message); }
+}
+
+async function pontoDbLoad(type) {
+  try {
+    const idb = await pontoDbOpen();
+    return await new Promise((resolve, reject) => {
+      const tx = idb.transaction('raw', 'readonly');
+      const req = tx.objectStore('raw').get(type);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  } catch(e) { console.warn('[pontoDb] load', type, e.message); return null; }
+}
+
+async function pontoDbClear() {
+  try {
+    const idb = await pontoDbOpen();
+    await new Promise((resolve, reject) => {
+      const tx = idb.transaction('raw', 'readwrite');
+      tx.objectStore('raw').clear();
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch(e) { console.warn('[pontoDb] clear', e.message); }
+}
+
 async function _adminLoadFileOnDemandRun(folder, onProgress) {
   // For DB-backed data: build in-memory Maps for aderencia engine
   if (folder === 'horarios') {
     if (typeof pontoHorarios !== 'undefined' && pontoHorarios.size > 0) return true;
     try {
+      // Tenta o cache local (IndexedDB) primeiro — evita rebaixar 250k linhas
+      // se já carregamos nas últimas horas.
+      const cached = await pontoDbLoad('horarios');
+      if (cached?.data?.length && (Date.now() - cached.cachedAt) < PONTO_DB_TTL) {
+        pontoHorarios = new Map();
+        cached.data.forEach(r => {
+          const [y,m,d] = r.data.split('-');
+          const dstr = `${d}/${m}/${y}`;
+          const mat = String(r.matricula).padStart(6,'0');
+          const key = `${r.filial}|${mat}|${dstr}`;
+          pontoHorarios.set(key, { filial:r.filial, mat, nome:r.nome,
+            ent1:r.ent1, sai1:r.sai1, ent2:r.ent2, sai2:r.sai2, date:dstr });
+        });
+        adminFiles.horarios = { count: cached.data.length, date: 'cache local' };
+        adhBaseKPI = null; adhColabKPI = null;
+        console.log(`[onDemand] horarios: ${pontoHorarios.size} keys (cache local, sem baixar do banco)`);
+        if (pontoMarcacao?.size > 0) adminPrecomputeAderencia().catch(console.warn);
+        return true;
+      }
+
       console.log('[onDemand] Loading horarios from DB...');
       const { count: horCount } = await db.from('horarios').select('*', { count:'exact', head:true });
       if (!horCount) return false;
@@ -1612,6 +1691,7 @@ async function _adminLoadFileOnDemandRun(folder, onProgress) {
       adminFiles.horarios = { count: data.length, date: 'banco' };
       adhBaseKPI = null; adhColabKPI = null;
       console.log(`[onDemand] horarios: ${pontoHorarios.size} keys`);
+      pontoDbSave('horarios', data); // guarda pra próxima vez
       // Trigger precompute if marcacao also loaded
       if (pontoMarcacao?.size > 0) adminPrecomputeAderencia().catch(console.warn);
       return true;
@@ -1621,6 +1701,25 @@ async function _adminLoadFileOnDemandRun(folder, onProgress) {
   if (folder === 'marcacao') {
     if (typeof pontoMarcacao !== 'undefined' && pontoMarcacao.size > 0) return true;
     try {
+      const cached = await pontoDbLoad('marcacao');
+      if (cached?.data?.length && (Date.now() - cached.cachedAt) < PONTO_DB_TTL) {
+        pontoMarcacao = new Map();
+        cached.data.forEach(r => {
+          const [y,m,d] = r.data.split('-');
+          const dstr = `${d}/${m}/${y}`;
+          const mat = String(r.matricula).padStart(6,'0');
+          const key = `${r.filial}|${mat}|${dstr}`;
+          pontoMarcacao.set(key, { filial:r.filial, mat, nome:r.nome,
+            bat1:r.bat1, bat2:r.bat2, bat3:r.bat3, bat4:r.bat4,
+            bat5:r.bat5, bat6:r.bat6, bat7:r.bat7, bat8:r.bat8 });
+        });
+        if (typeof adhSplitOvernightMarcacao === 'function') adhSplitOvernightMarcacao(pontoMarcacao);
+        adminFiles.marcacao = { count: cached.data.length, date: 'cache local' };
+        adhBaseKPI = null; adhColabKPI = null;
+        console.log(`[onDemand] marcacao: ${pontoMarcacao.size} keys (cache local, sem baixar do banco)`);
+        return true;
+      }
+
       console.log('[onDemand] Loading marcacao from DB...');
       const { count: marCount } = await db.from('marcacao').select('*', { count:'exact', head:true });
       if (!marCount) return false;
@@ -1640,6 +1739,7 @@ async function _adminLoadFileOnDemandRun(folder, onProgress) {
       adminFiles.marcacao = { count: data.length, date: 'banco' };
       adhBaseKPI = null; adhColabKPI = null; // force recompute
       console.log(`[onDemand] marcacao: ${pontoMarcacao.size} keys`);
+      pontoDbSave('marcacao', data); // guarda pra próxima vez
       return true;
     } catch(e) { console.error('[onDemand] marcacao:', e.message); return false; }
   }

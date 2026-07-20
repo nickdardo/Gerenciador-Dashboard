@@ -447,6 +447,11 @@ async function adhForceRefresh() {
     }
     toRemove.forEach(k => localStorage.removeItem(k));
   } catch(_){}
+  // "Atualizar" é o botão de forçar mesmo — limpa o cache local (IndexedDB)
+  // dos dados brutos também, pra garantir que baixa tudo de novo do banco.
+  if (typeof pontoDbClear === 'function') { try { await pontoDbClear(); } catch(_){} }
+  if (typeof pontoHorarios !== 'undefined') pontoHorarios = new Map();
+  if (typeof pontoMarcacao !== 'undefined') pontoMarcacao = new Map();
   adhBaseKPI = null; adhColabKPI = null;
   const el = window._adhCurrentEl;
   if (el) await pageAderencia(el);
