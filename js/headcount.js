@@ -268,36 +268,21 @@ function hcRenderMain(el) {
         </div>
       </div>
 
-      <div class="hc-kpi-row">
-        <div class="hc-kpi hc-kpi-blue">
-          <div class="hc-kpi-v">${stats.headcount.toLocaleString('pt-BR')}</div>
-          <div class="hc-kpi-l">Staff</div>
-        </div>
-        <div class="hc-kpi hc-kpi-blue2">
-          <div class="hc-kpi-v">${stats.ativos.toLocaleString('pt-BR')}</div>
-          <div class="hc-kpi-l">Ativos</div>
-        </div>
-        <div class="hc-kpi hc-kpi-gray">
-          <div class="hc-kpi-v">${stats.inativos.toLocaleString('pt-BR')}</div>
-          <div class="hc-kpi-l">Inativos</div>
-        </div>
-        <div class="hc-kpi hc-kpi-yellow">
-          <div class="hc-kpi-v">${stats.pcd.toLocaleString('pt-BR')}</div>
-          <div class="hc-kpi-l">PCD</div>
-        </div>
-        <div class="hc-kpi hc-kpi-orange">
-          <div class="hc-kpi-v">${stats.atestados.toLocaleString('pt-BR')}</div>
-          <div class="hc-kpi-l">Atestados</div>
-        </div>
-        <div class="hc-kpi hc-kpi-green">
-          <div class="hc-kpi-v">${stats.feriasAtivas.toLocaleString('pt-BR')}</div>
-          <div class="hc-kpi-l">Férias</div>
-        </div>
-        <div class="hc-kpi hc-kpi-red" style="cursor:pointer" onclick="hcOpenDesligados()" title="Clique para ver a lista de desligados">
-          <div class="hc-kpi-v">${stats.desligados12m.toLocaleString('pt-BR')}</div>
-          <div class="hc-kpi-l">Desligados (-12m)</div>
-        </div>
-      </div>
+      ${adhKpiCardsHTML([
+        { key:'blue', icon:'ti-users', title:'Quadro', rows: [
+          { label:'Staff', sub:'total no cadastro', value: stats.headcount.toLocaleString('pt-BR') },
+          { label:'Ativos', sub:'trabalhando hoje', value: stats.ativos.toLocaleString('pt-BR') },
+        ]},
+        { key:'amber', icon:'ti-report-medical', title:'Situação', rows: [
+          { label:'Atestados', sub:'auxílio doença', value: stats.atestados.toLocaleString('pt-BR') },
+          { label:'Inativos', sub:'no cadastro, já desligados', value: stats.inativos.toLocaleString('pt-BR') },
+          { label:'PCD', sub:'pessoas com deficiência', value: stats.pcd.toLocaleString('pt-BR') },
+        ]},
+        { key:'red', icon:'ti-calendar-off', title:'Ausências', rows: [
+          { label:'Férias', sub:'ativas agora', value: stats.feriasAtivas.toLocaleString('pt-BR') },
+          { label:'Desligados', sub:'últimos 12 meses · clique p/ ver', value: `<span style="cursor:pointer" onclick="hcOpenDesligados()" title="Clique para ver a lista de desligados">${stats.desligados12m.toLocaleString('pt-BR')}</span>`, color:'#b56666' },
+        ]},
+      ])}
 
       <div class="hc-main-layout">
 

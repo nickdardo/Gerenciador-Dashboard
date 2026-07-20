@@ -453,7 +453,7 @@ async function adhForceRefresh() {
   if (typeof pontoHorarios !== 'undefined') pontoHorarios = new Map();
   if (typeof pontoMarcacao !== 'undefined') pontoMarcacao = new Map();
   adhBaseKPI = null; adhColabKPI = null;
-  window._adhHistData = null; window._adhHistPage = 1;
+  window._adhHistData = null;
   const el = window._adhCurrentEl;
   if (el) await pageAderencia(el);
 }
@@ -664,8 +664,6 @@ function adhPrevMonthOf(mes) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
 }
 
-const ADH_HIST_PAGE_SIZE = 10;
-
 // ── Helpers compartilhados (render completo + re-render leve de busca/página) ──
 function adhEsc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -796,7 +794,6 @@ async function adhRenderMultiBase(el) {
   }
 
   if (window._adhSearchMes !== mes) { window._adhSearchTerm = ''; window._adhSearchMes = mes; }
-  if (!window._adhHistPage) window._adhHistPage = 1;
 
   el.innerHTML = `
     <div class="adh-full-wrap adh-exec">
@@ -826,15 +823,15 @@ async function adhRenderMultiBase(el) {
 
       <!-- KPI cards -->
       ${adhKpiCardsHTML([
-        { key:'aderencia', icon:'ti-chart-bar', title:'Aderência', rows: [
+        { key:'blue', icon:'ti-chart-bar', title:'Aderência', rows: [
           { label:`Média (${hist.meses.length} ${hist.meses.length===1?'mês':'meses'})`, sub:'todas as bases', value:`${mediaNMeses}%` },
           adhDeltaRow(global, prevGlobal),
         ]},
-        { key:'horas', icon:'ti-clock-hour-4', title:'Horas', rows: [
+        { key:'amber', icon:'ti-clock-hour-4', title:'Horas', rows: [
           { label:'Horas extras', sub:'total no mês', value: adhFmtH(totHE) },
           { label:'Horas a menos', sub:'déficit no mês', value:`−${adhFmtH(totFalta)}`, color:'#b56666' },
         ]},
-        { key:'colab', icon:'ti-users', title:'Colaboradores', rows: [
+        { key:'purple', icon:'ti-users', title:'Colaboradores', rows: [
           { label:'Ativos', sub:'cadastro atual', value: (window.eoColabs?.size || totColabs).toLocaleString('pt-BR') },
           { label:'Com ponto', sub:'registrado no mês', value: totColabs.toLocaleString('pt-BR') },
         ]},
@@ -874,39 +871,40 @@ async function adhRenderMultiBase(el) {
 // Tabela de ranking — separada em função própria (sync, sem refetch) pra
 // busca e paginação re-renderizarem só esse pedaço, na hora, sem recarregar
 // nada do banco.
+function adhBarColor(pct) {
+  if (pct >= 85) return '#48bb78';
+  if (pct >= 70) return '#f6ad55';
+  return '#fc8181';
+}
+
 function adhRenderRankingBodyHTML() {
   const hist = window._adhHistData;
   const term = (window._adhSearchTerm || '').trim().toUpperCase();
   const all  = window._adhSortedBases || [];
   const filtered = term ? all.filter(([base]) => base.toUpperCase().includes(term)) : all;
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / ADH_HIST_PAGE_SIZE));
-  window._adhHistPage = Math.min(Math.max(1, window._adhHistPage || 1), totalPages);
-  const pgStart = (window._adhHistPage - 1) * ADH_HIST_PAGE_SIZE;
-  const pageSorted = filtered.slice(pgStart, pgStart + ADH_HIST_PAGE_SIZE);
-
   if (!filtered.length) {
     return `<div style="padding:28px 10px;text-align:center;color:var(--text-muted);font-size:12.5px">Nenhuma base encontrada${term ? ` para "${adhEsc(term)}"` : ''}.</div>`;
   }
 
-  let pageBtns = '';
-  for (let p = 1; p <= totalPages; p++) {
-    pageBtns += `<button class="adm-page-btn ${p===window._adhHistPage?'active':''}" onclick="adhGoToHistPage(${p})">${p}</button>`;
-  }
-
   return `
+    <div style="font-size:10.5px;color:var(--text-muted);margin-bottom:8px">${filtered.length} base${filtered.length===1?'':'s'} · ordenado da maior para a menor aderência</div>
     <div style="overflow-x:auto">
+    <div style="max-height:560px;overflow-y:auto">
     <table class="adh-exec-table">
       <thead>
         <tr>
-          <th>Base</th>
-          ${hist.meses.map(m => `<th>${adhMonthLabel(m)}</th>`).join('')}
-          <th>Variação</th>
-          <th class="r">Extras</th><th class="r">Déficit</th><th class="r">Colab.</th><th style="text-align:center">Status</th>
+          <th style="position:sticky;top:0;background:var(--bg-surface);z-index:1">Base</th>
+          ${hist.meses.map(m => `<th style="position:sticky;top:0;background:var(--bg-surface);z-index:1">${adhMonthLabel(m)}</th>`).join('')}
+          <th style="position:sticky;top:0;background:var(--bg-surface);z-index:1">Variação</th>
+          <th class="r" style="position:sticky;top:0;background:var(--bg-surface);z-index:1">Extras</th>
+          <th class="r" style="position:sticky;top:0;background:var(--bg-surface);z-index:1">Déficit</th>
+          <th class="r" style="position:sticky;top:0;background:var(--bg-surface);z-index:1">Colab.</th>
+          <th style="text-align:center;position:sticky;top:0;background:var(--bg-surface);z-index:1">Status</th>
         </tr>
       </thead>
       <tbody>
-        ${pageSorted.map(([base, d]) => {
+        ${filtered.map(([base, d]) => {
           const porMes = hist.porBase.get(base) || new Map();
           return `
           <tr onclick="adhOpenBase('${base}')">
@@ -914,7 +912,7 @@ function adhRenderRankingBodyHTML() {
             ${hist.meses.map(m => {
               const v = porMes.get(m);
               if (v == null) return `<td style="color:var(--text-muted)">—</td>`;
-              return `<td><div style="display:flex;align-items:center;gap:6px"><div class="adh-exec-bar" style="width:40px"><div style="width:${Math.round(v)}%"></div></div><span style="font-size:11px">${v}%</span></div></td>`;
+              return `<td><div style="display:flex;align-items:center;gap:6px"><div class="adh-exec-bar" style="width:50px;height:7px"><div style="width:${Math.round(v)}%;background:${adhBarColor(v)}"></div></div><span style="font-size:11.5px;font-weight:600">${v}%</span></div></td>`;
             }).join('')}
             <td>${adhDeltaHTML(d.pct, (window._adhPrevByBase||new Map()).get(base))}</td>
             <td class="r" style="color:var(--text-muted)">+${adhFmtH(d.he_h)}</td>
@@ -926,27 +924,14 @@ function adhRenderRankingBodyHTML() {
       </tbody>
     </table>
     </div>
-    ${totalPages > 1 ? `
-    <div class="adm-pagination">
-      <span class="adm-page-info">Página ${window._adhHistPage} de ${totalPages} · ${filtered.length} base${filtered.length===1?'':'s'}</span>
-      <div class="adm-page-btns">${pageBtns}</div>
-    </div>` : ''}
+    </div>
   `;
 }
 
 function adhSearchBase(value) {
   window._adhSearchTerm = value;
-  window._adhHistPage = 1;
   const body = document.getElementById('adh-ranking-body');
   if (body) body.innerHTML = adhRenderRankingBodyHTML();
-}
-
-function adhGoToHistPage(page) {
-  window._adhHistPage = page;
-  const body = document.getElementById('adh-ranking-body');
-  if (body) { body.innerHTML = adhRenderRankingBodyHTML(); return; }
-  const el = window._adhCurrentEl;
-  if (el) adhRenderMultiBase(el);
 }
 
 function adhToggleAcoesMenu(btn) {
@@ -1302,15 +1287,15 @@ function adhRenderDetalhe(el, base, showBack) {
 
       <!-- KPIs -->
       ${adhKpiCardsHTML([
-        { key:'aderencia', icon:'ti-chart-bar', title:'Aderência', rows: [
+        { key:'blue', icon:'ti-chart-bar', title:'Aderência', rows: [
           { label:'Escala realizada', sub: base || 'todas as bases', value:`${pct}%`, bar: pct },
           { label:'Horas programadas', sub:'base do cálculo', value: adhFmtH(prog_h) },
         ]},
-        { key:'horas', icon:'ti-clock-hour-4', title:'Horas', rows: [
+        { key:'amber', icon:'ti-clock-hour-4', title:'Horas', rows: [
           { label:'Horas extras', sub:'no mês', value: adhFmtH(he_h) },
           { label:'Horas a menos', sub:'déficit no mês', value:`−${adhFmtH(fat_h)}`, color:'#b56666' },
         ]},
-        { key:'colab', icon:'ti-users', title:'Colaboradores', rows: [
+        { key:'purple', icon:'ti-users', title:'Colaboradores', rows: [
           { label:'Total', sub: base ? 'nesta base' : 'todas as bases', value: colabs.toLocaleString('pt-BR') },
           bk ? { label:'Com ponto', sub:'registrado no mês', value: bk.colabs.toLocaleString('pt-BR') } : null,
         ]},
