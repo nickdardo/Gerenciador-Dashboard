@@ -1658,6 +1658,121 @@ a { color: inherit; text-decoration: none; }
 }
 .adh-exec-bar div { height: 100%; background: #6b8fb5; border-radius: 3px; }
 
+/* ── Corpo: coluna principal (ranking) + sidebar (comparativo/insights/plano) ── */
+.adh-exec-body {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 16px;
+  align-items: start;
+}
+.adh-exec-main { min-width: 0; }
+.adh-exec-sidebar { display: flex; flex-direction: column; gap: 16px; }
+
+.adh-exec-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.adh-search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(255,255,255,.03);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--adh-radius-sm);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.adh-search-wrap i { font-size: 13px; }
+.adh-search-input {
+  border: none;
+  background: transparent;
+  outline: none;
+  color: var(--text-primary);
+  font-size: 12px;
+  width: 150px;
+}
+.adh-search-input::placeholder { color: var(--text-muted); }
+
+/* Comparativo mensal (sidebar) */
+.adh-mini-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.adh-mini-label { font-size: 11px; color: var(--text-muted); width: 62px; flex-shrink: 0; }
+.adh-mini-bar { flex: 1; height: 6px; background: var(--border-strong); border-radius: 3px; overflow: hidden; }
+.adh-mini-bar div { height: 100%; background: #5fa87a; border-radius: 3px; }
+.adh-mini-pct { font-size: 11.5px; font-weight: 700; color: var(--text-primary); width: 34px; text-align: right; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.adh-mini-hist-btn {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11.5px; font-weight: 600; color: var(--blue);
+  background: none; border: none; padding: 0; cursor: pointer;
+}
+.adh-mini-hist-btn:hover { text-decoration: underline; }
+.adh-mini-hist-btn i { font-size: 12px; }
+
+/* Insights & Comentários + Plano de Ação — lado a lado na sidebar */
+.adh-side-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.adh-insights-card, .adh-plano-card { display: flex; flex-direction: column; }
+
+.adh-insights-textarea {
+  width: 100%;
+  min-height: 140px;
+  resize: vertical;
+  background: rgba(255,255,255,.03);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--adh-radius-sm);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 10px 12px;
+}
+.adh-insights-textarea:focus { outline: none; border-color: var(--blue); }
+.adh-insights-status { font-size: 10px; color: var(--text-muted); margin-top: 6px; min-height: 12px; }
+
+.adh-plano-add-btn {
+  width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 6px;
+  color: var(--text-muted);
+  background: rgba(255,255,255,.04);
+  border: 1px solid var(--border-strong);
+}
+.adh-plano-add-btn:hover { color: var(--blue); border-color: var(--blue); }
+.adh-plano-list { display: flex; flex-direction: column; gap: 8px; max-height: 220px; overflow-y: auto; }
+.adh-plano-item { display: flex; align-items: center; gap: 6px; font-size: 11.5px; }
+.adh-plano-item-text {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-secondary);
+}
+.adh-status-badge {
+  flex-shrink: 0;
+  font-size: 10px; font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: none;
+  cursor: pointer;
+}
+.adh-plano-del {
+  flex-shrink: 0;
+  width: 18px; height: 18px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-muted);
+  border-radius: 4px;
+}
+.adh-plano-del:hover { color: #b56666; background: rgba(181,102,102,.12); }
+.adh-plano-del i { font-size: 11px; }
+
+/* Empilha a sidebar embaixo do ranking em telas menores */
+@media (max-width: 1100px) {
+  .adh-exec-body { grid-template-columns: 1fr; }
+  .adh-side-row { grid-template-columns: 1fr; }
+}
+
 .adh-acoes-menu {
   position: absolute;
   top: calc(100% + 6px);
