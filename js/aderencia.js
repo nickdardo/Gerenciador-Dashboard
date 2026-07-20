@@ -426,6 +426,16 @@ function adhFmtH(h) {
   return Math.round(h).toLocaleString('pt-BR') + 'h';
 }
 
+// Formato mais legível pra valores por colaborador (diferente do adhFmtH,
+// usado nos totais grandes da base): menos de 1h mostra em minutos,
+// 1h ou mais mostra em horas fechadas (sem casas decimais).
+function adhHuman(h) {
+  if (h == null || isNaN(h)) return '—';
+  if (h <= 0) return '0min';
+  if (h < 1) return `${Math.round(h * 60)}min`;
+  return `${Math.round(h)}h`;
+}
+
 // Force a fresh reload of aderência data, bypassing the localStorage cache —
 // gives users a one-click way to refresh instead of clearing cache manually.
 async function adhForceRefresh() {
@@ -1118,9 +1128,9 @@ function adhRenderColabRows(list, base) {
       <td style="color:var(--text-muted);font-size:11px">${cargo}</td>
       <td style="text-align:center">${situBadge}</td>
       <td class="r" style="color:var(--text-muted)">${ch ? ch+'h' : '—'}</td>
-      <td class="r">${c.semDados ? '—' : (c.min_prog/60).toFixed(1)+'h'}</td>
-      <td class="r" style="color:#f6ad55">${c.semDados ? '—' : c.he_h.toFixed(1)+'h'}</td>
-      <td class="r" style="color:#fc8181">${c.semDados ? '—' : c.falta_h.toFixed(1)+'h'}</td>
+      <td class="r">${c.semDados ? '—' : adhHuman(c.min_prog/60)}</td>
+      <td class="r" style="color:#f6ad55">${c.semDados ? '—' : adhHuman(c.he_h)}</td>
+      <td class="r" style="color:#fc8181">${c.semDados ? '—' : adhHuman(c.falta_h)}</td>
       ${pctCell}
     </tr>`;
   }).join('');
@@ -1364,27 +1374,46 @@ function adhBuildPanelContent(mat, filial, nome, cargo, compact = false) {
   const totF  = days.reduce((s,d)=>s+d.falta,0);
   const totPct = totP>0 ? Math.max(0,Math.round((1-(totHE+totF)/totP)*100)) : null;
   const pctClr = p => p==null ? 'var(--text-muted)' : (p>=88?'#48bb78':p>=70?'#f6ad55':'#fc8181');
-  const fmtH = m => m>0?(m/60).toFixed(1)+'h':'—';
+  const fmtH = m => m>0 ? adhHuman(m/60) : '—';
 
-  // Hour chart — smooth area lines for planned vs real
-  const hourPlan = new Array(24).fill(0);
-  const hourReal = new Array(24).fill(0);
+  // Hour chart — smooth area lines for planned vs real vs hora extra.
+  // Calculado minuto a minuto (não só por hora "cheia") pra saber com
+  // precisão quais minutos trabalhados caem FORA do planejado (hora extra),
+  // já considerando também as batidas 5-8 quando existirem.
+  const hourPlan  = new Array(24).fill(0);
+  const hourReal  = new Array(24).fill(0);
+  const hourExtra = new Array(24).fill(0);
   days.forEach(d => {
     const tm = t => { if(!t)return null; const p=String(t).split(':'); return parseInt(p[0])*60+parseInt(p[1]||0); };
+    const marcar = (arr, ini, fim) => { for (let m=ini; m<fim; m++) arr[((m%1440)+1440)%1440] = true; };
+
+    const planMin = new Array(1440).fill(false);
+    const realMin = new Array(1440).fill(false);
+
     [[d.ent1,d.sai1],[d.ent2,d.sai2]].forEach(([e,s])=>{
-      const em=tm(e),sm=tm(s); if(em==null||!sm) return;
-      for(let h=0;h<24;h++){const hs=h*60,he2=hs+60;const os=Math.max(em,hs),oe=Math.min(sm>em?sm:sm+1440,he2);if(oe>os)hourPlan[h]+=oe-os;}
+      const em=tm(e), sm=tm(s); if(em==null||sm==null) return;
+      marcar(planMin, em, sm>em?sm:sm+1440);
     });
-    [[d.bat1,d.bat2],[d.bat3,d.bat4]].forEach(([a,b])=>{
-      const am=tm(a),bm=tm(b); if(am==null||!bm) return;
-      for(let h=0;h<24;h++){const hs=h*60,he2=hs+60;const os=Math.max(am,hs),oe=Math.min(bm>am?bm:bm+1440,he2);if(oe>os)hourReal[h]+=oe-os;}
+    [[d.bat1,d.bat2],[d.bat3,d.bat4],[d.bat5,d.bat6],[d.bat7,d.bat8]].forEach(([a,b])=>{
+      const am=tm(a), bm=tm(b); if(am==null||bm==null) return;
+      marcar(realMin, am, bm>am?bm:bm+1440);
     });
+
+    for (let m=0; m<1440; m++) {
+      const h = Math.floor(m/60);
+      if (planMin[m]) hourPlan[h]++;
+      if (realMin[m]) {
+        hourReal[h]++;
+        if (!planMin[m]) hourExtra[h]++;
+      }
+    }
   });
-  const maxH = Math.max(...hourPlan,...hourReal,1);
+  const maxH = Math.max(...hourPlan,...hourReal,...hourExtra,1);
   const W=760, H=80, PAD=28;
   const pts = (arr) => arr.map((v,i)=>`${PAD+i*(W-PAD*2)/23},${H-4-Math.round(v/maxH*(H-8))}`).join(' ');
-  const planPts = pts(hourPlan);
-  const realPts = pts(hourReal);
+  const planPts  = pts(hourPlan);
+  const realPts  = pts(hourReal);
+  const extraPts = pts(hourExtra);
   // Smooth polyline using SVG
   const svgPath = (points, close=false) => {
     const arr = points.split(' ').map(p=>p.split(',').map(Number));
@@ -1416,11 +1445,17 @@ function adhBuildPanelContent(mat, filial, nome, cargo, compact = false) {
         <stop offset="0%" stop-color="#48bb78" stop-opacity="0.4"/>
         <stop offset="100%" stop-color="#48bb78" stop-opacity="0.02"/>
       </linearGradient>
+      <linearGradient id="gradExtra" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.45"/>
+        <stop offset="100%" stop-color="#f59e0b" stop-opacity="0.02"/>
+      </linearGradient>
     </defs>
     <path d="${svgPath(planPts,true)}" fill="url(#gradPlan)"/>
     <path d="${svgPath(realPts,true)}" fill="url(#gradReal)"/>
+    ${hourExtra.some(v=>v>0) ? `<path d="${svgPath(extraPts,true)}" fill="url(#gradExtra)"/>` : ''}
     <path d="${svgPath(planPts)}" fill="none" stroke="#00a0d2" stroke-width="2" stroke-linecap="round"/>
     <path d="${svgPath(realPts)}" fill="none" stroke="#48bb78" stroke-width="2" stroke-linecap="round"/>
+    ${hourExtra.some(v=>v>0) ? `<path d="${svgPath(extraPts)}" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"/>` : ''}
     ${hLabels}
   </svg>`;
 
@@ -1543,6 +1578,7 @@ function adhBuildPanelContent(mat, filial, nome, cargo, compact = false) {
       <div class="adh-tip-chart-legend">
         <span><span class="adh-leg-dot" style="background:#00a0d2"></span>Planejado</span>
         <span><span class="adh-leg-dot" style="background:#48bb78"></span>Realizado</span>
+        <span><span class="adh-leg-dot" style="background:#f59e0b"></span>Hora Extra</span>
       </div>
     </div>
 
