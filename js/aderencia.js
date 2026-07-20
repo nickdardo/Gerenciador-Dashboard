@@ -680,10 +680,45 @@ function adhDeltaHTML(atual, anterior, unidade='pp') {
   return `<span style="color:${cor};font-size:10px">${seta} ${Math.abs(d)}${unidade} vs. mês anterior</span>`;
 }
 
+function adhDeltaRow(atual, anterior, unidade='pp') {
+  if (anterior == null) return { label:'Vs. mês anterior', sub:'tendência', value:'sem dado anterior', color:'#4a5568' };
+  const d = Math.round((atual-anterior)*10)/10;
+  if (Math.abs(d) < 0.1) return { label:'Vs. mês anterior', sub:'tendência', value:'= mês anterior', color:'#4a5568' };
+  return { label:'Vs. mês anterior', sub:'tendência', value:`${d>0?'↑':'↓'} ${Math.abs(d)}${unidade}`, color: d>0 ? '#5fa87a' : '#b56666' };
+}
+
 function adhStatusIcon(pct) {
   if (pct >= 85) return `<i class="ti ti-check" style="color:#5fa87a" title="Dentro da meta" aria-hidden="true"></i>`;
   if (pct >= 70) return `<i class="ti ti-alert-triangle" style="color:#c9a24a" title="Atenção" aria-hidden="true"></i>`;
   return `<i class="ti ti-flag-3" style="color:#b56666" title="Crítico" aria-hidden="true"></i>`;
+}
+
+// ── Cards de KPI (tema aprovado: caixas separadas, borda + degradê sutil na
+// cor da categoria por trás do título, valor colorido só quando sinaliza algo
+// — o resto fica neutro). Reaproveitado na visão geral e no detalhe por base.
+function adhKpiCardHTML(card) {
+  const rows = card.rows.filter(Boolean);
+  return `
+    <div class="adh-kpi-card adh-kpi-${card.key}">
+      <div class="adh-kpi-card-head">
+        <i class="ti ${card.icon}" aria-hidden="true"></i>
+        <span>${card.title}</span>
+      </div>
+      ${rows.map((r, i) => `
+        <div class="adh-kpi-row">
+          <div>
+            <div class="adh-kpi-row-l">${r.label}</div>
+            ${r.sub ? `<div class="adh-kpi-row-s">${r.sub}</div>` : ''}
+          </div>
+          <div class="adh-kpi-row-v ${i === 0 ? 'lg' : 'sm'}" ${r.color ? `style="color:${r.color}"` : ''}>${r.value}</div>
+        </div>
+        ${r.bar != null ? `<div class="adh-exec-bar" style="width:100%;margin:-4px 0 10px">${`<div style="width:${Math.round(r.bar)}%"></div>`}</div>` : ''}
+      `).join('')}
+    </div>`;
+}
+
+function adhKpiCardsHTML(cards) {
+  return `<div class="adh-kpi-cards">${cards.map(adhKpiCardHTML).join('')}</div>`;
 }
 
 async function adhRenderMultiBase(el) {
@@ -790,26 +825,20 @@ async function adhRenderMultiBase(el) {
       </div>
 
       <!-- KPI cards -->
-      <div class="adh-exec-kpis" style="grid-template-columns:repeat(4,1fr)">
-        <div class="adh-exec-kpi" style="border-top:1px solid rgba(56,189,248,.35)">
-          <div style="display:flex;align-items:center;gap:7px;margin-bottom:8px"><i class="ti ti-chart-bar" style="color:#38bdf8;font-size:13px" aria-hidden="true"></i><span class="adh-exec-kpi-l" style="margin:0">Aderência (${hist.meses.length} ${hist.meses.length===1?'mês':'meses'})</span></div>
-          <div class="adh-exec-kpi-v">${mediaNMeses}%</div>
-          ${adhDeltaHTML(global, prevGlobal)}
-        </div>
-        <div class="adh-exec-kpi" style="border-top:1px solid rgba(201,162,74,.35)">
-          <div style="display:flex;align-items:center;gap:7px;margin-bottom:8px"><i class="ti ti-clock-plus" style="color:#c9a24a;font-size:13px" aria-hidden="true"></i><span class="adh-exec-kpi-l" style="margin:0">Total horas extras</span></div>
-          <div class="adh-exec-kpi-v">${adhFmtH(totHE)}</div>
-        </div>
-        <div class="adh-exec-kpi" style="border-top:1px solid rgba(181,102,102,.35)">
-          <div style="display:flex;align-items:center;gap:7px;margin-bottom:8px"><i class="ti ti-clock-minus" style="color:#b56666;font-size:13px" aria-hidden="true"></i><span class="adh-exec-kpi-l" style="margin:0">Total horas a menos</span></div>
-          <div class="adh-exec-kpi-v">−${adhFmtH(totFalta)}</div>
-        </div>
-        <div class="adh-exec-kpi" style="border-top:1px solid rgba(167,139,250,.35)">
-          <div style="display:flex;align-items:center;gap:7px;margin-bottom:8px"><i class="ti ti-users" style="color:#a78bfa;font-size:13px" aria-hidden="true"></i><span class="adh-exec-kpi-l" style="margin:0">Colaboradores ativos</span></div>
-          <div class="adh-exec-kpi-v">${(window.eoColabs?.size || totColabs).toLocaleString('pt-BR')}</div>
-          <div style="font-size:10px;color:var(--text-muted)">${totColabs.toLocaleString('pt-BR')} com ponto registrado</div>
-        </div>
-      </div>
+      ${adhKpiCardsHTML([
+        { key:'aderencia', icon:'ti-chart-bar', title:'Aderência', rows: [
+          { label:`Média (${hist.meses.length} ${hist.meses.length===1?'mês':'meses'})`, sub:'todas as bases', value:`${mediaNMeses}%` },
+          adhDeltaRow(global, prevGlobal),
+        ]},
+        { key:'horas', icon:'ti-clock-hour-4', title:'Horas', rows: [
+          { label:'Horas extras', sub:'total no mês', value: adhFmtH(totHE) },
+          { label:'Horas a menos', sub:'déficit no mês', value:`−${adhFmtH(totFalta)}`, color:'#b56666' },
+        ]},
+        { key:'colab', icon:'ti-users', title:'Colaboradores', rows: [
+          { label:'Ativos', sub:'cadastro atual', value: (window.eoColabs?.size || totColabs).toLocaleString('pt-BR') },
+          { label:'Com ponto', sub:'registrado no mês', value: totColabs.toLocaleString('pt-BR') },
+        ]},
+      ])}
 
       <!-- Corpo: coluna principal (ranking) + sidebar (comparativo/insights/plano) -->
       <div class="adh-exec-body">
@@ -1272,30 +1301,20 @@ function adhRenderDetalhe(el, base, showBack) {
       </div>
 
       <!-- KPIs -->
-      <div class="adh-exec-kpis">
-        <div class="adh-exec-kpi">
-          <div class="adh-exec-kpi-l">Escala realizada</div>
-          <div class="adh-exec-kpi-v">${pct}%</div>
-          <div class="adh-exec-bar" style="margin-top:6px"><div style="width:${Math.round(pct)}%"></div></div>
-        </div>
-        <div class="adh-exec-kpi">
-          <div class="adh-exec-kpi-l">Horas extras</div>
-          <div class="adh-exec-kpi-v">${adhFmtH(he_h)}</div>
-        </div>
-        <div class="adh-exec-kpi">
-          <div class="adh-exec-kpi-l">Horas a menos</div>
-          <div class="adh-exec-kpi-v">${adhFmtH(fat_h)}</div>
-        </div>
-        <div class="adh-exec-kpi">
-          <div class="adh-exec-kpi-l">Horas programadas</div>
-          <div class="adh-exec-kpi-v">${adhFmtH(prog_h)}</div>
-        </div>
-        <div class="adh-exec-kpi">
-          <div class="adh-exec-kpi-l">Colaboradores</div>
-          <div class="adh-exec-kpi-v">${colabs.toLocaleString('pt-BR')}</div>
-          ${bk ? `<div style="font-size:10px;color:var(--text-muted)">${bk.colabs.toLocaleString('pt-BR')} com ponto registrado</div>` : ''}
-        </div>
-      </div>
+      ${adhKpiCardsHTML([
+        { key:'aderencia', icon:'ti-chart-bar', title:'Aderência', rows: [
+          { label:'Escala realizada', sub: base || 'todas as bases', value:`${pct}%`, bar: pct },
+          { label:'Horas programadas', sub:'base do cálculo', value: adhFmtH(prog_h) },
+        ]},
+        { key:'horas', icon:'ti-clock-hour-4', title:'Horas', rows: [
+          { label:'Horas extras', sub:'no mês', value: adhFmtH(he_h) },
+          { label:'Horas a menos', sub:'déficit no mês', value:`−${adhFmtH(fat_h)}`, color:'#b56666' },
+        ]},
+        { key:'colab', icon:'ti-users', title:'Colaboradores', rows: [
+          { label:'Total', sub: base ? 'nesta base' : 'todas as bases', value: colabs.toLocaleString('pt-BR') },
+          bk ? { label:'Com ponto', sub:'registrado no mês', value: bk.colabs.toLocaleString('pt-BR') } : null,
+        ]},
+      ])}
 
       <!-- Table -->
       <div class="adh-colab-section">

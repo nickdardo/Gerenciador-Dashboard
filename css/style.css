@@ -1658,6 +1658,45 @@ a { color: inherit; text-decoration: none; }
 }
 .adh-exec-bar div { height: 100%; background: #6b8fb5; border-radius: 3px; }
 
+/* ── Cards de KPI (tema aprovado: caixas separadas + degradê na cor da
+   categoria por trás do título) — usado na visão geral e no detalhe da base ── */
+.adh-kpi-cards { display: flex; gap: 14px; margin-bottom: 20px; flex-wrap: wrap; }
+.adh-kpi-card {
+  flex: 1;
+  min-width: 220px;
+  border-radius: var(--adh-radius-lg);
+  border: 1px solid var(--border-strong);
+  padding: 16px 18px;
+}
+.adh-kpi-card-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 14px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+}
+.adh-kpi-card-head i { font-size: 14px; }
+.adh-kpi-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; gap: 10px; }
+.adh-kpi-row:last-child { margin-bottom: 0; }
+.adh-kpi-row-l { font-size: 12px; color: var(--text-primary); }
+.adh-kpi-row-s { font-size: 10.5px; color: var(--text-muted); margin-top: 1px; }
+.adh-kpi-row-v { color: var(--text-primary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.adh-kpi-row-v.lg { font-size: 22px; font-weight: 700; }
+.adh-kpi-row-v.sm { font-size: 15px; font-weight: 700; }
+
+.adh-kpi-aderencia { background: linear-gradient(180deg, rgba(56,189,248,.16), rgba(56,189,248,0) 64px), var(--adh-surface); border-color: rgba(56,189,248,.28); }
+.adh-kpi-aderencia i { color: #38bdf8; }
+.adh-kpi-horas { background: linear-gradient(180deg, rgba(201,162,74,.16), rgba(201,162,74,0) 64px), var(--adh-surface); border-color: rgba(201,162,74,.28); }
+.adh-kpi-horas i { color: #c9a24a; }
+.adh-kpi-colab { background: linear-gradient(180deg, rgba(167,139,250,.16), rgba(167,139,250,0) 64px), var(--adh-surface); border-color: rgba(167,139,250,.28); }
+.adh-kpi-colab i { color: #a78bfa; }
+
+@media (max-width: 900px) { .adh-kpi-cards { flex-direction: column; } }
+
 /* ── Corpo: coluna principal (ranking) + sidebar (comparativo/insights/plano) ── */
 .adh-exec-body {
   display: grid;
