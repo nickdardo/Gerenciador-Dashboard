@@ -431,8 +431,8 @@ function adhFmtH(h) {
 // 1h ou mais mostra em horas fechadas (sem casas decimais).
 function adhHuman(h) {
   if (h == null || isNaN(h)) return '—';
-  if (h <= 0) return '0min';
-  if (h < 1) return `${Math.round(h * 60)}min`;
+  if (h <= 0) return '0m';
+  if (h < 1) return `${Math.round(h * 60)}m`;
   return `${Math.round(h)}h`;
 }
 
