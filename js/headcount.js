@@ -71,7 +71,7 @@ async function hcEnsureData() {
       window.eoFerias = byMat;
     } catch(e) { console.warn('[headcount] ferias:', e.message); window.eoFerias = new Map(); }
   }
-  if (!window.eoDesligados) {
+  if (!window.eoDesligadosAll) {
     try {
       const { data } = await db.from('colaboradores_desligados').select('matricula,filial,nome,cargo,ch,data_demissao,causa_texto');
       const byMat = new Map();
@@ -81,7 +81,7 @@ async function hcEnsureData() {
       }
       window.eoDesligados = byMat;
       window.eoDesligadosAll = data || []; // histórico completo (pode ter + de um desligamento por matrícula)
-    } catch(e) { console.warn('[headcount] desligados:', e.message); window.eoDesligados = new Map(); window.eoDesligadosAll = []; }
+    } catch(e) { console.warn('[headcount] desligados:', e.message); window.eoDesligados = window.eoDesligados || new Map(); window.eoDesligadosAll = []; }
   }
   if (!window.eoPcd) {
     try {
@@ -110,6 +110,7 @@ function hcComputeStats(base) {
   const grupos = new Map(); // grupo -> { staff, ferias }
   const funcoes = new Map(); // funcao -> Map(chDiario -> count)
   const chSet = new Set();
+  const situacoes = new Map(); // situação (texto) -> contagem
 
   for (const r of roster) {
     const desligado = hcIsDesligado(r.mat);
@@ -136,6 +137,9 @@ function hcComputeStats(base) {
     if (!funcoes.has(funcao)) funcoes.set(funcao, new Map());
     const fm = funcoes.get(funcao);
     fm.set(chd, (fm.get(chd)||0) + 1);
+
+    const situ = String(r.situacao || 'Sem informação').trim() || 'Sem informação';
+    situacoes.set(situ, (situacoes.get(situ) || 0) + 1);
   }
 
   const ativos = headcount - inativos;
@@ -164,6 +168,7 @@ function hcComputeStats(base) {
   return {
     headcount, ativos, inativos, pcd, atestados, feriasAtivas, desligados12m,
     fullTime, partTime, ftPct, fte, grupos, funcoes, chList: [...chSet].sort((a,b)=>a-b),
+    situacoes,
   };
 }
 
@@ -177,7 +182,7 @@ async function pageHeadcount(el) {
   if (!ROLES_OK.includes(role)) {
     el.innerHTML = `
       <div class="page-header"><div>
-        <h1 class="page-title">Headcount</h1>
+        <h1 class="page-title">Staff</h1>
         <p class="page-sub">Acesso restrito</p>
       </div></div>
       <div class="adh-denied">
@@ -206,7 +211,7 @@ async function pageHeadcount(el) {
 }
 
 async function hcForceRefresh() {
-  window.eoColabs = null; window.eoFerias = null; window.eoDesligados = null; window.eoPcd = null;
+  window.eoColabs = null; window.eoFerias = null; window.eoDesligados = null; window.eoDesligadosAll = null; window.eoPcd = null;
   const el = window._hcCurrentEl;
   if (el) await pageHeadcount(el);
 }
@@ -243,19 +248,13 @@ function hcRenderMain(el) {
   const totalMeta   = gruposOrdenados.reduce((s,[,g])=>s+g.meta,0);
   const totalDelta  = totalFerias - totalMeta;
 
-  const funcoesOrdenadas = [...stats.funcoes.entries()].sort((a,b) => {
-    const totalA = [...a[1].values()].reduce((x,y)=>x+y,0);
-    const totalB = [...b[1].values()].reduce((x,y)=>x+y,0);
-    return totalB - totalA;
-  });
-
   const ftDeg = stats.ftPct * 3.6;
 
   el.innerHTML = `
     <div class="hc-wrap">
       <div class="hc-header">
         <div>
-          <h1 class="page-title">Headcount</h1>
+          <h1 class="page-title">Staff</h1>
           <p class="page-sub">Quadro de pessoal · cruza Colaboradores, Férias, Desligamentos e PCD</p>
         </div>
         <div style="display:flex;align-items:center;gap:10px">
@@ -272,7 +271,7 @@ function hcRenderMain(el) {
       <div class="hc-kpi-row">
         <div class="hc-kpi hc-kpi-blue">
           <div class="hc-kpi-v">${stats.headcount.toLocaleString('pt-BR')}</div>
-          <div class="hc-kpi-l">Headcount</div>
+          <div class="hc-kpi-l">Staff</div>
         </div>
         <div class="hc-kpi hc-kpi-blue2">
           <div class="hc-kpi-v">${stats.ativos.toLocaleString('pt-BR')}</div>
@@ -342,29 +341,29 @@ function hcRenderMain(el) {
           </div>
 
           <div class="hc-panel">
-            <div class="hc-panel-title">Função × Carga horária</div>
-            <table class="hc-table">
-              <thead><tr>
-                <th>Função</th>
-                ${stats.chList.map(c => `<th class="r">${c}h</th>`).join('')}
-                <th class="r">Total</th>
-              </tr></thead>
-              <tbody>
-                ${funcoesOrdenadas.map(([funcao, chMap]) => {
-                  const total = [...chMap.values()].reduce((a,b)=>a+b,0);
-                  return `<tr>
-                    <td>${funcao}</td>
-                    ${stats.chList.map(c => `<td class="r">${chMap.get(c) || ''}</td>`).join('')}
-                    <td class="r" style="font-weight:700">${total}</td>
-                  </tr>`;
-                }).join('')}
-              </tbody>
-              <tfoot><tr>
-                <td>TOTAL</td>
-                ${stats.chList.map(c => `<td class="r">${funcoesOrdenadas.reduce((s,[,m])=>s+(m.get(c)||0),0)}</td>`).join('')}
-                <td class="r">${stats.ativos}</td>
-              </tr></tfoot>
-            </table>
+            <div class="hc-panel-title">Situação</div>
+            ${(() => {
+              const situOrdenadas = [...stats.situacoes.entries()].sort((a,b) => b[1]-a[1]);
+              const totalSitu = situOrdenadas.reduce((s,[,n])=>s+n,0) || 1;
+              const corSitu = (nome) => {
+                const n = nome.toLowerCase();
+                if (n === 'trabalhando') return '#72c02c';
+                if (n.includes('férias')) return '#38bdf8';
+                if (n.includes('auxílio') || n.includes('auxilio') || n.includes('atestado')) return '#f59e0b';
+                return '#8896aa';
+              };
+              return situOrdenadas.map(([nome,n]) => {
+                const pct = Math.round(n/totalSitu*1000)/10;
+                return `
+                  <div style="margin-bottom:8px">
+                    <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">
+                      <span>${nome}</span>
+                      <span style="font-weight:700">${n} <span style="color:var(--text-muted);font-weight:400">(${pct}%)</span></span>
+                    </div>
+                    <div class="adh-full-card-bar"><div style="width:${pct}%;background:${corSitu(nome)};height:100%;border-radius:2px"></div></div>
+                  </div>`;
+              }).join('');
+            })()}
           </div>
         </div>
 
