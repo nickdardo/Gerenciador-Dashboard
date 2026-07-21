@@ -244,6 +244,59 @@ function adminUsersTab(users, preconfig = []) {
 }
 
 // ══════════════════════════════════════════════════════
+// UPLOAD EM LOTE — reconhece cada arquivo pelo nome e chama o loader
+// que já existe pra cada tipo, sem duplicar nenhuma lógica de parsing.
+// Cada loader espera um "input" com .files[0] — passamos um objeto simples
+// no lugar de um <input> de verdade, então nada dos parsers precisa mudar.
+// ══════════════════════════════════════════════════════
+const ADM_BATCH_PATTERNS = [
+  { fn: 'adminLoadColabs',    label: 'Colaboradores',     test: n => n.includes('hrcl204') || n.includes('colaborador') },
+  { fn: 'adminLoadHorarios',  label: 'Ponto planejado',   test: n => n.includes('horario') },
+  { fn: 'adminLoadMarcacao',  label: 'Marcação de ponto', test: n => n.includes('marcac') },
+  { fn: 'adminLoadMalha',     label: 'Malha aérea',       test: n => n.includes('rvpe') || n.includes('malha') },
+  { fn: 'adminLoadFerias',    label: 'Férias',            test: n => n.includes('hrcl107') || n.includes('feria') },
+  { fn: 'adminLoadDesligados',label: 'Desligamentos',     test: n => n.includes('hrcl106') || n.includes('desliga') },
+  { fn: 'adminLoadPcd',       label: 'PCD',                test: n => n.includes('hrcl114') || n.includes('pcd') },
+];
+
+function adminBatchUpload(input) {
+  const files = [...(input.files || [])];
+  if (!files.length) return;
+
+  const statusEl = document.getElementById('adm-batch-status');
+  const matched = [];
+  const unmatched = [];
+  for (const file of files) {
+    const nameLower = file.name.toLowerCase();
+    const pat = ADM_BATCH_PATTERNS.find(p => p.test(nameLower));
+    if (pat) matched.push({ file, pat }); else unmatched.push(file);
+  }
+
+  if (statusEl) {
+    let html = '';
+    if (matched.length) {
+      html += `<div style="color:#72c02c">✓ Reconhecidos: ${matched.map(m => `${m.pat.label} (${m.file.name})`).join(', ')} — acompanhe o progresso de cada um nos cards abaixo.</div>`;
+    }
+    if (unmatched.length) {
+      html += `<div style="color:#f6ad55;margin-top:4px">Não reconhecidos pelo nome — suba manualmente no card certo: ${unmatched.map(f => f.name).join(', ')}</div>`;
+    }
+    if (!matched.length && !unmatched.length) html = 'Nenhum arquivo selecionado.';
+    statusEl.innerHTML = html;
+  }
+
+  // Cada loader já atualiza sozinho o status do próprio card (adminSetFileStatus) —
+  // não precisamos esperar um terminar pra chamar o próximo.
+  for (const { file, pat } of matched) {
+    const fn = window[pat.fn];
+    if (typeof fn !== 'function') { console.warn('[batchUpload] função não encontrada:', pat.fn); continue; }
+    try { fn({ files: [file], value: '' }); }
+    catch(e) { console.error(`[batchUpload] ${pat.label}:`, e); }
+  }
+
+  input.value = '';
+}
+
+// ══════════════════════════════════════════════════════
 // TAB: ARQUIVOS
 // ══════════════════════════════════════════════════════
 function adminFilesTab() {
@@ -338,6 +391,23 @@ function adminFilesTab() {
       <span>Hub de dados operacionais</span>
       <span style="font-size:11px;color:var(--text-muted)">Dados salvos no banco de dados</span>
     </div>
+
+    <div class="adm-batch-upload">
+      <div class="adm-batch-upload-drop"
+        ondragover="event.preventDefault(); this.classList.add('dragover')"
+        ondragleave="this.classList.remove('dragover')"
+        ondrop="event.preventDefault(); this.classList.remove('dragover'); adminBatchUpload({files:event.dataTransfer.files})"
+        onclick="document.getElementById('adm-batch-input').click()">
+        <i class="ti ti-upload" aria-hidden="true"></i>
+        <div>
+          <div class="adm-batch-upload-title">Upload em lote</div>
+          <div class="adm-batch-upload-sub">Arraste vários arquivos aqui de uma vez (ou clique pra escolher) — o painel reconhece cada um pelo nome (HRCL106, HRCL107, HRCL114, HRCL204, Horarios, Marcacao, RVPE127...) e joga pro lugar certo sozinho.</div>
+        </div>
+      </div>
+      <input type="file" id="adm-batch-input" multiple accept=".xlsx,.xls,.csv" style="display:none" onchange="adminBatchUpload(this)">
+      <div id="adm-batch-status" class="adm-batch-status"></div>
+    </div>
+
     <div class="adm-files-grid">
       ${files.map(f => {
         const hist = adminFileHistory[f.key] || [];
