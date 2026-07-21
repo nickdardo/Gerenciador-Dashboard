@@ -109,13 +109,19 @@ async function adminRender() {
 
   body.innerHTML = `
     <!-- KPIs -->
-    <div class="adm-kpi-row">
-      ${adminKpi('Usuários',         totalUsers,        '#00a0d2', 'ti-users')}
-      ${adminKpi('Ativos',           ativos,            '#72c02c', 'ti-user-check')}
-      ${adminKpi('Colaboradores',    adminFiles.colaboradores?.count || '—', '#a78bfa', 'ti-id-badge')}
-      ${adminKpi('Arquivos carregados', filesOk+'/4',   filesOk===4?'#72c02c':'#f59e0b', 'ti-files')}
-      ${adminKpi('Logins hoje',      loginsHoje,        '#f472b6', 'ti-login')}
-    </div>
+    ${adhKpiCardsHTML([
+      { key:'blue', icon:'ti-users', title:'Usuários', rows: [
+        { label:'Cadastrados', sub:'perfis no sistema', value: totalUsers.toLocaleString('pt-BR') },
+        { label:'Ativos', sub:'com acesso liberado', value: ativos.toLocaleString('pt-BR') },
+      ]},
+      { key:'amber', icon:'ti-database', title:'Dados', rows: [
+        { label:'Colaboradores', sub:'no cadastro', value: adminFiles.colaboradores?.count != null ? adminFiles.colaboradores.count.toLocaleString('pt-BR') : '—' },
+        { label:'Arquivos carregados', sub:'dos 4 obrigatórios', value: `${filesOk}/4`, color: filesOk===4 ? '#5fa87a' : '#c9a24a' },
+      ]},
+      { key:'purple', icon:'ti-login', title:'Atividade', rows: [
+        { label:'Logins hoje', sub:'acessos registrados', value: loginsHoje.toLocaleString('pt-BR') },
+      ]},
+    ])}
 
     <!-- Tabs -->
     <div class="adm-tabs-bar" id="adm-tabs-bar">
@@ -1195,14 +1201,19 @@ async function adminAderenciaTab(el) {
       </div>
     </div>
 
-    ${stats ? `
-    <div class="adm-kpi-row" style="margin-bottom:0">
-      ${adminKpi('Aderência geral', stats.adherencePct+'%', pctColor(stats.adherencePct), 'ti-chart-bar')}
-      ${adminKpi('No horário',      stats.ok,               '#72c02c',  'ti-check')}
-      ${adminKpi('Atrasos',         stats.atraso+stats.desvio, '#f59e0b','ti-clock-exclamation')}
-      ${adminKpi('Saída antecipada',stats.saida_antecipada, '#f59e0b',  'ti-clock-minus')}
-      ${adminKpi('Faltas',          stats.falta,            '#ef4444',  'ti-x')}
-    </div>` : ''}
+    ${stats ? adhKpiCardsHTML([
+      { key:'blue', icon:'ti-chart-bar', title:'Aderência', rows: [
+        { label:'Aderência geral', sub:'todas as bases', value: stats.adherencePct+'%', color: pctColor(stats.adherencePct) },
+        { label:'No horário', sub:'jornadas ok', value: stats.ok.toLocaleString('pt-BR') },
+      ]},
+      { key:'amber', icon:'ti-clock-exclamation', title:'Desvios', rows: [
+        { label:'Atrasos', sub:'atraso + desvio', value: (stats.atraso+stats.desvio).toLocaleString('pt-BR') },
+        { label:'Saída antecipada', sub:'jornada encerrada antes', value: stats.saida_antecipada.toLocaleString('pt-BR') },
+      ]},
+      { key:'red', icon:'ti-x', title:'Faltas', rows: [
+        { label:'Faltas', sub:'sem ponto registrado', value: stats.falta.toLocaleString('pt-BR') },
+      ]},
+    ], true) : ''}
 
     <div class="adm-adh-grid">
       ${Object.entries(byBase).sort((a,b)=>pct(b[1])-pct(a[1])).map(([base, b]) => {
