@@ -718,12 +718,12 @@ function adhKpiCardHTML(card) {
         <span>${card.title}</span>
       </div>
       ${rows.map((r, i) => `
-        <div class="adh-kpi-row" ${r.sub ? `title="${r.sub}"` : ''}>
+        <div class="adh-kpi-row ${r.onclick?'adh-kpi-row-clickable':''}" ${r.sub ? `title="${r.sub}"` : ''} ${r.onclick ? `onclick="${r.onclick}"` : ''}>
           <div>
             <div class="adh-kpi-row-l">${r.label}</div>
             ${r.sub ? `<div class="adh-kpi-row-s">${r.sub}</div>` : ''}
           </div>
-          <div class="adh-kpi-row-v ${i === 0 ? 'lg' : 'sm'}" ${r.color ? `style="color:${r.color}"` : ''}>${r.value}</div>
+          <div class="adh-kpi-row-v ${i === 0 ? 'lg' : 'sm'}" ${r.color ? `style="color:${r.color}"` : ''}>${r.onclick ? `<span class="adh-kpi-row-v-btn">${r.value} <i class="ti ti-arrow-right" aria-hidden="true"></i></span>` : r.value}</div>
         </div>
         ${r.bar != null ? `<div class="adh-exec-bar" style="width:100%;margin:-4px 0 10px">${`<div style="width:${Math.round(r.bar)}%"></div>`}</div>` : ''}
       `).join('')}

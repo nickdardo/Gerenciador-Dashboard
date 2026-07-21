@@ -179,16 +179,20 @@ function hcComputeStats(base) {
   const fte = somaCh > 0 ? Math.round(somaCh / 180 * 10) / 10 : 0; // 1 FTE = 180h (confirmado com o cliente)
   const ftPct = (fullTime+partTime) > 0 ? Math.round(fullTime/(fullTime+partTime)*1000)/10 : 0;
 
-  // Meta = 10% do staff de cada grupo (regra de rotatividade de férias)
+  // Meta = 10% do staff de cada grupo (rotatividade mensal de férias) — MAS
+  // não em julho e dezembro, que são meses de alta temporada onde essa meta
+  // não vale (confirmado com o cliente). Nesses dois meses, meta = 0.
+  const mesAtual = new Date().getMonth(); // 0=jan ... 6=jul, 11=dez
+  const altaTemporada = mesAtual === 6 || mesAtual === 11;
   for (const [, g] of grupos) {
-    g.meta = Math.round(g.staff * 0.10);
+    g.meta = altaTemporada ? 0 : Math.round(g.staff * 0.10);
     g.delta = g.ferias - g.meta;
   }
 
   return {
     headcount, ativos, inativos, afastados, totalCadastro, pcd, atestados, feriasAtivas, desligados12m,
     fullTime, partTime, ftPct, fte, grupos, funcoes, chList: [...chSet].sort((a,b)=>a-b),
-    situacoes,
+    situacoes, altaTemporada,
   };
 }
 
@@ -242,6 +246,9 @@ function hcChangeBase(base) {
   const isAdmin = role === 'admin'; // '*' não dá mais acesso a todas as bases pra quem não é admin
   if (!isAdmin && base && !myBases.includes(base)) return; // ignora troca pra base não autorizada
   window._hcBase = base || null;
+  window._hcGrupoFilter = null;
+  window._hcSituFilter = 'todos';
+  window._hcSearch = '';
   hcRenderMain(window._hcCurrentEl);
 }
 
@@ -250,6 +257,51 @@ function hcFilterSitu(mode, btn) {
   if (btn) btn.classList.add('active');
   window._hcSituFilter = mode;
   hcRerenderColabTable();
+}
+
+function hcFilterGrupo(nome) {
+  window._hcGrupoFilter = (window._hcGrupoFilter === nome) ? null : nome;
+  const panel = document.getElementById('hc-grupo-panel');
+  if (panel) panel.innerHTML = hcGrupoTableHTML();
+  hcRerenderColabTable();
+}
+
+function hcGrupoTableHTML() {
+  const stats = window._hcStats;
+  if (!stats) return '';
+  const gruposOrdenados = [...stats.grupos.entries()].sort((a,b) => b[1].staff - a[1].staff);
+  const totalStaff  = gruposOrdenados.reduce((s,[,g])=>s+g.staff,0);
+  const totalFerias = gruposOrdenados.reduce((s,[,g])=>s+g.ferias,0);
+  const totalMeta   = gruposOrdenados.reduce((s,[,g])=>s+g.meta,0);
+  const totalDelta  = totalFerias - totalMeta;
+  const ativo = window._hcGrupoFilter || null;
+  const metaLabel = stats.altaTemporada ? 'Meta suspensa (alta temporada)' : 'Meta = 10% do staff (rotatividade mensal de férias)';
+
+  return `
+    <div class="hc-panel-title" style="display:flex;align-items:center;justify-content:space-between">
+      <span>Grupo</span>
+      ${ativo ? `<button class="hc-grupo-clear" onclick="hcFilterGrupo(null)"><i class="ti ti-x" aria-hidden="true"></i> ${ativo}</button>` : ''}
+    </div>
+    <table class="hc-table">
+      <thead><tr><th>Grupo</th><th class="r">Staff</th><th class="r">Férias</th><th class="r">Meta</th><th class="r">Delta</th></tr></thead>
+      <tbody>
+        ${gruposOrdenados.map(([nome,g]) => `
+          <tr class="hc-grupo-row ${ativo===nome?'active':''}" onclick="hcFilterGrupo('${nome}')" title="Clique para filtrar a lista por ${nome}">
+            <td>${nome}</td>
+            <td class="r">${g.staff}</td>
+            <td class="r">${g.ferias}</td>
+            <td class="r" style="color:var(--text-muted)">${g.meta}</td>
+            <td class="r" style="color:${g.delta<0?'#fc8181':g.delta>0?'#72c02c':'var(--text-muted)'}">${g.delta>0?'+':''}${g.delta}</td>
+          </tr>`).join('')}
+      </tbody>
+      <tfoot><tr>
+        <td>TOTAL</td><td class="r">${totalStaff}</td><td class="r">${totalFerias}</td>
+        <td class="r">${totalMeta}</td>
+        <td class="r" style="color:${totalDelta<0?'#fc8181':totalDelta>0?'#72c02c':'var(--text-muted)'}">${totalDelta>0?'+':''}${totalDelta}</td>
+      </tr></tfoot>
+    </table>
+    <div style="font-size:9px;color:var(--text-muted);margin-top:8px">${metaLabel} · Delta = Férias − Meta${stats.altaTemporada ? ' · Julho e dezembro não entram na meta de 10%' : ''}</div>
+  `;
 }
 
 function hcSearch(value) {
@@ -268,12 +320,6 @@ function hcRenderMain(el) {
   const myBases  = currentUserProfile?.bases || [];
   const isAdmin = role === 'admin'; // '*' não dá mais acesso a todas as bases pra quem não é admin
   const bases    = isAdmin ? hcAllBases() : hcAllBases().filter(b => myBases.includes(b));
-
-  const gruposOrdenados = [...stats.grupos.entries()].sort((a,b) => b[1].staff - a[1].staff);
-  const totalStaff  = gruposOrdenados.reduce((s,[,g])=>s+g.staff,0);
-  const totalFerias = gruposOrdenados.reduce((s,[,g])=>s+g.ferias,0);
-  const totalMeta   = gruposOrdenados.reduce((s,[,g])=>s+g.meta,0);
-  const totalDelta  = totalFerias - totalMeta;
 
   const ftDeg = stats.ftPct * 3.6;
 
@@ -339,27 +385,8 @@ function hcRenderMain(el) {
             </div>
           </div>
 
-          <div class="hc-panel">
-            <div class="hc-panel-title">Grupo</div>
-            <table class="hc-table">
-              <thead><tr><th>Grupo</th><th class="r">Staff</th><th class="r">Férias</th><th class="r">Meta</th><th class="r">Delta</th></tr></thead>
-              <tbody>
-                ${gruposOrdenados.map(([nome,g]) => `
-                  <tr>
-                    <td>${nome}</td>
-                    <td class="r">${g.staff}</td>
-                    <td class="r">${g.ferias}</td>
-                    <td class="r" style="color:var(--text-muted)">${g.meta}</td>
-                    <td class="r" style="color:${g.delta<0?'#fc8181':g.delta>0?'#72c02c':'var(--text-muted)'}">${g.delta>0?'+':''}${g.delta}</td>
-                  </tr>`).join('')}
-              </tbody>
-              <tfoot><tr>
-                <td>TOTAL</td><td class="r">${totalStaff}</td><td class="r">${totalFerias}</td>
-                <td class="r">${totalMeta}</td>
-                <td class="r" style="color:${totalDelta<0?'#fc8181':totalDelta>0?'#72c02c':'var(--text-muted)'}">${totalDelta>0?'+':''}${totalDelta}</td>
-              </tr></tfoot>
-            </table>
-            <div style="font-size:9px;color:var(--text-muted);margin-top:8px">Meta = 10% do staff (rotatividade mensal de férias) · Delta = Férias − Meta</div>
+          <div class="hc-panel" id="hc-grupo-panel">
+            ${hcGrupoTableHTML()}
           </div>
 
           <div class="hc-panel">
@@ -480,6 +507,7 @@ function hcRerenderColabTable() {
   let list = (window._hcColabListFull || []).slice();
   if (window._hcSituFilter === 'ativo')   list = list.filter(c => !c.desligado && !c.afastado);
   if (window._hcSituFilter === 'inativo') list = list.filter(c => c.desligado || c.afastado);
+  if (window._hcGrupoFilter) list = list.filter(c => hcCargoGrupo(c.funcao) === window._hcGrupoFilter);
   const q = (window._hcSearch||'').trim().toLowerCase();
   if (q) list = list.filter(c => String(c.mat).includes(q) || String(c.nome||'').toLowerCase().includes(q));
 
