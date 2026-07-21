@@ -890,17 +890,16 @@ function adhRenderRankingBodyHTML() {
   return `
     <div style="font-size:10.5px;color:var(--text-muted);margin-bottom:8px">${filtered.length} base${filtered.length===1?'':'s'} · ordenado da maior para a menor aderência</div>
     <div style="overflow-x:auto">
-    <div style="max-height:560px;overflow-y:auto">
     <table class="adh-exec-table">
       <thead>
         <tr>
-          <th style="position:sticky;top:0;background:var(--bg-surface);z-index:1">Base</th>
-          ${hist.meses.map(m => `<th style="position:sticky;top:0;background:var(--bg-surface);z-index:1">${adhMonthLabel(m)}</th>`).join('')}
-          <th style="position:sticky;top:0;background:var(--bg-surface);z-index:1">Variação</th>
-          <th class="r" style="position:sticky;top:0;background:var(--bg-surface);z-index:1">Extras</th>
-          <th class="r" style="position:sticky;top:0;background:var(--bg-surface);z-index:1">Déficit</th>
-          <th class="r" style="position:sticky;top:0;background:var(--bg-surface);z-index:1">Colab.</th>
-          <th style="text-align:center;position:sticky;top:0;background:var(--bg-surface);z-index:1">Status</th>
+          <th>Base</th>
+          ${hist.meses.map(m => `<th>${adhMonthLabel(m)}</th>`).join('')}
+          <th>Variação</th>
+          <th class="r">Extras</th>
+          <th class="r">Déficit</th>
+          <th class="r">Colab.</th>
+          <th style="text-align:center">Status</th>
         </tr>
       </thead>
       <tbody>
@@ -923,7 +922,6 @@ function adhRenderRankingBodyHTML() {
         }).join('')}
       </tbody>
     </table>
-    </div>
     </div>
   `;
 }
