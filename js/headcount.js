@@ -176,7 +176,7 @@ function hcComputeStats(base) {
     if (d >= ha12m && d <= hoje) desligados12m++;
   }
 
-  const fte = somaCh > 0 ? Math.round(somaCh / 220 * 10) / 10 : 0;
+  const fte = somaCh > 0 ? Math.round(somaCh / 180 * 10) / 10 : 0; // 1 FTE = 180h (confirmado com o cliente)
   const ftPct = (fullTime+partTime) > 0 ? Math.round(fullTime/(fullTime+partTime)*1000)/10 : 0;
 
   // Meta = 10% do staff de cada grupo (regra de rotatividade de férias)
