@@ -1327,8 +1327,33 @@ function malhaStatsDoMes(mes) {
 
 // Cliente/aeronave — respeita base+mês+semana, mas NÃO o cliente selecionado
 // (é essa a dimensão sendo detalhada; filtrar por ele também zeraria o resto).
+// Linhas de um mês que caem num slot de 30min específico, dentro da semana
+// mais cheia — usado quando o usuário clica no gráfico pra filtrar.
+function malhaRowsDoSlot(mes, semanaKey, idx, metrica) {
+  if (idx == null || !semanaKey) return null;
+  const inicioMin = idx*30, fimMin = inicioMin+30;
+  return malhaAplicaCliente(malhaRowsBase(mes)).filter(r => {
+    if (!r.data || malhaSemanaChave(r.data).key !== semanaKey) return false;
+    if (metrica === 'movimentos') {
+      const c = malhaMinutos(r.hora_chegada), s = malhaMinutos(r.hora_saida);
+      return (c!=null && c>=inicioMin && c<fimMin) || (s!=null && s>=inicioMin && s<fimMin);
+    }
+    let c = malhaMinutos(r.hora_chegada), s = malhaMinutos(r.hora_saida);
+    if (c==null || s==null) return false;
+    if (s<c) s += 1440;
+    return c < fimMin && s > inicioMin;
+  });
+}
+
 function malhaBreakdownDoMes(mes) {
-  const rows = malhaAplicaSemana(malhaRowsBase(mes));
+  let rows;
+  const slotIdx = window._malhaSlotSelecionado;
+  if (slotIdx != null) {
+    const pior = malhaPiorSemana(mes);
+    rows = pior ? (malhaRowsDoSlot(mes, pior.key, slotIdx, window._malhaMetrica || 'movimentos') || []) : [];
+  } else {
+    rows = malhaAplicaSemana(malhaRowsBase(mes));
+  }
   const cias = new Map(), aeronaves = new Map();
   rows.forEach(r => {
     const c = r.cia || 'SEM CIA'; cias.set(c, (cias.get(c)||0)+1);
@@ -1468,10 +1493,10 @@ function malhaSmoothPath(pontos) {
   return d;
 }
 
-function adminMalhaCurvaSVG(c1, c2, mes1, mes2) {
+function adminMalhaCurvaSVG(c1, c2, mes1, mes2, larguraAlvo) {
   const n = 48;
   const max = Math.max(3, ...c1, ...c2);
-  const W=1100, H=260, padL=30, padR=10, padT=10, padB=24;
+  const W = larguraAlvo || 1200, H=260, padL=32, padR=14, padT=10, padB=24;
   const stepX = (W-padL-padR)/(n-1);
   const scaleY = v => H-padB-(v/max*(H-padB-padT));
   const pontosFor = arr => arr.map((v,i) => [padL+i*stepX, scaleY(v)]);
@@ -1480,23 +1505,26 @@ function adminMalhaCurvaSVG(c1, c2, mes1, mes2) {
   const yStep = max<=6?1:max<=12?3:Math.ceil(max/4);
   const yTicks = [];
   for (let v=0; v<=max; v+=yStep) yTicks.push(v);
+  const slotSel = window._malhaSlotSelecionado;
 
-  // Guarda os dados num lugar que o handler de mousemove consegue ler —
-  // o gráfico é HTML puro (sem framework), então a interação é feita por
-  // um listener global lendo esse estado, igual o resto do painel.
-  window._malhaCurvaData = { c1, c2, mes1: malhaMesLabel(mes1), mes2: malhaMesLabel(mes2), W, H, padL, padR, padT, padB, n, max };
+  // Guarda os dados crus (não só os rótulos) num lugar acessível pros
+  // handlers de hover/clique e pra função que reajusta a largura depois
+  // de medir o container de verdade — o gráfico é HTML puro, sem
+  // framework, então a interação é feita por listeners globais.
+  window._malhaCurvaData = { c1, c2, mes1raw: mes1, mes2raw: mes2, mes1: malhaMesLabel(mes1), mes2: malhaMesLabel(mes2), W, H, padL, padR, padT, padB, n, max };
 
   return `
-    <div style="position:relative;width:100%">
-      <svg id="malha-curva-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="display:block;width:100%;height:260px;cursor:crosshair"
-        onmousemove="adminMalhaCurvaHover(event,this)" onmouseleave="adminMalhaCurvaLeave()">
-        ${yTicks.map(v => `<line x1="${padL}" y1="${scaleY(v).toFixed(1)}" x2="${W-padR}" y2="${scaleY(v).toFixed(1)}" stroke="var(--border)" stroke-width="1" vector-effect="non-scaling-stroke"/><text x="4" y="${(scaleY(v)+3).toFixed(1)}" font-size="9" style="fill:var(--text-muted)">${v}</text>`).join('')}
+    <div id="malha-curva-wrap" style="position:relative;width:100%">
+      <svg id="malha-curva-svg" viewBox="0 0 ${W} ${H}" style="display:block;width:100%;height:260px;cursor:crosshair"
+        onmousemove="adminMalhaCurvaHover(event,this)" onmouseleave="adminMalhaCurvaLeave()" onclick="adminMalhaCurvaClick(event,this)">
+        ${yTicks.map(v => `<line x1="${padL}" y1="${scaleY(v).toFixed(1)}" x2="${W-padR}" y2="${scaleY(v).toFixed(1)}" stroke="var(--border)" stroke-width="1"/><text x="4" y="${(scaleY(v)+3).toFixed(1)}" font-size="9" style="fill:var(--text-muted)">${v}</text>`).join('')}
         ${[...Array(24).keys()].map(h => `<text x="${(padL+h*2*stepX).toFixed(1)}" y="${H-6}" font-size="8.5" text-anchor="middle" style="fill:var(--text-muted)">${String(h).padStart(2,'0')}h</text>`).join('')}
         <path d="${areaFor(c2)}" fill="#5fa87a" opacity="0.12" stroke="none"/>
         <path d="${areaFor(c1)}" fill="#38bdf8" opacity="0.12" stroke="none"/>
-        <path d="${pathFor(c2)}" fill="none" stroke="#5fa87a" stroke-width="2" vector-effect="non-scaling-stroke"/>
-        <path d="${pathFor(c1)}" fill="none" stroke="#38bdf8" stroke-width="2" vector-effect="non-scaling-stroke"/>
-        <line id="malha-curva-crosshair" x1="0" y1="${padT}" x2="0" y2="${H-padB}" stroke="var(--text-muted)" stroke-width="1" stroke-dasharray="3,3" vector-effect="non-scaling-stroke" style="display:none"/>
+        <path d="${pathFor(c2)}" fill="none" stroke="#5fa87a" stroke-width="2"/>
+        <path d="${pathFor(c1)}" fill="none" stroke="#38bdf8" stroke-width="2"/>
+        ${slotSel != null ? `<line x1="${(padL+slotSel*stepX).toFixed(1)}" y1="${padT}" x2="${(padL+slotSel*stepX).toFixed(1)}" y2="${H-padB}" stroke="var(--blue)" stroke-width="1.5"/>` : ''}
+        <line id="malha-curva-crosshair" x1="0" y1="${padT}" x2="0" y2="${H-padB}" stroke="var(--text-muted)" stroke-width="1" stroke-dasharray="3,3" style="display:none"/>
         <circle id="malha-curva-dot1" r="3.5" fill="#38bdf8" stroke="#0b0f1a" stroke-width="1.5" style="display:none"/>
         <circle id="malha-curva-dot2" r="3.5" fill="#5fa87a" stroke="#0b0f1a" stroke-width="1.5" style="display:none"/>
       </svg>
@@ -1504,15 +1532,34 @@ function adminMalhaCurvaSVG(c1, c2, mes1, mes2) {
     </div>`;
 }
 
-function adminMalhaCurvaHover(evt, svg) {
+// Depois que a página é inserida no DOM, mede a largura real do container
+// e reconstrói o SVG com esse valor exato — assim o viewBox bate 1:1 com
+// os pixels de verdade, sem distorcer o texto dos horários (o que
+// acontecia forçando um único preserveAspectRatio genérico).
+function adminMalhaCurvaAjustaLargura() {
+  const wrap = document.getElementById('malha-curva-wrap');
   const d = window._malhaCurvaData;
-  if (!d) return;
+  if (!wrap || !d) return;
+  const largura = Math.round(wrap.clientWidth);
+  if (!largura || largura === d.W) return;
+  wrap.outerHTML = adminMalhaCurvaSVG(d.c1, d.c2, d.mes1raw, d.mes2raw, largura);
+}
+
+function adminMalhaCurvaIdxDoEvento(evt, svg) {
+  const d = window._malhaCurvaData;
+  if (!d) return null;
   const rect = svg.getBoundingClientRect();
   const xSvg = (evt.clientX - rect.left) * (d.W / rect.width);
   const stepX = (d.W-d.padL-d.padR)/(d.n-1);
   let idx = Math.round((xSvg - d.padL) / stepX);
-  idx = Math.max(0, Math.min(d.n-1, idx));
+  return Math.max(0, Math.min(d.n-1, idx));
+}
 
+function adminMalhaCurvaHover(evt, svg) {
+  const d = window._malhaCurvaData;
+  if (!d) return;
+  const idx = adminMalhaCurvaIdxDoEvento(evt, svg);
+  const stepX = (d.W-d.padL-d.padR)/(d.n-1);
   const scaleY = v => d.H-d.padB-(v/d.max*(d.H-d.padB-d.padT));
   const xPos = d.padL + idx*stepX;
 
@@ -1530,7 +1577,7 @@ function adminMalhaCurvaHover(evt, svg) {
   const tooltip = document.getElementById('malha-curva-tooltip');
   if (tooltip) {
     tooltip.innerHTML = `
-      <div style="font-weight:700;color:var(--text-primary);margin-bottom:5px">${hora}</div>
+      <div style="font-weight:700;color:var(--text-primary);margin-bottom:5px">${hora} <span style="font-weight:400;color:var(--text-muted)">· clique pra filtrar</span></div>
       <div style="display:flex;align-items:center;gap:6px;color:#38bdf8;margin-bottom:2px"><span style="width:8px;height:8px;border-radius:2px;background:#38bdf8;display:inline-block"></span>${d.mes1}: <strong>${d.c1[idx]}</strong></div>
       <div style="display:flex;align-items:center;gap:6px;color:#5fa87a"><span style="width:8px;height:8px;border-radius:2px;background:#5fa87a;display:inline-block"></span>${d.mes2}: <strong>${d.c2[idx]}</strong></div>`;
     const leftPct = xPos/d.W*100;
@@ -1545,6 +1592,18 @@ function adminMalhaCurvaLeave() {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });
+}
+
+function adminMalhaCurvaClick(evt, svg) {
+  const idx = adminMalhaCurvaIdxDoEvento(evt, svg);
+  if (idx == null) return;
+  window._malhaSlotSelecionado = (window._malhaSlotSelecionado === idx) ? null : idx;
+  adminMalhaRenderDash(document.getElementById('adm-tab-content'));
+}
+
+function adminMalhaLimparSlot() {
+  window._malhaSlotSelecionado = null;
+  adminMalhaRenderDash(document.getElementById('adm-tab-content'));
 }
 
 function adminMalhaTabelaHTML(mapa1, mapa2, titulo) {
@@ -1592,14 +1651,26 @@ function adminMalhaRenderDash(el) {
   const mes1 = window._malhaMes1, mes2 = window._malhaMes2;
   const metrica = window._malhaMetrica || 'movimentos';
   const agregacao = window._malhaAgregacao || 'media';
+  const slotSel = window._malhaSlotSelecionado;
 
   const b1 = malhaBreakdownDoMes(mes1), b2 = malhaBreakdownDoMes(mes2);
 
   const pior1 = malhaPiorSemana(mes1), pior2 = malhaPiorSemana(mes2);
-  const total1 = pior1 ? pior1.total : 0, total2 = pior2 ? pior2.total : 0;
   const curva1 = pior1 ? adminMalhaCurva(mes1, pior1.key, metrica, agregacao) : new Array(48).fill(0);
   const curva2 = pior2 ? adminMalhaCurva(mes2, pior2.key, metrica, agregacao) : new Array(48).fill(0);
   const pico1 = adminMalhaPicoDaCurva(curva1), pico2 = adminMalhaPicoDaCurva(curva2);
+
+  let total1, total2, slotLabel = null;
+  if (slotSel != null) {
+    total1 = pior1 ? (malhaRowsDoSlot(mes1, pior1.key, slotSel, metrica) || []).length : 0;
+    total2 = pior2 ? (malhaRowsDoSlot(mes2, pior2.key, slotSel, metrica) || []).length : 0;
+    const totalMin = slotSel*30, hh = Math.floor(totalMin/60), mm = totalMin%60;
+    const fimMin = totalMin+30, hh2 = Math.floor(fimMin/60), mm2 = fimMin%60;
+    slotLabel = `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}–${String(hh2).padStart(2,'0')}:${String(mm2).padStart(2,'0')}`;
+  } else {
+    total1 = pior1 ? pior1.total : 0;
+    total2 = pior2 ? pior2.total : 0;
+  }
   const deltaArea = total2-total1;
   const deltaAreaPct = total1 ? Math.round(deltaArea/total1*1000)/10 : 0;
 
@@ -1629,16 +1700,22 @@ function adminMalhaRenderDash(el) {
       </div>
     </div>
 
+    ${slotSel != null ? `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+      <button class="hc-grupo-clear" onclick="adminMalhaLimparSlot()"><i class="ti ti-x" aria-hidden="true"></i> Filtrado por horário ${slotLabel}</button>
+      <span style="font-size:11px;color:var(--text-muted)">KPIs, Cia e Aeronave abaixo refletem só esse horário, na semana mais cheia de cada mês</span>
+    </div>` : ''}
+
     <div style="display:flex;gap:16px;margin-bottom:16px;flex-wrap:wrap">
       <div class="hc-panel" style="flex:1;min-width:200px">
         <div style="font-size:10px;font-weight:700;color:#38bdf8;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">${malhaMesLabel(mes1)}</div>
         <div style="font-size:26px;font-weight:700;color:#38bdf8">${total1.toLocaleString('pt-BR')}</div>
-        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">${pico1.hora!=null ? `Pico ${pico1.hora} (${pico1.valor})` : 'Sem dados'}</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">${slotSel!=null ? `Voos no horário selecionado` : (pico1.hora!=null ? `Pico ${pico1.hora} (${pico1.valor})` : 'Sem dados')}</div>
       </div>
       <div class="hc-panel" style="flex:1;min-width:200px">
         <div style="font-size:10px;font-weight:700;color:#5fa87a;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">${malhaMesLabel(mes2)}</div>
         <div style="font-size:26px;font-weight:700;color:#5fa87a">${total2.toLocaleString('pt-BR')}</div>
-        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">${pico2.hora!=null ? `Pico ${pico2.hora} (${pico2.valor})` : 'Sem dados'}</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">${slotSel!=null ? `Voos no horário selecionado` : (pico2.hora!=null ? `Pico ${pico2.hora} (${pico2.valor})` : 'Sem dados')}</div>
       </div>
       <div class="hc-panel" style="flex:1;min-width:200px">
         <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Delta área</div>
@@ -1649,7 +1726,7 @@ function adminMalhaRenderDash(el) {
 
     <div class="hc-panel" style="margin-bottom:16px">
       <div class="hc-panel-title" style="margin-bottom:2px">Curva de demanda (24h) · ${metricaLbl[metrica]}</div>
-      <div style="font-size:11px;color:var(--text-muted);margin-bottom:14px">Pior semana da base${pior1?` · ${malhaMesLabel(mes1)}: semana ${pior1.key}`:''}${pior2?` · ${malhaMesLabel(mes2)}: semana ${pior2.key}`:''}</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:14px">Pior semana da base${pior1?` · ${malhaMesLabel(mes1)}: semana ${pior1.key}`:''}${pior2?` · ${malhaMesLabel(mes2)}: semana ${pior2.key}`:''} · clique num ponto do gráfico pra filtrar Cia/Aeronave por horário</div>
       ${adminMalhaCurvaSVG(curva1, curva2, mes1, mes2)}
       <div style="display:flex;gap:16px;margin-top:8px;font-size:11px;color:var(--text-secondary)">
         <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#38bdf8;display:inline-block"></span>${malhaMesLabel(mes1)}</span>
@@ -1668,6 +1745,14 @@ function adminMalhaRenderDash(el) {
       </div>
     </div>
   `;
+
+  // Corrige a largura do gráfico pro tamanho real do container assim que o
+  // layout terminar de calcular (não dá pra saber isso ainda no innerHTML).
+  requestAnimationFrame(adminMalhaCurvaAjustaLargura);
+  if (!window._malhaResizeListenerAdded) {
+    window._malhaResizeListenerAdded = true;
+    window.addEventListener('resize', () => adminMalhaCurvaAjustaLargura());
+  }
 }
 
 function adminMalhaAplicar() {
@@ -1677,11 +1762,13 @@ function adminMalhaAplicar() {
   if (mesA) window._malhaMes1 = mesA;
   if (mesB) window._malhaMes2 = mesB;
   window._malhaBase = base || null;
+  window._malhaSlotSelecionado = null;
   adminMalhaRenderDash(document.getElementById('adm-tab-content'));
 }
 
 function adminMalhaSetMetrica(m) {
   window._malhaMetrica = m;
+  window._malhaSlotSelecionado = null;
   adminMalhaRenderDash(document.getElementById('adm-tab-content'));
 }
 
@@ -1732,6 +1819,7 @@ async function adminMalhaTab(el) {
   if (!window._malhaMes1 || !meses.includes(window._malhaMes1)) window._malhaMes1 = meses[meses.length-2] || meses[0] || null;
   if (!window._malhaMes2 || !meses.includes(window._malhaMes2)) window._malhaMes2 = meses[meses.length-1] || null;
   window._malhaCliente = null;
+  window._malhaSlotSelecionado = null;
   window._malhaSemana = null;
 
   adminMalhaRenderDash(el);
