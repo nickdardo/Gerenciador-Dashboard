@@ -1415,52 +1415,62 @@ function malhaHorasDaSemana(mes, semanaKey) {
   return porHora;
 }
 
-function adminMalhaCiaBarsHTML(nomesCia, b1, b2) {
-  if (!nomesCia.length) return `<div style="padding:24px 10px;text-align:center;color:var(--text-muted);font-size:12px">Sem voos nesse período.</div>`;
-  const max = Math.max(1, ...nomesCia.map(c => Math.max(b1.get(c)||0, b2.get(c)||0)));
-  const ativo = window._malhaCliente;
-  return nomesCia.map(c => {
-    const v1 = b1.get(c)||0, v2 = b2.get(c)||0;
-    const active = ativo === c;
-    return `
-      <div onclick="adminMalhaSelectCia('${c.replace(/'/g,"\\'")}')" style="cursor:pointer;padding:8px 10px;border-radius:8px;margin-bottom:3px;background:${active?'rgba(0,160,210,.10)':'transparent'}">
-        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:5px">
-          <span style="color:${active?'var(--blue)':'var(--text-primary)'};font-weight:${active?700:500}">${c}</span>
-          <span style="color:var(--text-muted)">${v1} → ${v2}</span>
-        </div>
-        <div style="display:flex;gap:2px;height:7px">
-          <div style="width:${Math.round(v1/max*100)}%;background:#38bdf8;border-radius:3px 0 0 3px"></div>
-          <div style="width:${Math.round(v2/max*100)}%;background:#5fa87a;border-radius:0 3px 3px 0"></div>
-        </div>
-      </div>`;
-  }).join('');
+function adminMalhaCurva(mes, semanaKey, metrica, agregacao) {
+  const n = 48;
+  const porDia = new Map();
+  malhaAplicaCliente(malhaRowsBase(mes)).forEach(r => {
+    if (!r.data || malhaSemanaChave(r.data).key !== semanaKey) return;
+    if (!porDia.has(r.data)) porDia.set(r.data, new Array(n).fill(0));
+    const arr = porDia.get(r.data);
+    if (metrica === 'movimentos') {
+      const c = malhaMinutos(r.hora_chegada); if (c!=null) arr[Math.min(n-1,Math.floor(c/30))]++;
+      const s = malhaMinutos(r.hora_saida);   if (s!=null) arr[Math.min(n-1,Math.floor(s/30))]++;
+    } else {
+      // "Em solo" e "Atendimento" (mesmo cálculo por enquanto — ver observação
+      // na mensagem de entrega): aeronaves simultâneas no pátio, contando cada
+      // meia-hora entre a chegada e a saída.
+      let c = malhaMinutos(r.hora_chegada), s = malhaMinutos(r.hora_saida);
+      if (c==null || s==null) return;
+      if (s < c) s += 1440;
+      for (let m=c; m<s; m+=30) arr[Math.floor((m%1440)/30)]++;
+    }
+  });
+  const dias = [...porDia.values()];
+  const curva = new Array(n).fill(0);
+  for (let i=0;i<n;i++) {
+    const vals = dias.map(d=>d[i]);
+    if (!vals.length) continue;
+    curva[i] = agregacao==='maximo' ? Math.max(...vals) : Math.round(vals.reduce((a,b)=>a+b,0)/vals.length*10)/10;
+  }
+  return curva;
 }
 
-function adminMalhaDetailHTML(b1, b2) {
-  const c = window._malhaCliente;
-  if (!c) {
-    return `<div class="hc-panel-title">Detalhe</div><div style="padding:24px 0;text-align:center;color:var(--text-muted);font-size:12px">Clique numa cia, semana<br>ou dia pra ver o detalhe aqui</div>`;
-  }
-  const v1 = b1.get(c)||0, v2 = b2.get(c)||0;
-  const delta = v2-v1;
-  const rows1 = malhaAplicaCliente(malhaRowsBase(window._malhaMes1));
-  const porDia = [0,0,0,0,0,0,0];
-  rows1.forEach(r => { if (!r.data) return; const d = new Date(r.data+'T12:00:00'); porDia[d.getDay()]++; });
-  const diasLbl = ['dom','seg','ter','qua','qui','sex','sáb'];
-  const maxDia = Math.max(1, ...porDia);
+function adminMalhaPicoDaCurva(curva) {
+  if (!curva.length) return { hora:null, valor:0 };
+  let idx=0;
+  curva.forEach((v,i)=>{ if (v>curva[idx]) idx=i; });
+  const totalMin = idx*30;
+  const h = Math.floor(totalMin/60), m = totalMin%60;
+  return { hora: `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`, valor: curva[idx] };
+}
+
+function adminMalhaCurvaSVG(c1, c2) {
+  const n = 48;
+  const max = Math.max(3, ...c1, ...c2);
+  const W=1100, H=260, padL=30, padR=10, padT=10, padB=24;
+  const stepX = (W-padL-padR)/(n-1);
+  const scaleY = v => H-padB-(v/max*(H-padB-padT));
+  const pathFor = arr => arr.map((v,i)=>`${i===0?'M':'L'} ${(padL+i*stepX).toFixed(1)} ${scaleY(v).toFixed(1)}`).join(' ');
+  const yStep = max<=6?1:max<=12?3:Math.ceil(max/4);
+  const yTicks = [];
+  for (let v=0; v<=max; v+=yStep) yTicks.push(v);
   return `
-    <div class="hc-panel-title" style="color:var(--blue)">${c}</div>
-    <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="font-size:12px;color:var(--text-muted)">${malhaMesLabel(window._malhaMes1)}</span><span style="font-size:18px;font-weight:700;color:var(--text-primary)">${v1}</span></div>
-    <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="font-size:12px;color:var(--text-muted)">${malhaMesLabel(window._malhaMes2)}</span><span style="font-size:18px;font-weight:700;color:var(--text-primary)">${v2}</span></div>
-    <div style="display:flex;justify-content:space-between;margin-bottom:16px;padding-top:8px;border-top:1px solid var(--border)"><span style="font-size:12px;color:var(--text-muted)">Delta</span><span style="font-size:15px;font-weight:700;color:${delta>=0?'#5fa87a':'#fc8181'}">${delta>=0?'+':''}${delta}</span></div>
-    <div style="font-size:10px;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Por dia da semana · ${malhaMesLabel(window._malhaMes1)}</div>
-    ${diasLbl.map((d,i) => `
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-        <span style="font-size:11px;color:var(--text-muted);width:26px">${d}</span>
-        <div style="flex:1;height:6px;background:var(--border-strong);border-radius:3px;overflow:hidden"><div style="width:${Math.round(porDia[i]/maxDia*100)}%;height:100%;background:#38bdf8"></div></div>
-        <span style="font-size:11px;color:var(--text-secondary);width:22px;text-align:right">${porDia[i]}</span>
-      </div>`).join('')}
-  `;
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:220px">
+      ${yTicks.map(v => `<line x1="${padL}" y1="${scaleY(v).toFixed(1)}" x2="${W-padR}" y2="${scaleY(v).toFixed(1)}" stroke="var(--border)" stroke-width="1"/><text x="4" y="${(scaleY(v)+3).toFixed(1)}" font-size="9" style="fill:var(--text-muted)">${v}</text>`).join('')}
+      ${[...Array(24).keys()].map(h => `<text x="${(padL+h*2*stepX).toFixed(1)}" y="${H-6}" font-size="8.5" text-anchor="middle" style="fill:var(--text-muted)">${String(h).padStart(2,'0')}h</text>`).join('')}
+      <path d="${pathFor(c2)}" fill="none" stroke="#5fa87a" stroke-width="2"/>
+      <path d="${pathFor(c1)}" fill="none" stroke="#38bdf8" stroke-width="2"/>
+    </svg>`;
 }
 
 function adminMalhaTabelaHTML(mapa1, mapa2, titulo) {
@@ -1470,22 +1480,25 @@ function adminMalhaTabelaHTML(mapa1, mapa2, titulo) {
   let totM1=0, totM2=0;
   nomes.forEach(n => { totM1+=mapa1.get(n)||0; totM2+=mapa2.get(n)||0; });
   const totDelta = totM2-totM1;
+  const totDeltaPct = totM1 ? Math.round(totDelta/totM1*1000)/10 : 0;
+  const th = label => `<th style="text-align:right;padding:6px;color:var(--text-muted);font-size:10px;text-transform:uppercase">${label}</th>`;
   return `
     <table style="width:100%;border-collapse:collapse;font-size:12px">
       <thead><tr>
         <th style="text-align:left;padding:6px;color:var(--text-muted);font-size:10px;text-transform:uppercase">${titulo}</th>
-        <th style="text-align:right;padding:6px;color:var(--text-muted);font-size:10px;text-transform:uppercase">M</th>
-        <th style="text-align:right;padding:6px;color:var(--text-muted);font-size:10px;text-transform:uppercase">M2</th>
-        <th style="text-align:right;padding:6px;color:var(--text-muted);font-size:10px;text-transform:uppercase">Delta</th>
+        ${th('M')}${th('M2')}${th('Δ')}${th('Δ%')}
       </tr></thead>
       <tbody>
         ${nomes.map(n => {
           const v1=mapa1.get(n)||0, v2=mapa2.get(n)||0, d=v2-v1;
+          const dpct = v1 ? Math.round(d/v1*1000)/10 : 0;
+          const cor = d>0?'#5fa87a':d<0?'#fc8181':'var(--text-muted)';
           return `<tr>
             <td style="padding:6px;color:var(--text-primary);border-bottom:1px solid var(--border)">${n}</td>
             <td style="text-align:right;padding:6px;color:var(--text-secondary);border-bottom:1px solid var(--border)">${v1}</td>
             <td style="text-align:right;padding:6px;color:var(--text-secondary);border-bottom:1px solid var(--border)">${v2}</td>
-            <td style="text-align:right;padding:6px;font-weight:700;border-bottom:1px solid var(--border);color:${d>0?'#5fa87a':d<0?'#fc8181':'var(--text-muted)'}">${d>0?'+':''}${d}</td>
+            <td style="text-align:right;padding:6px;font-weight:700;border-bottom:1px solid var(--border);color:${cor}">${d>0?'+':''}${d}</td>
+            <td style="text-align:right;padding:6px;font-weight:700;border-bottom:1px solid var(--border);color:${cor}">${dpct>0?'+':''}${dpct}%</td>
           </tr>`;
         }).join('')}
       </tbody>
@@ -1494,217 +1507,115 @@ function adminMalhaTabelaHTML(mapa1, mapa2, titulo) {
         <td style="text-align:right;padding:7px 6px;font-weight:700;color:var(--text-primary)">${totM1}</td>
         <td style="text-align:right;padding:7px 6px;font-weight:700;color:var(--text-primary)">${totM2}</td>
         <td style="text-align:right;padding:7px 6px;font-weight:700;color:${totDelta>0?'#5fa87a':totDelta<0?'#fc8181':'var(--text-muted)'}">${totDelta>0?'+':''}${totDelta}</td>
+        <td style="text-align:right;padding:7px 6px;font-weight:700;color:${totDelta>0?'#5fa87a':totDelta<0?'#fc8181':'var(--text-muted)'}">${totDeltaPct>0?'+':''}${totDeltaPct}%</td>
       </tr></tfoot>
     </table>`;
-}
-
-function adminMalhaGradeSemanalHTML(mes) {
-  const grade = malhaGradeSemanal(mes);
-  if (!grade.length) return `<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px">Sem dados.</div>`;
-  const totais = { dom:0,seg:0,ter:0,qua:0,qui:0,sex:0,sab:0,total:0 };
-  grade.forEach(s => { MALHA_DIAS.forEach(d => totais[d]+=s[d]); totais.total+=s.total; });
-  const semanaAtiva = window._malhaSemana;
-  return `
-    <table style="width:100%;border-collapse:collapse;font-size:11px">
-      <thead><tr>
-        <th style="text-align:left;padding:5px 6px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase">Semana</th>
-        ${MALHA_DIAS.map(d=>`<th style="text-align:right;padding:5px 4px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase">${d}</th>`).join('')}
-        <th style="text-align:right;padding:5px 6px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase">Total</th>
-      </tr></thead>
-      <tbody>
-        ${grade.map(s => {
-          const active = semanaAtiva===s.key;
-          return `<tr onclick="adminMalhaSelectSemana('${s.key}')" style="cursor:pointer;background:${active?'rgba(0,160,210,.10)':'transparent'}">
-            <td style="padding:5px 6px;color:${active?'var(--blue)':'var(--text-primary)'};font-weight:${active?700:500}">${s.key}</td>
-            ${MALHA_DIAS.map(d=>`<td style="text-align:right;padding:5px 4px;color:var(--text-secondary)">${s[d]||''}</td>`).join('')}
-            <td style="text-align:right;padding:5px 6px;font-weight:700;color:var(--text-primary)">${s.total}</td>
-          </tr>`;
-        }).join('')}
-      </tbody>
-      <tfoot><tr style="border-top:1px solid var(--border-strong)">
-        <td style="padding:6px;font-weight:700;color:var(--text-primary)">Total</td>
-        ${MALHA_DIAS.map(d=>`<td style="text-align:right;padding:6px 4px;font-weight:700;color:var(--text-primary)">${totais[d]}</td>`).join('')}
-        <td style="text-align:right;padding:6px;font-weight:700;color:var(--text-primary)">${totais.total}</td>
-      </tr></tfoot>
-    </table>`;
-}
-
-function adminMalhaGradeHorariaHTML(mes) {
-  const grade = malhaGradeHoraria(mes);
-  if (!grade.length) return `<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px">Sem dados.</div>`;
-  const totais = new Array(8).fill(0);
-  grade.forEach(s => s.slots.forEach((v,i)=>totais[i]+=v));
-  const semanaAtiva = window._malhaSemana;
-  return `
-    <table style="width:100%;border-collapse:collapse;font-size:10.5px">
-      <thead><tr>
-        <th style="text-align:left;padding:5px 6px;color:var(--text-muted);font-size:9px;text-transform:uppercase">Semana</th>
-        ${MALHA_SLOTS_LBL.map(l=>`<th style="text-align:right;padding:5px 3px;color:var(--text-muted);font-size:9px">${l}</th>`).join('')}
-      </tr></thead>
-      <tbody>
-        ${grade.map(s => {
-          const active = semanaAtiva===s.key;
-          return `<tr onclick="adminMalhaSelectSemana('${s.key}')" style="cursor:pointer;background:${active?'rgba(0,160,210,.10)':'transparent'}">
-            <td style="padding:5px 6px;color:${active?'var(--blue)':'var(--text-primary)'};font-weight:${active?700:500}">${s.key}</td>
-            ${s.slots.map(v=>`<td style="text-align:right;padding:5px 3px;color:var(--text-secondary)">${v||''}</td>`).join('')}
-          </tr>`;
-        }).join('')}
-      </tbody>
-      <tfoot><tr style="border-top:1px solid var(--border-strong)">
-        <td style="padding:6px">Total</td>
-        ${totais.map(v=>`<td style="text-align:right;padding:6px 3px;font-weight:700;color:var(--text-primary)">${v}</td>`).join('')}
-      </tr></tfoot>
-    </table>`;
-}
-
-function adminMalhaComparativoPiorSemanaHTML(mes1, mes2) {
-  const p1 = malhaPiorSemana(mes1), p2 = malhaPiorSemana(mes2);
-  if (!p1 && !p2) return `<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px">Sem dados.</div>`;
-  const h1 = p1 ? malhaHorasDaSemana(mes1, p1.key) : new Array(24).fill(0);
-  const h2 = p2 ? malhaHorasDaSemana(mes2, p2.key) : new Array(24).fill(0);
-  const max = Math.max(1, ...h1, ...h2);
-  const W=760, H=160, padL=26, padB=20, padT=10;
-  const stepX = (W-padL-10)/23;
-  const scaleY = v => H-padB-(v/max*(H-padB-padT));
-  const pathFor = arr => arr.map((v,i)=>`${i===0?'M':'L'} ${(padL+i*stepX).toFixed(1)} ${scaleY(v).toFixed(1)}`).join(' ');
-  const ticks = [0,3,6,9,12,15,18,21];
-  return `
-    <div style="display:flex;gap:16px;margin-bottom:10px;font-size:11px">
-      <span style="display:flex;align-items:center;gap:5px;color:var(--text-secondary)"><span style="width:10px;height:10px;border-radius:2px;background:#38bdf8;display:inline-block"></span>${malhaMesLabel(mes1)}${p1?` · semana ${p1.key} (a mais cheia)`:''}</span>
-      <span style="display:flex;align-items:center;gap:5px;color:var(--text-secondary)"><span style="width:10px;height:10px;border-radius:2px;background:#5fa87a;display:inline-block"></span>${malhaMesLabel(mes2)}${p2?` · semana ${p2.key} (a mais cheia)`:''}</span>
-    </div>
-    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:160px">
-      ${ticks.map(t => `<text x="${(padL+t*stepX).toFixed(1)}" y="${H-4}" font-size="9" text-anchor="middle" style="fill:var(--text-muted)">${String(t).padStart(2,'0')}h</text>`).join('')}
-      <path d="${pathFor(h1)}" fill="none" stroke="#38bdf8" stroke-width="2"/>
-      <path d="${pathFor(h2)}" fill="none" stroke="#5fa87a" stroke-width="2"/>
-    </svg>`;
 }
 
 function adminMalhaRenderDash(el) {
   const bases = malhaBasesDisponiveis();
   const meses = malhaMesesDisponiveis(window._malhaBase);
   const mes1 = window._malhaMes1, mes2 = window._malhaMes2;
-  const s1 = malhaStatsDoMes(mes1), s2 = malhaStatsDoMes(mes2);
+  const metrica = window._malhaMetrica || 'movimentos';
+  const agregacao = window._malhaAgregacao || 'media';
+
   const b1 = malhaBreakdownDoMes(mes1), b2 = malhaBreakdownDoMes(mes2);
-  const delta = s2.total - s1.total;
-  const deltaPct = s1.total ? Math.round(delta/s1.total*1000)/10 : 0;
-  const nomesCia = [...new Set([...b1.cias.keys(), ...b2.cias.keys()])]
-    .sort((a,b) => ((b2.cias.get(b)||0)+(b1.cias.get(b)||0)) - ((b2.cias.get(a)||0)+(b1.cias.get(a)||0)));
+
+  const pior1 = malhaPiorSemana(mes1), pior2 = malhaPiorSemana(mes2);
+  const total1 = pior1 ? pior1.total : 0, total2 = pior2 ? pior2.total : 0;
+  const curva1 = pior1 ? adminMalhaCurva(mes1, pior1.key, metrica, agregacao) : new Array(48).fill(0);
+  const curva2 = pior2 ? adminMalhaCurva(mes2, pior2.key, metrica, agregacao) : new Array(48).fill(0);
+  const pico1 = adminMalhaPicoDaCurva(curva1), pico2 = adminMalhaPicoDaCurva(curva2);
+  const deltaArea = total2-total1;
+  const deltaAreaPct = total1 ? Math.round(deltaArea/total1*1000)/10 : 0;
+
+  const metricaLbl = { atendimento:'Atendimento', solo:'Em solo', movimentos:'Movimentos' };
 
   el.innerHTML = `
-    <div class="adm-section-header">
-      <span>Malha aérea · ${(adminFiles.malha?.count||0).toLocaleString('pt-BR')} voos no total${window._malhaCliente?` · filtrado por ${window._malhaCliente}`:''}${window._malhaSemana?` · semana ${window._malhaSemana}`:''}</span>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        ${(window._malhaCliente||window._malhaSemana) ? `<button class="hc-grupo-clear" onclick="adminMalhaLimparFiltros()"><i class="ti ti-x" aria-hidden="true"></i> Limpar filtros</button>` : ''}
-        <select class="adh-month-select" onchange="adminMalhaSetBase(this.value||null)">
-          <option value="">Todas as bases</option>
-          ${bases.map(b => `<option value="${b}" ${b===window._malhaBase?'selected':''}>${b}</option>`).join('')}
-        </select>
-        <select class="adh-month-select" onchange="adminMalhaSetMes(1,this.value)">
-          ${meses.map(m => `<option value="${m}" ${m===mes1?'selected':''}>${malhaMesLabel(m)}</option>`).join('')}
-        </select>
-        <span style="color:var(--text-muted);font-size:12px">×</span>
-        <select class="adh-month-select" onchange="adminMalhaSetMes(2,this.value)">
-          ${meses.map(m => `<option value="${m}" ${m===mes2?'selected':''}>${malhaMesLabel(m)}</option>`).join('')}
-        </select>
+    <div class="adm-section-header" style="align-items:flex-end;flex-wrap:wrap;gap:14px">
+      <div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap">
+        <div><div style="font-size:9.5px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Mês A</div>
+          <select id="malha-sel-mesA" class="adh-month-select">${meses.map(m=>`<option value="${m}" ${m===mes1?'selected':''}>${malhaMesLabel(m)}</option>`).join('')}</select></div>
+        <div><div style="font-size:9.5px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Mês B (comparar)</div>
+          <select id="malha-sel-mesB" class="adh-month-select">${meses.map(m=>`<option value="${m}" ${m===mes2?'selected':''}>${malhaMesLabel(m)}</option>`).join('')}</select></div>
+        <div><div style="font-size:9.5px;color:var(--text-muted);text-transform:uppercase;margin-bottom:4px">Base</div>
+          <select id="malha-sel-base" class="adh-month-select">${bases.map(b=>`<option value="${b}" ${b===window._malhaBase?'selected':''}>${b}</option>`).join('')}</select></div>
+        <button class="adh-refresh-btn" style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600" onclick="adminMalhaAplicar()">Aplicar</button>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <div class="malha-toggle-group">
+          <button class="malha-toggle ${metrica==='atendimento'?'active':''}" onclick="adminMalhaSetMetrica('atendimento')">Atendimento</button>
+          <button class="malha-toggle ${metrica==='solo'?'active':''}" onclick="adminMalhaSetMetrica('solo')">Em solo</button>
+          <button class="malha-toggle ${metrica==='movimentos'?'active':''}" onclick="adminMalhaSetMetrica('movimentos')">Movimentos</button>
+        </div>
+        <div class="malha-toggle-group">
+          <button class="malha-toggle ${agregacao==='media'?'active':''}" onclick="adminMalhaSetAgregacao('media')">Média</button>
+          <button class="malha-toggle ${agregacao==='maximo'?'active':''}" onclick="adminMalhaSetAgregacao('maximo')">Máximo</button>
+        </div>
       </div>
     </div>
 
-    ${adhKpiCardsHTML([
-      { key:'blue', icon:'ti-plane-departure', title:'Voos previstos', rows: [
-        { label: malhaMesLabel(mes1), sub:`${s1.mediaDia}/dia em média`, value: s1.total.toLocaleString('pt-BR') },
-        { label: malhaMesLabel(mes2), sub:`${s2.mediaDia}/dia em média`, value: s2.total.toLocaleString('pt-BR') },
-      ]},
-      { key: delta>=0?'green':'red', icon:'ti-arrows-diff', title:'Variação', rows: [
-        { label:'Voos a mais/menos', sub:`${malhaMesLabel(mes1)} → ${malhaMesLabel(mes2)}`, value: `${delta>=0?'+':''}${delta}`, color: delta>=0?'#5fa87a':'#fc8181' },
-        { label:'Variação percentual', sub:'sobre o mês 1', value: `${deltaPct>=0?'+':''}${deltaPct}%`, color: delta>=0?'#5fa87a':'#fc8181' },
-      ]},
-      { key:'amber', icon:'ti-clock-exclamation', title:'PNT previsto', rows: [
-        { label: malhaMesLabel(mes1), sub:'permanência em solo > 4h', value: s1.pntPct!=null ? s1.pntPct+'%' : '—' },
-        { label: malhaMesLabel(mes2), sub:'permanência em solo > 4h', value: s2.pntPct!=null ? s2.pntPct+'%' : '—' },
-      ]},
-    ])}
-
-    <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;margin-bottom:16px">
-      <div class="hc-panel" style="flex:1;min-width:340px">
-        <div class="hc-panel-title">Grade semanal · ${malhaMesLabel(mes1)}</div>
-        <div style="overflow-x:auto">${adminMalhaGradeSemanalHTML(mes1)}</div>
+    <div style="display:flex;gap:16px;margin-bottom:16px;flex-wrap:wrap">
+      <div class="hc-panel" style="flex:1;min-width:200px">
+        <div style="font-size:10px;font-weight:700;color:#38bdf8;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">${malhaMesLabel(mes1)}</div>
+        <div style="font-size:26px;font-weight:700;color:#38bdf8">${total1.toLocaleString('pt-BR')}</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">${pico1.hora!=null ? `Pico ${pico1.hora} (${pico1.valor})` : 'Sem dados'}</div>
       </div>
-      <div class="hc-panel" style="flex:1;min-width:340px">
-        <div class="hc-panel-title">Grade semanal · ${malhaMesLabel(mes2)}</div>
-        <div style="overflow-x:auto">${adminMalhaGradeSemanalHTML(mes2)}</div>
+      <div class="hc-panel" style="flex:1;min-width:200px">
+        <div style="font-size:10px;font-weight:700;color:#5fa87a;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">${malhaMesLabel(mes2)}</div>
+        <div style="font-size:26px;font-weight:700;color:#5fa87a">${total2.toLocaleString('pt-BR')}</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">${pico2.hora!=null ? `Pico ${pico2.hora} (${pico2.valor})` : 'Sem dados'}</div>
+      </div>
+      <div class="hc-panel" style="flex:1;min-width:200px">
+        <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Delta área</div>
+        <div style="font-size:26px;font-weight:700;color:${deltaArea>=0?'#5fa87a':'#fc8181'}">${deltaArea>=0?'+':''}${deltaArea}</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">${deltaAreaPct>=0?'+':''}${deltaAreaPct}%</div>
       </div>
     </div>
 
-    <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;margin-bottom:16px">
-      <div class="hc-panel" style="flex:1;min-width:340px">
-        <div class="hc-panel-title">Voos por horário · ${malhaMesLabel(mes1)}</div>
-        <div style="overflow-x:auto">${adminMalhaGradeHorariaHTML(mes1)}</div>
-      </div>
-      <div class="hc-panel" style="flex:1;min-width:340px">
-        <div class="hc-panel-title">Voos por horário · ${malhaMesLabel(mes2)}</div>
-        <div style="overflow-x:auto">${adminMalhaGradeHorariaHTML(mes2)}</div>
+    <div class="hc-panel" style="margin-bottom:16px">
+      <div class="hc-panel-title" style="margin-bottom:2px">Curva de demanda (24h) · ${metricaLbl[metrica]}</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:14px">Pior semana da base${pior1?` · ${malhaMesLabel(mes1)}: semana ${pior1.key}`:''}${pior2?` · ${malhaMesLabel(mes2)}: semana ${pior2.key}`:''}</div>
+      ${adminMalhaCurvaSVG(curva1, curva2)}
+      <div style="display:flex;gap:16px;margin-top:8px;font-size:11px;color:var(--text-secondary)">
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#38bdf8;display:inline-block"></span>${malhaMesLabel(mes1)}</span>
+        <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#5fa87a;display:inline-block"></span>${malhaMesLabel(mes2)}</span>
       </div>
     </div>
 
-    <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;margin-bottom:16px">
-      <div class="hc-panel" style="flex:1.6;min-width:320px">
-        <div class="hc-panel-title">Voos por cia · ${malhaMesLabel(mes1)} × ${malhaMesLabel(mes2)}</div>
-        <div id="malha-cia-bars">${adminMalhaCiaBarsHTML(nomesCia, b1.cias, b2.cias)}</div>
+    <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+      <div class="hc-panel" style="flex:1;min-width:300px">
+        <div class="hc-panel-title">Cia</div>
+        ${adminMalhaTabelaHTML(b1.cias, b2.cias, 'Item')}
       </div>
-      <div class="hc-panel" style="flex:1;min-width:260px" id="malha-detail">${adminMalhaDetailHTML(b1.cias, b2.cias)}</div>
-    </div>
-
-    <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;margin-bottom:16px">
-      <div class="hc-panel" style="flex:1;min-width:280px">
-        <div class="hc-panel-title">Cliente</div>
-        ${adminMalhaTabelaHTML(b1.cias, b2.cias, 'Cliente')}
-      </div>
-      <div class="hc-panel" style="flex:1;min-width:280px">
+      <div class="hc-panel" style="flex:1;min-width:300px">
         <div class="hc-panel-title">Aeronave</div>
-        ${adminMalhaTabelaHTML(b1.aeronaves, b2.aeronaves, 'Aeronave')}
+        ${adminMalhaTabelaHTML(b1.aeronaves, b2.aeronaves, 'Item')}
       </div>
-    </div>
-
-    <div class="hc-panel">
-      <div class="hc-panel-title">Comparativo de voos por horário · semana mais cheia de cada mês</div>
-      ${adminMalhaComparativoPiorSemanaHTML(mes1, mes2)}
     </div>
   `;
 }
 
-function adminMalhaSetBase(base) {
+function adminMalhaAplicar() {
+  const mesA = document.getElementById('malha-sel-mesA')?.value;
+  const mesB = document.getElementById('malha-sel-mesB')?.value;
+  const base = document.getElementById('malha-sel-base')?.value;
+  if (mesA) window._malhaMes1 = mesA;
+  if (mesB) window._malhaMes2 = mesB;
   window._malhaBase = base || null;
-  const meses = malhaMesesDisponiveis(window._malhaBase);
-  if (!meses.includes(window._malhaMes1)) window._malhaMes1 = meses[meses.length-2] || meses[0] || null;
-  if (!meses.includes(window._malhaMes2)) window._malhaMes2 = meses[meses.length-1] || null;
-  window._malhaCliente = null;
-  window._malhaSemana = null;
   adminMalhaRenderDash(document.getElementById('adm-tab-content'));
 }
 
-function adminMalhaSetMes(qual, mes) {
-  if (qual === 1) window._malhaMes1 = mes; else window._malhaMes2 = mes;
-  window._malhaCliente = null;
-  window._malhaSemana = null;
+function adminMalhaSetMetrica(m) {
+  window._malhaMetrica = m;
   adminMalhaRenderDash(document.getElementById('adm-tab-content'));
 }
 
-function adminMalhaSelectCia(nome) {
-  window._malhaCliente = (window._malhaCliente === nome) ? null : nome;
+function adminMalhaSetAgregacao(a) {
+  window._malhaAgregacao = a;
   adminMalhaRenderDash(document.getElementById('adm-tab-content'));
 }
 
-function adminMalhaSelectSemana(key) {
-  window._malhaSemana = (window._malhaSemana === key) ? null : key;
-  adminMalhaRenderDash(document.getElementById('adm-tab-content'));
-}
-
-function adminMalhaLimparFiltros() {
-  window._malhaCliente = null;
-  window._malhaSemana = null;
-  adminMalhaRenderDash(document.getElementById('adm-tab-content'));
-}
 
 async function adminMalhaTab(el) {
   el.innerHTML = `
