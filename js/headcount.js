@@ -202,7 +202,7 @@ async function pageHeadcount(el) {
 
   const bases = currentUserProfile?.bases || [];
   if (!window._hcBase) {
-    window._hcBase = (bases.includes('*') || role === 'admin') ? null : (bases[0] || null);
+    window._hcBase = (role === 'admin') ? null : (bases[0] || null); // '*' não dá mais acesso a todas as bases pra quem não é admin
   }
   if (!window._hcSituFilter) window._hcSituFilter = 'todos';
   if (!window._hcSearch) window._hcSearch = '';
@@ -217,6 +217,10 @@ async function hcForceRefresh() {
 }
 
 function hcChangeBase(base) {
+  const role    = currentUserProfile?.role;
+  const myBases = currentUserProfile?.bases || [];
+  const isAdmin = role === 'admin'; // '*' não dá mais acesso a todas as bases pra quem não é admin
+  if (!isAdmin && base && !myBases.includes(base)) return; // ignora troca pra base não autorizada
   window._hcBase = base || null;
   hcRenderMain(window._hcCurrentEl);
 }
@@ -240,7 +244,10 @@ function hcRenderMain(el) {
   window._hcStats = stats;
   window._hcColabListFull = hcBuildColabList(base);
 
-  const bases = hcAllBases();
+  const role     = currentUserProfile?.role;
+  const myBases  = currentUserProfile?.bases || [];
+  const isAdmin = role === 'admin'; // '*' não dá mais acesso a todas as bases pra quem não é admin
+  const bases    = isAdmin ? hcAllBases() : hcAllBases().filter(b => myBases.includes(b));
 
   const gruposOrdenados = [...stats.grupos.entries()].sort((a,b) => b[1].staff - a[1].staff);
   const totalStaff  = gruposOrdenados.reduce((s,[,g])=>s+g.staff,0);
@@ -250,6 +257,17 @@ function hcRenderMain(el) {
 
   const ftDeg = stats.ftPct * 3.6;
 
+  const baseControlHTML = isAdmin
+    ? `<select class="adh-month-select" onchange="hcChangeBase(this.value||null)">
+         <option value="">Todas as bases</option>
+         ${bases.map(b => `<option value="${b}" ${b===base?'selected':''}>${b}</option>`).join('')}
+       </select>`
+    : bases.length > 1
+      ? `<select class="adh-month-select" onchange="hcChangeBase(this.value)">
+           ${bases.map(b => `<option value="${b}" ${b===base?'selected':''}>${b}</option>`).join('')}
+         </select>`
+      : `<span class="adm-base-tag" style="font-size:12.5px;padding:7px 14px">${bases[0] || 'Sem base atribuída'}</span>`;
+
   el.innerHTML = `
     <div class="hc-wrap">
       <div class="hc-header">
@@ -258,10 +276,7 @@ function hcRenderMain(el) {
           <p class="page-sub">Quadro de pessoal · cruza Colaboradores, Férias, Desligamentos e PCD</p>
         </div>
         <div style="display:flex;align-items:center;gap:10px">
-          <select class="adh-month-select" onchange="hcChangeBase(this.value||null)">
-            <option value="">Todas as bases</option>
-            ${bases.map(b => `<option value="${b}" ${b===base?'selected':''}>${b}</option>`).join('')}
-          </select>
+          ${baseControlHTML}
           <button class="adh-refresh-btn" onclick="hcForceRefresh()">
             <i class="ti ti-refresh" aria-hidden="true"></i> Atualizar
           </button>

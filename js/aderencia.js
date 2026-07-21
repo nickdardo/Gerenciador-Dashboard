@@ -488,6 +488,18 @@ async function pageAderencia(el) {
   const bases = currentUserProfile?.bases || [];
   const ROLES_OK = ['admin','gerente','coordenador','supervisor','lideranca'];
 
+  function showNoBaseAssigned() {
+    el.innerHTML = `
+      <div class="page-header"><div>
+        <h1 class="page-title">Aderência ao Ponto</h1>
+        <p class="page-sub">Acesso restrito</p>
+      </div></div>
+      <div class="adh-denied">
+        <i class="ti ti-map-pin-off" style="font-size:36px;opacity:.2" aria-hidden="true"></i>
+        <p>Nenhuma base atribuída ao seu usuário.<br>Fale com o admin pra configurar seu acesso.</p>
+      </div>`;
+  }
+
   if (!window._adhMes) window._adhMes = adhCurrentMonth();
   const mes = window._adhMes;
 
@@ -548,7 +560,8 @@ async function pageAderencia(el) {
         // Skip loading, go straight to render
         await rosterPromise;
         if (role === 'admin') { adhRenderMultiBase(el); return; }
-        const myBase = bases.includes('*') ? null : (bases[0] || null);
+        const myBase = bases[0] || null; // '*' não dá mais visão de todas as bases pra quem não é admin
+        if (!myBase) { showNoBaseAssigned(); return; }
         adhRenderDetalhe(el, myBase, false);
         return;
       }
@@ -604,7 +617,8 @@ async function pageAderencia(el) {
       } catch(_) {}
 
       if (role === 'admin') { adhRenderMultiBase(el); return; }
-      const myBase = bases.includes('*') ? null : (bases[0] || null);
+      const myBase = bases[0] || null; // '*' não dá mais visão de todas as bases pra quem não é admin
+      if (!myBase) { showNoBaseAssigned(); return; }
       await rosterPromise;
       adhRenderDetalhe(el, myBase, false);
       return;
@@ -650,7 +664,8 @@ async function pageAderencia(el) {
   if (role === 'admin') {
     adhRenderMultiBase(el);
   } else {
-    const myBase = bases.includes('*') ? null : (bases[0] || null);
+    const myBase = bases[0] || null; // '*' não dá mais visão de todas as bases pra quem não é admin
+    if (!myBase) { showNoBaseAssigned(); return; }
     adhRenderDetalhe(el, myBase, false);
   }
 }

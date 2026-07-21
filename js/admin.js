@@ -1285,7 +1285,7 @@ async function adminEditUser(userId) {
         <div class="adm-field"><label>Email</label>
           <input class="adm-input" value="${u.email}" disabled style="opacity:.5"></div>
         <div class="adm-field"><label>Perfil de acesso</label>
-          <select id="edit-role" class="adm-input">
+          <select id="edit-role" class="adm-input" onchange="adminSyncBaseAllVisibility(this)">
             <option value="admin"       ${u.role==='admin'       ?'selected':''}>Admin Master</option>
             <option value="gerente"     ${u.role==='gerente'     ?'selected':''}>Gerente</option>
             <option value="coordenador" ${u.role==='coordenador' ?'selected':''}>Coordenador</option>
@@ -1296,7 +1296,7 @@ async function adminEditUser(userId) {
         </div>
         <div class="adm-field"><label>Bases autorizadas</label>
           <div class="adm-bases-picker">
-            <label class="adm-base-chk" style="color:#ef4444;font-weight:600">
+            <label class="adm-base-chk" id="edit-base-all-wrap" style="color:#ef4444;font-weight:600;${u.role==='admin'?'':'display:none'}">
               <input type="checkbox" id="edit-base-all" ${u.bases?.includes('*')?'checked':''}
                 onchange="adminToggleAllBases(this)"> Todas as bases
             </label>
@@ -1329,11 +1329,23 @@ function adminToggleAllBases(chk) {
   grid.querySelectorAll('input').forEach(c => { c.checked=chk.checked; c.disabled=chk.checked; });
 }
 
+function adminSyncBaseAllVisibility(roleSelect) {
+  const wrap = document.getElementById('edit-base-all-wrap');
+  const chk  = document.getElementById('edit-base-all');
+  if (!wrap || !chk) return;
+  if (roleSelect.value === 'admin') {
+    wrap.style.display = '';
+  } else {
+    wrap.style.display = 'none';
+    if (chk.checked) { chk.checked = false; adminToggleAllBases(chk); }
+  }
+}
+
 async function adminSaveUser(userId) {
   const nome  = document.getElementById('edit-nome').value.trim();
   const role  = document.getElementById('edit-role').value;
   const ativo = document.getElementById('edit-ativo').checked;
-  const allBases = document.getElementById('edit-base-all').checked;
+  const allBases = role === 'admin' && document.getElementById('edit-base-all').checked;
   const bases = allBases
     ? ['*']
     : [...document.querySelectorAll('input[name="edit-base"]:checked')].map(c=>c.value);
@@ -1386,7 +1398,7 @@ function adminPreconfigModal(p) {
         <div class="adm-field"><label>Nome (opcional)</label>
           <input id="pre-nome" class="adm-input" placeholder="Ex: João Silva" value="${p?.nome||''}"></div>
         <div class="adm-field"><label>Perfil de acesso</label>
-          <select id="pre-role" class="adm-input">
+          <select id="pre-role" class="adm-input" onchange="adminSyncBaseAllVisibility(this)">
             <option value="admin"       ${p?.role==='admin'       ?'selected':''}>Admin Master</option>
             <option value="gerente"     ${!p||p?.role==='gerente' ?'selected':''}>Gerente</option>
             <option value="coordenador" ${p?.role==='coordenador' ?'selected':''}>Coordenador</option>
@@ -1397,7 +1409,7 @@ function adminPreconfigModal(p) {
         </div>
         <div class="adm-field"><label>Bases autorizadas</label>
           <div class="adm-bases-picker">
-            <label class="adm-base-chk" style="color:#ef4444;font-weight:600">
+            <label class="adm-base-chk" id="edit-base-all-wrap" style="color:#ef4444;font-weight:600;${p?.role==='admin'?'':'display:none'}">
               <input type="checkbox" id="edit-base-all" ${p?.bases?.includes('*')?'checked':''}
                 onchange="adminToggleAllBases(this)"> Todas as bases
             </label>
@@ -1425,7 +1437,7 @@ async function adminSavePreconfig(id) {
   const email = document.getElementById('pre-email').value.trim().toLowerCase();
   const nome  = document.getElementById('pre-nome').value.trim();
   const role  = document.getElementById('pre-role').value;
-  const allBases = document.getElementById('edit-base-all').checked;
+  const allBases = role === 'admin' && document.getElementById('edit-base-all').checked;
   const bases = allBases
     ? ['*']
     : [...document.querySelectorAll('input[name="edit-base"]:checked')].map(c=>c.value);
