@@ -1454,23 +1454,82 @@ function adminMalhaPicoDaCurva(curva) {
   return { hora: `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`, valor: curva[idx] };
 }
 
-function adminMalhaCurvaSVG(c1, c2) {
+function adminMalhaCurvaSVG(c1, c2, mes1, mes2) {
   const n = 48;
   const max = Math.max(3, ...c1, ...c2);
   const W=1100, H=260, padL=30, padR=10, padT=10, padB=24;
   const stepX = (W-padL-padR)/(n-1);
   const scaleY = v => H-padB-(v/max*(H-padB-padT));
   const pathFor = arr => arr.map((v,i)=>`${i===0?'M':'L'} ${(padL+i*stepX).toFixed(1)} ${scaleY(v).toFixed(1)}`).join(' ');
+  const areaFor = arr => `${pathFor(arr)} L ${(padL+(n-1)*stepX).toFixed(1)} ${(H-padB).toFixed(1)} L ${padL.toFixed(1)} ${(H-padB).toFixed(1)} Z`;
   const yStep = max<=6?1:max<=12?3:Math.ceil(max/4);
   const yTicks = [];
   for (let v=0; v<=max; v+=yStep) yTicks.push(v);
+
+  // Guarda os dados num lugar que o handler de mousemove consegue ler —
+  // o gráfico é HTML puro (sem framework), então a interação é feita por
+  // um listener global lendo esse estado, igual o resto do painel.
+  window._malhaCurvaData = { c1, c2, mes1: malhaMesLabel(mes1), mes2: malhaMesLabel(mes2), W, H, padL, padR, padT, padB, n, max };
+
   return `
-    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:220px">
-      ${yTicks.map(v => `<line x1="${padL}" y1="${scaleY(v).toFixed(1)}" x2="${W-padR}" y2="${scaleY(v).toFixed(1)}" stroke="var(--border)" stroke-width="1"/><text x="4" y="${(scaleY(v)+3).toFixed(1)}" font-size="9" style="fill:var(--text-muted)">${v}</text>`).join('')}
-      ${[...Array(24).keys()].map(h => `<text x="${(padL+h*2*stepX).toFixed(1)}" y="${H-6}" font-size="8.5" text-anchor="middle" style="fill:var(--text-muted)">${String(h).padStart(2,'0')}h</text>`).join('')}
-      <path d="${pathFor(c2)}" fill="none" stroke="#5fa87a" stroke-width="2"/>
-      <path d="${pathFor(c1)}" fill="none" stroke="#38bdf8" stroke-width="2"/>
-    </svg>`;
+    <div style="position:relative">
+      <svg id="malha-curva-svg" viewBox="0 0 ${W} ${H}" style="width:100%;height:220px;cursor:crosshair"
+        onmousemove="adminMalhaCurvaHover(event,this)" onmouseleave="adminMalhaCurvaLeave()">
+        ${yTicks.map(v => `<line x1="${padL}" y1="${scaleY(v).toFixed(1)}" x2="${W-padR}" y2="${scaleY(v).toFixed(1)}" stroke="var(--border)" stroke-width="1"/><text x="4" y="${(scaleY(v)+3).toFixed(1)}" font-size="9" style="fill:var(--text-muted)">${v}</text>`).join('')}
+        ${[...Array(24).keys()].map(h => `<text x="${(padL+h*2*stepX).toFixed(1)}" y="${H-6}" font-size="8.5" text-anchor="middle" style="fill:var(--text-muted)">${String(h).padStart(2,'0')}h</text>`).join('')}
+        <path d="${areaFor(c2)}" fill="#5fa87a" opacity="0.12" stroke="none"/>
+        <path d="${areaFor(c1)}" fill="#38bdf8" opacity="0.12" stroke="none"/>
+        <path d="${pathFor(c2)}" fill="none" stroke="#5fa87a" stroke-width="2"/>
+        <path d="${pathFor(c1)}" fill="none" stroke="#38bdf8" stroke-width="2"/>
+        <line id="malha-curva-crosshair" x1="0" y1="${padT}" x2="0" y2="${H-padB}" stroke="var(--text-muted)" stroke-width="1" stroke-dasharray="3,3" style="display:none"/>
+        <circle id="malha-curva-dot1" r="3.5" fill="#38bdf8" stroke="#0b0f1a" stroke-width="1.5" style="display:none"/>
+        <circle id="malha-curva-dot2" r="3.5" fill="#5fa87a" stroke="#0b0f1a" stroke-width="1.5" style="display:none"/>
+      </svg>
+      <div id="malha-curva-tooltip" style="position:absolute;display:none;pointer-events:none;background:#141b2c;border:1px solid var(--border-strong);border-radius:8px;padding:8px 10px;font-size:11px;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.4);z-index:10;top:6px"></div>
+    </div>`;
+}
+
+function adminMalhaCurvaHover(evt, svg) {
+  const d = window._malhaCurvaData;
+  if (!d) return;
+  const rect = svg.getBoundingClientRect();
+  const xSvg = (evt.clientX - rect.left) * (d.W / rect.width);
+  const stepX = (d.W-d.padL-d.padR)/(d.n-1);
+  let idx = Math.round((xSvg - d.padL) / stepX);
+  idx = Math.max(0, Math.min(d.n-1, idx));
+
+  const scaleY = v => d.H-d.padB-(v/d.max*(d.H-d.padB-d.padT));
+  const xPos = d.padL + idx*stepX;
+
+  const crosshair = document.getElementById('malha-curva-crosshair');
+  const dot1 = document.getElementById('malha-curva-dot1');
+  const dot2 = document.getElementById('malha-curva-dot2');
+  if (crosshair) { crosshair.setAttribute('x1', xPos); crosshair.setAttribute('x2', xPos); crosshair.style.display = 'block'; }
+  if (dot1) { dot1.setAttribute('cx', xPos); dot1.setAttribute('cy', scaleY(d.c1[idx])); dot1.style.display = 'block'; }
+  if (dot2) { dot2.setAttribute('cx', xPos); dot2.setAttribute('cy', scaleY(d.c2[idx])); dot2.style.display = 'block'; }
+
+  const totalMin = idx*30;
+  const h = Math.floor(totalMin/60), m = totalMin%60;
+  const hora = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+
+  const tooltip = document.getElementById('malha-curva-tooltip');
+  if (tooltip) {
+    tooltip.innerHTML = `
+      <div style="font-weight:700;color:var(--text-primary);margin-bottom:5px">${hora}</div>
+      <div style="display:flex;align-items:center;gap:6px;color:#38bdf8;margin-bottom:2px"><span style="width:8px;height:8px;border-radius:2px;background:#38bdf8;display:inline-block"></span>${d.mes1}: <strong>${d.c1[idx]}</strong></div>
+      <div style="display:flex;align-items:center;gap:6px;color:#5fa87a"><span style="width:8px;height:8px;border-radius:2px;background:#5fa87a;display:inline-block"></span>${d.mes2}: <strong>${d.c2[idx]}</strong></div>`;
+    const leftPct = xPos/d.W*100;
+    if (leftPct > 70) { tooltip.style.left = 'auto'; tooltip.style.right = `${100-leftPct}%`; }
+    else { tooltip.style.right = 'auto'; tooltip.style.left = `${leftPct}%`; }
+    tooltip.style.display = 'block';
+  }
+}
+
+function adminMalhaCurvaLeave() {
+  ['malha-curva-crosshair','malha-curva-dot1','malha-curva-dot2','malha-curva-tooltip'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
 }
 
 function adminMalhaTabelaHTML(mapa1, mapa2, titulo) {
@@ -1576,7 +1635,7 @@ function adminMalhaRenderDash(el) {
     <div class="hc-panel" style="margin-bottom:16px">
       <div class="hc-panel-title" style="margin-bottom:2px">Curva de demanda (24h) · ${metricaLbl[metrica]}</div>
       <div style="font-size:11px;color:var(--text-muted);margin-bottom:14px">Pior semana da base${pior1?` · ${malhaMesLabel(mes1)}: semana ${pior1.key}`:''}${pior2?` · ${malhaMesLabel(mes2)}: semana ${pior2.key}`:''}</div>
-      ${adminMalhaCurvaSVG(curva1, curva2)}
+      ${adminMalhaCurvaSVG(curva1, curva2, mes1, mes2)}
       <div style="display:flex;gap:16px;margin-top:8px;font-size:11px;color:var(--text-secondary)">
         <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#38bdf8;display:inline-block"></span>${malhaMesLabel(mes1)}</span>
         <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#5fa87a;display:inline-block"></span>${malhaMesLabel(mes2)}</span>
