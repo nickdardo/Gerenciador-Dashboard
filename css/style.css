@@ -1701,6 +1701,16 @@ a { color: inherit; text-decoration: none; }
 
 @media (max-width: 900px) { .adh-kpi-cards { flex-direction: column; } }
 
+.adh-kpi-cards.compact { margin-bottom: 20px; }
+.adh-kpi-cards.compact .adh-kpi-card { padding: 12px 14px; }
+.adh-kpi-cards.compact .adh-kpi-card-head { margin-bottom: 9px; font-size: 10.5px; }
+.adh-kpi-cards.compact .adh-kpi-card-head i { font-size: 12px; }
+.adh-kpi-cards.compact .adh-kpi-row { margin-bottom: 8px; }
+.adh-kpi-cards.compact .adh-kpi-row-l { font-size: 11.5px; }
+.adh-kpi-cards.compact .adh-kpi-row-s { font-size: 10px; }
+.adh-kpi-cards.compact .adh-kpi-row-v.lg { font-size: 16px; }
+.adh-kpi-cards.compact .adh-kpi-row-v.sm { font-size: 13px; }
+
 /* ── Corpo: coluna principal (ranking) + sidebar (comparativo/insights/plano) ── */
 .adh-exec-body {
   display: grid;

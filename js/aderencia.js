@@ -730,8 +730,8 @@ function adhKpiCardHTML(card) {
     </div>`;
 }
 
-function adhKpiCardsHTML(cards) {
-  return `<div class="adh-kpi-cards">${cards.map(adhKpiCardHTML).join('')}</div>`;
+function adhKpiCardsHTML(cards, compact) {
+  return `<div class="adh-kpi-cards${compact ? ' compact' : ''}">${cards.map(adhKpiCardHTML).join('')}</div>`;
 }
 
 async function adhRenderMultiBase(el) {
