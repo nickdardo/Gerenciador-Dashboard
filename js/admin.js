@@ -1042,7 +1042,7 @@ async function adminLoadMalha(input) {
         basesSet.add(base);
         records.push({base,data,tipo:parts[5]?.trim()||null,voo:parts[6]?.trim()||null,
           hora_chegada:parts[7]?.trim()||null,hora_saida:parts[8]?.trim()||null,
-          cia:parts[9]?.trim()||null,aeronave:parts[10]?.trim()||null,updated_at:new Date()});
+          cia:parts[2]?.trim()||null,aeronave:parts[10]?.trim()||null,updated_at:new Date()});
       }
       const total=records.length;
       adminSetFileStatus('malha',`Gravando ${total.toLocaleString()} voos...`,'load');
@@ -1332,7 +1332,7 @@ function malhaBreakdownDoMes(mes) {
   const cias = new Map(), aeronaves = new Map();
   rows.forEach(r => {
     const c = r.cia || 'SEM CIA'; cias.set(c, (cias.get(c)||0)+1);
-    const a = r.aeronave || 'SEM AERONAVE'; aeronaves.set(a, (aeronaves.get(a)||0)+1);
+    const a = r.tipo || 'SEM TIPO'; aeronaves.set(a, (aeronaves.get(a)||0)+1);
   });
   return { cias, aeronaves };
 }
@@ -1454,13 +1454,28 @@ function adminMalhaPicoDaCurva(curva) {
   return { hora: `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`, valor: curva[idx] };
 }
 
+function malhaSmoothPath(pontos) {
+  if (!pontos.length) return '';
+  if (pontos.length === 1) return `M ${pontos[0][0].toFixed(1)} ${pontos[0][1].toFixed(1)}`;
+  let d = `M ${pontos[0][0].toFixed(1)} ${pontos[0][1].toFixed(1)}`;
+  for (let i = 0; i < pontos.length-1; i++) {
+    const [x0,y0] = pontos[i], [x1,y1] = pontos[i+1];
+    const mx = (x0+x1)/2, my = (y0+y1)/2;
+    d += ` Q ${x0.toFixed(1)} ${y0.toFixed(1)} ${mx.toFixed(1)} ${my.toFixed(1)}`;
+  }
+  const last = pontos[pontos.length-1];
+  d += ` L ${last[0].toFixed(1)} ${last[1].toFixed(1)}`;
+  return d;
+}
+
 function adminMalhaCurvaSVG(c1, c2, mes1, mes2) {
   const n = 48;
   const max = Math.max(3, ...c1, ...c2);
   const W=1100, H=260, padL=30, padR=10, padT=10, padB=24;
   const stepX = (W-padL-padR)/(n-1);
   const scaleY = v => H-padB-(v/max*(H-padB-padT));
-  const pathFor = arr => arr.map((v,i)=>`${i===0?'M':'L'} ${(padL+i*stepX).toFixed(1)} ${scaleY(v).toFixed(1)}`).join(' ');
+  const pontosFor = arr => arr.map((v,i) => [padL+i*stepX, scaleY(v)]);
+  const pathFor = arr => malhaSmoothPath(pontosFor(arr));
   const areaFor = arr => `${pathFor(arr)} L ${(padL+(n-1)*stepX).toFixed(1)} ${(H-padB).toFixed(1)} L ${padL.toFixed(1)} ${(H-padB).toFixed(1)} Z`;
   const yStep = max<=6?1:max<=12?3:Math.ceil(max/4);
   const yTicks = [];
@@ -1472,16 +1487,16 @@ function adminMalhaCurvaSVG(c1, c2, mes1, mes2) {
   window._malhaCurvaData = { c1, c2, mes1: malhaMesLabel(mes1), mes2: malhaMesLabel(mes2), W, H, padL, padR, padT, padB, n, max };
 
   return `
-    <div style="position:relative">
-      <svg id="malha-curva-svg" viewBox="0 0 ${W} ${H}" style="width:100%;height:220px;cursor:crosshair"
+    <div style="position:relative;width:100%">
+      <svg id="malha-curva-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="display:block;width:100%;height:260px;cursor:crosshair"
         onmousemove="adminMalhaCurvaHover(event,this)" onmouseleave="adminMalhaCurvaLeave()">
-        ${yTicks.map(v => `<line x1="${padL}" y1="${scaleY(v).toFixed(1)}" x2="${W-padR}" y2="${scaleY(v).toFixed(1)}" stroke="var(--border)" stroke-width="1"/><text x="4" y="${(scaleY(v)+3).toFixed(1)}" font-size="9" style="fill:var(--text-muted)">${v}</text>`).join('')}
+        ${yTicks.map(v => `<line x1="${padL}" y1="${scaleY(v).toFixed(1)}" x2="${W-padR}" y2="${scaleY(v).toFixed(1)}" stroke="var(--border)" stroke-width="1" vector-effect="non-scaling-stroke"/><text x="4" y="${(scaleY(v)+3).toFixed(1)}" font-size="9" style="fill:var(--text-muted)">${v}</text>`).join('')}
         ${[...Array(24).keys()].map(h => `<text x="${(padL+h*2*stepX).toFixed(1)}" y="${H-6}" font-size="8.5" text-anchor="middle" style="fill:var(--text-muted)">${String(h).padStart(2,'0')}h</text>`).join('')}
         <path d="${areaFor(c2)}" fill="#5fa87a" opacity="0.12" stroke="none"/>
         <path d="${areaFor(c1)}" fill="#38bdf8" opacity="0.12" stroke="none"/>
-        <path d="${pathFor(c2)}" fill="none" stroke="#5fa87a" stroke-width="2"/>
-        <path d="${pathFor(c1)}" fill="none" stroke="#38bdf8" stroke-width="2"/>
-        <line id="malha-curva-crosshair" x1="0" y1="${padT}" x2="0" y2="${H-padB}" stroke="var(--text-muted)" stroke-width="1" stroke-dasharray="3,3" style="display:none"/>
+        <path d="${pathFor(c2)}" fill="none" stroke="#5fa87a" stroke-width="2" vector-effect="non-scaling-stroke"/>
+        <path d="${pathFor(c1)}" fill="none" stroke="#38bdf8" stroke-width="2" vector-effect="non-scaling-stroke"/>
+        <line id="malha-curva-crosshair" x1="0" y1="${padT}" x2="0" y2="${H-padB}" stroke="var(--text-muted)" stroke-width="1" stroke-dasharray="3,3" vector-effect="non-scaling-stroke" style="display:none"/>
         <circle id="malha-curva-dot1" r="3.5" fill="#38bdf8" stroke="#0b0f1a" stroke-width="1.5" style="display:none"/>
         <circle id="malha-curva-dot2" r="3.5" fill="#5fa87a" stroke="#0b0f1a" stroke-width="1.5" style="display:none"/>
       </svg>
