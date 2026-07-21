@@ -430,6 +430,7 @@ function hcRenderMain(el) {
                 <button class="adh-sort-btn hc-situ-filter-btn active" onclick="hcFilterSitu('todos',this)">Todos</button>
                 <button class="adh-sort-btn hc-situ-filter-btn" onclick="hcFilterSitu('ativo',this)">Ativos</button>
                 <button class="adh-sort-btn hc-situ-filter-btn" onclick="hcFilterSitu('inativo',this)">Inativos</button>
+                <button class="adh-sort-btn hc-situ-filter-btn" onclick="hcFilterSitu('ferias',this)">Férias</button>
               </div>
             </div>
             <div class="adh-colab-table-wrap" style="max-height:calc(100vh - 360px);min-height:320px;overflow-y:auto">
@@ -507,6 +508,7 @@ function hcRerenderColabTable() {
   let list = (window._hcColabListFull || []).slice();
   if (window._hcSituFilter === 'ativo')   list = list.filter(c => !c.desligado && !c.afastado);
   if (window._hcSituFilter === 'inativo') list = list.filter(c => c.desligado || c.afastado);
+  if (window._hcSituFilter === 'ferias')  list = list.filter(c => c.emFerias);
   if (window._hcGrupoFilter) list = list.filter(c => hcCargoGrupo(c.funcao) === window._hcGrupoFilter);
   const q = (window._hcSearch||'').trim().toLowerCase();
   if (q) list = list.filter(c => String(c.mat).includes(q) || String(c.nome||'').toLowerCase().includes(q));
