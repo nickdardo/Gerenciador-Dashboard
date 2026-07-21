@@ -39,6 +39,18 @@ function hcIsAtestado(situacao) {
   return s.includes('auxílio') || s.includes('auxilio') || s.includes('atestado');
 }
 
+// Confirmado com o cliente: essas 4 situações saem de Headcount/Ativos/FTE —
+// contrato sem capacidade de trabalho no momento, mesmo ainda no cadastro.
+// Férias e Atestado Médico (curto) continuam contando normalmente.
+function hcIsAfastado(situacao) {
+  const s = String(situacao || '').toLowerCase();
+  return ((s.includes('auxílio') || s.includes('auxilio')) && s.includes('doen')) ||
+         s.includes('aposentadoria') ||
+         s.includes('invalidez') ||
+         s.includes('acidente') ||
+         s.includes('suspenso');
+}
+
 // Carga horária mensal → "equivalente diário" (180h/mês ≈ 6h/dia), usado só
 // para rotular a tabela de Função × Carga, igual o modelo de referência.
 function hcChDiario(ch) {
@@ -103,14 +115,14 @@ function hcComputeStats(base) {
     }
   }
 
-  const headcount = roster.length;
-  let inativos = 0, pcd = 0, atestados = 0, feriasAtivas = 0;
+  const totalCadastro = roster.length;
+  let inativos = 0, afastados = 0, pcd = 0, atestados = 0, feriasAtivas = 0;
   let fullTime = 0, partTime = 0, somaCh = 0;
 
   const grupos = new Map(); // grupo -> { staff, ferias }
   const funcoes = new Map(); // funcao -> Map(chDiario -> count)
   const chSet = new Set();
-  const situacoes = new Map(); // situação (texto) -> contagem
+  const situacoes = new Map(); // situação (texto) -> contagem (todo mundo do cadastro, inclusive afastados)
 
   for (const r of roster) {
     const desligado = hcIsDesligado(r.mat);
@@ -120,6 +132,16 @@ function hcComputeStats(base) {
     if (hcIsAtestado(r.situacao)) atestados++;
     const emFerias = hcIsFeriasAtiva(r.mat);
     if (emFerias) feriasAtivas++;
+
+    const situ = String(r.situacao || 'Sem informação').trim() || 'Sem informação';
+    situacoes.set(situ, (situacoes.get(situ) || 0) + 1);
+
+    // Afastados de verdade (Auxílio Doença, Aposentadoria por Invalidez, Acidente
+    // de Trabalho, Contrato Suspenso) — contam no cadastro, aparecem na lista e no
+    // gráfico de Situação acima, mas ficam fora de Headcount/Ativos/FTE/Grupo,
+    // igual o Headcount Capacity de referência (contrato sem capacidade de trabalho
+    // no momento). Férias continua contando normalmente — é temporário.
+    if (hcIsAfastado(r.situacao)) { afastados++; continue; }
 
     const ch = r.ch || 0;
     somaCh += ch;
@@ -137,12 +159,10 @@ function hcComputeStats(base) {
     if (!funcoes.has(funcao)) funcoes.set(funcao, new Map());
     const fm = funcoes.get(funcao);
     fm.set(chd, (fm.get(chd)||0) + 1);
-
-    const situ = String(r.situacao || 'Sem informação').trim() || 'Sem informação';
-    situacoes.set(situ, (situacoes.get(situ) || 0) + 1);
   }
 
-  const ativos = headcount - inativos;
+  const ativos = totalCadastro - inativos - afastados;
+  const headcount = ativos; // "Headcount" = força de trabalho efetiva, igual o Capacity de referência
 
   // Desligados nos últimos 12 meses (olha o histórico completo, não só
   // quem ainda aparece no cadastro — a maioria já nem está mais lá)
@@ -166,7 +186,7 @@ function hcComputeStats(base) {
   }
 
   return {
-    headcount, ativos, inativos, pcd, atestados, feriasAtivas, desligados12m,
+    headcount, ativos, inativos, afastados, totalCadastro, pcd, atestados, feriasAtivas, desligados12m,
     fullTime, partTime, ftPct, fte, grupos, funcoes, chList: [...chSet].sort((a,b)=>a-b),
     situacoes,
   };
@@ -286,17 +306,18 @@ function hcRenderMain(el) {
 
       ${adhKpiCardsHTML([
         { key:'blue', icon:'ti-users', title:'Quadro', rows: [
-          { label:'Staff', sub:'total no cadastro', value: stats.headcount.toLocaleString('pt-BR') },
+          { label:'Staff', sub:'headcount ativo · sem afastados', value: stats.headcount.toLocaleString('pt-BR') },
           { label:'Ativos', sub:'trabalhando hoje', value: stats.ativos.toLocaleString('pt-BR') },
         ]},
         { key:'amber', icon:'ti-report-medical', title:'Situação', rows: [
-          { label:'Atestados', sub:'auxílio doença', value: stats.atestados.toLocaleString('pt-BR') },
+          { label:'Atestados', sub:'auxílio doença + atestado médico', value: stats.atestados.toLocaleString('pt-BR') },
+          { label:'Afastados', sub:'aux. doença, invalidez, acidente, susp. · fora do headcount', value: stats.afastados.toLocaleString('pt-BR') },
           { label:'Inativos', sub:'no cadastro, já desligados', value: stats.inativos.toLocaleString('pt-BR') },
           { label:'PCD', sub:'pessoas com deficiência', value: stats.pcd.toLocaleString('pt-BR') },
         ]},
         { key:'red', icon:'ti-calendar-off', title:'Ausências', rows: [
           { label:'Férias', sub:'ativas agora', value: stats.feriasAtivas.toLocaleString('pt-BR') },
-          { label:'Desligados', sub:'últimos 12 meses · clique p/ ver', value: `<span style="cursor:pointer" onclick="hcOpenDesligados()" title="Clique para ver a lista de desligados">${stats.desligados12m.toLocaleString('pt-BR')}</span>`, color:'#b56666' },
+          { label:'Desligados', sub:'últimos 12 meses · clique para ver a lista', value: stats.desligados12m.toLocaleString('pt-BR'), color:'#b56666', onclick:'hcOpenDesligados()' },
         ]},
       ], true)}
 
@@ -384,7 +405,7 @@ function hcRenderMain(el) {
                 <button class="adh-sort-btn hc-situ-filter-btn" onclick="hcFilterSitu('inativo',this)">Inativos</button>
               </div>
             </div>
-            <div class="adh-colab-table-wrap" style="max-height:640px;overflow-y:auto">
+            <div class="adh-colab-table-wrap" style="max-height:calc(100vh - 360px);min-height:320px;overflow-y:auto">
               <table class="adh-colab-table" id="hc-colab-table">
                 <thead>
                   <tr>
@@ -415,10 +436,12 @@ function hcBuildColabList(base) {
     const desligInfo = window.eoDesligados?.get(mat);
     const feriasInfo = window.eoFerias?.get(mat);
     const emFerias = hcIsFeriasAtiva(mat);
+    const afastado = !desligado && hcIsAfastado(r.situacao);
     out.push({
       mat, nome: r.nome, filial: st, funcao: r.funcao, ch: r.ch,
       situacao: r.situacao, admissao: r.admissao || null,
       desligado, demissao: desligInfo?.data_demissao || null,
+      afastado,
       emFerias, feriasFim: feriasInfo?.data_fim || null,
       pcd: !!window.eoPcd?.get(mat),
     });
@@ -455,8 +478,8 @@ function hcRenderColabRows(list) {
 
 function hcRerenderColabTable() {
   let list = (window._hcColabListFull || []).slice();
-  if (window._hcSituFilter === 'ativo')   list = list.filter(c => !c.desligado);
-  if (window._hcSituFilter === 'inativo') list = list.filter(c => c.desligado);
+  if (window._hcSituFilter === 'ativo')   list = list.filter(c => !c.desligado && !c.afastado);
+  if (window._hcSituFilter === 'inativo') list = list.filter(c => c.desligado || c.afastado);
   const q = (window._hcSearch||'').trim().toLowerCase();
   if (q) list = list.filter(c => String(c.mat).includes(q) || String(c.nome||'').toLowerCase().includes(q));
 
@@ -604,10 +627,12 @@ function hcRenderDesligados(el) {
           </button>
           <div style="position:relative">
             <h1 class="page-title">Desligamentos ${base?`<span class="adh-base-badge">${base}</span>`:''}</h1>
-            <p class="page-sub hc-desl-filter-trigger" onclick="hcToggleDeslFilter()">
-              ${hcDeslPeriodLabel()} <i class="ti ti-chevron-down" style="font-size:9px" aria-hidden="true"></i>
-              · <span id="hc-desl-count">${rows.length.toLocaleString('pt-BR')} registro${rows.length===1?'':'s'}</span>
-            </p>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+              <button class="hc-desl-filter-trigger" onclick="hcToggleDeslFilter()">
+                <i class="ti ti-filter" aria-hidden="true"></i> ${hcDeslPeriodLabel()} <i class="ti ti-chevron-down" aria-hidden="true"></i>
+              </button>
+              <span class="page-sub" style="margin:0"><span id="hc-desl-count">${rows.length.toLocaleString('pt-BR')} registro${rows.length===1?'':'s'}</span></span>
+            </div>
             ${hcDeslFilterPanelHTML()}
           </div>
         </div>
