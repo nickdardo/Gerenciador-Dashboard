@@ -1286,28 +1286,55 @@ function malhaMesesDisponiveis(base) {
   return [...new Set(rows.map(r => (r.data||'').slice(0,7)))].filter(Boolean).sort();
 }
 
-function malhaRowsDoMes(mes) {
+// Linhas cruas de um mês — só base+mês, sem aplicar semana/cliente ainda.
+// As funções abaixo compõem isso com os filtros certos pra cada uso: os
+// KPIs respeitam tudo (drill-down completo); a grade semanal/horária
+// respeita cliente mas não semana (senão colapsaria pra 1 linha só); e o
+// comparativo por cia/aeronave respeita semana mas não o próprio cliente
+// (senão só apareceria 1 barra depois de clicar).
+function malhaRowsBase(mes) {
   const base = window._malhaBase;
   if (!mes) return [];
-  return (window.malhaRows||[]).filter(r =>
-    (!base || r.base === base) && (r.data||'').slice(0,7) === mes);
+  return (window.malhaRows||[]).filter(r => (!base || r.base === base) && (r.data||'').slice(0,7) === mes);
+}
+
+function malhaAplicaSemana(rows) {
+  const semana = window._malhaSemana;
+  if (!semana) return rows;
+  return rows.filter(r => r.data && malhaSemanaChave(r.data).key === semana);
+}
+
+function malhaAplicaCliente(rows) {
+  const cliente = window._malhaCliente;
+  if (!cliente) return rows;
+  return rows.filter(r => (r.cia||'SEM CIA') === cliente);
+}
+
+function malhaRowsDoMes(mes) {
+  return malhaAplicaCliente(malhaAplicaSemana(malhaRowsBase(mes)));
 }
 
 function malhaStatsDoMes(mes) {
-  const rows = malhaRowsDoMes(mes);
+  const rows = malhaRowsDoMes(mes); // respeita todos os filtros ativos
   const total = rows.length;
-  const diasNoMes = mes && typeof adhDaysInMonth === 'function' ? adhDaysInMonth(mes) : (new Set(rows.map(r=>r.data)).size || 1);
+  const diasNoMes = mes && typeof adhDaysInMonth === 'function' ? adhDaysInMonth(mes) : 1;
   const mediaDia = diasNoMes ? Math.round(total/diasNoMes*10)/10 : 0;
   let pntSim = 0, pntElig = 0;
-  const cias = new Map();
-  rows.forEach(r => {
-    const c = r.cia || 'SEM CIA';
-    cias.set(c, (cias.get(c)||0)+1);
-    const p = malhaIsPNT(r);
-    if (p != null) { pntElig++; if (p) pntSim++; }
-  });
+  rows.forEach(r => { const p = malhaIsPNT(r); if (p != null) { pntElig++; if (p) pntSim++; } });
   const pntPct = pntElig ? Math.round(pntSim/pntElig*1000)/10 : null;
-  return { total, mediaDia, pntPct, cias };
+  return { total, mediaDia, pntPct };
+}
+
+// Cliente/aeronave — respeita base+mês+semana, mas NÃO o cliente selecionado
+// (é essa a dimensão sendo detalhada; filtrar por ele também zeraria o resto).
+function malhaBreakdownDoMes(mes) {
+  const rows = malhaAplicaSemana(malhaRowsBase(mes));
+  const cias = new Map(), aeronaves = new Map();
+  rows.forEach(r => {
+    const c = r.cia || 'SEM CIA'; cias.set(c, (cias.get(c)||0)+1);
+    const a = r.aeronave || 'SEM AERONAVE'; aeronaves.set(a, (aeronaves.get(a)||0)+1);
+  });
+  return { cias, aeronaves };
 }
 
 function malhaMesLabel(mes) {
@@ -1315,12 +1342,85 @@ function malhaMesLabel(mes) {
   return typeof adhMonthLabel === 'function' ? adhMonthLabel(mes) : mes;
 }
 
-function adminMalhaCiaBarsHTML(nomesCia, s1, s2) {
+// "Chave semana" = domingo a sábado, recortado nas bordas do mês (igual o
+// print de referência: primeira e última semana do mês vêm parciais).
+function malhaSemanaChave(dataStr) {
+  const d = new Date(dataStr+'T12:00:00');
+  const dow = d.getDay();
+  const inicio = new Date(d); inicio.setDate(d.getDate()-dow);
+  const fim = new Date(inicio); fim.setDate(inicio.getDate()+6);
+  const mesInicio = new Date(d.getFullYear(), d.getMonth(), 1);
+  const mesFim = new Date(d.getFullYear(), d.getMonth()+1, 0);
+  const ini = inicio < mesInicio ? mesInicio : inicio;
+  const fi  = fim > mesFim ? mesFim : fim;
+  return { key: `${String(ini.getDate()).padStart(2,'0')} a ${String(fi.getDate()).padStart(2,'0')}`, sortKey: ini.getTime() };
+}
+
+const MALHA_DIAS = ['dom','seg','ter','qua','qui','sex','sab'];
+
+// Grade semanal — respeita cliente, mas NÃO semana (senão colapsaria pra 1 linha).
+function malhaGradeSemanal(mes) {
+  const semanas = new Map();
+  malhaAplicaCliente(malhaRowsBase(mes)).forEach(r => {
+    if (!r.data) return;
+    const { key, sortKey } = malhaSemanaChave(r.data);
+    if (!semanas.has(key)) semanas.set(key, { key, sortKey, dom:0,seg:0,ter:0,qua:0,qui:0,sex:0,sab:0, total:0 });
+    const d = new Date(r.data+'T12:00:00');
+    const campo = MALHA_DIAS[d.getDay()];
+    const s = semanas.get(key);
+    s[campo]++; s.total++;
+  });
+  return [...semanas.values()].sort((a,b)=>a.sortKey-b.sortKey);
+}
+
+const MALHA_SLOTS = [[0,2],[3,5],[6,8],[9,11],[12,14],[15,17],[18,20],[21,23]];
+const MALHA_SLOTS_LBL = MALHA_SLOTS.map(s => `${String(s[0]).padStart(2,'0')}-${String(s[1]).padStart(2,'0')}`);
+
+function malhaSlotIdx(hhmm) {
+  const min = malhaMinutos(hhmm);
+  if (min == null) return null;
+  const h = Math.floor(min/60);
+  for (let i=0;i<MALHA_SLOTS.length;i++) if (h>=MALHA_SLOTS[i][0] && h<=MALHA_SLOTS[i][1]) return i;
+  return null;
+}
+
+function malhaGradeHoraria(mes) {
+  const semanas = new Map();
+  malhaAplicaCliente(malhaRowsBase(mes)).forEach(r => {
+    if (!r.data) return;
+    const { key, sortKey } = malhaSemanaChave(r.data);
+    if (!semanas.has(key)) semanas.set(key, { key, sortKey, slots: new Array(8).fill(0), total: 0 });
+    const idx = malhaSlotIdx(r.hora_chegada);
+    const s = semanas.get(key);
+    if (idx != null) s.slots[idx]++;
+    s.total++;
+  });
+  return [...semanas.values()].sort((a,b)=>a.sortKey-b.sortKey);
+}
+
+// Semana mais movimentada do mês (usada no comparativo por horário)
+function malhaPiorSemana(mes) {
+  const grade = malhaGradeSemanal(mes);
+  if (!grade.length) return null;
+  return grade.reduce((a,b) => b.total > a.total ? b : a);
+}
+
+function malhaHorasDaSemana(mes, semanaKey) {
+  const porHora = new Array(24).fill(0);
+  malhaAplicaCliente(malhaRowsBase(mes)).forEach(r => {
+    if (!r.data || malhaSemanaChave(r.data).key !== semanaKey) return;
+    const min = malhaMinutos(r.hora_chegada);
+    if (min != null) porHora[Math.floor(min/60)]++;
+  });
+  return porHora;
+}
+
+function adminMalhaCiaBarsHTML(nomesCia, b1, b2) {
   if (!nomesCia.length) return `<div style="padding:24px 10px;text-align:center;color:var(--text-muted);font-size:12px">Sem voos nesse período.</div>`;
-  const max = Math.max(1, ...nomesCia.map(c => Math.max(s1.cias.get(c)||0, s2.cias.get(c)||0)));
+  const max = Math.max(1, ...nomesCia.map(c => Math.max(b1.get(c)||0, b2.get(c)||0)));
   const ativo = window._malhaCliente;
   return nomesCia.map(c => {
-    const v1 = s1.cias.get(c)||0, v2 = s2.cias.get(c)||0;
+    const v1 = b1.get(c)||0, v2 = b2.get(c)||0;
     const active = ativo === c;
     return `
       <div onclick="adminMalhaSelectCia('${c.replace(/'/g,"\\'")}')" style="cursor:pointer;padding:8px 10px;border-radius:8px;margin-bottom:3px;background:${active?'rgba(0,160,210,.10)':'transparent'}">
@@ -1336,14 +1436,14 @@ function adminMalhaCiaBarsHTML(nomesCia, s1, s2) {
   }).join('');
 }
 
-function adminMalhaDetailHTML(s1, s2) {
+function adminMalhaDetailHTML(b1, b2) {
   const c = window._malhaCliente;
   if (!c) {
-    return `<div class="hc-panel-title">Detalhe</div><div style="padding:24px 0;text-align:center;color:var(--text-muted);font-size:12px">Clique numa cia à esquerda<br>pra ver o detalhe aqui</div>`;
+    return `<div class="hc-panel-title">Detalhe</div><div style="padding:24px 0;text-align:center;color:var(--text-muted);font-size:12px">Clique numa cia, semana<br>ou dia pra ver o detalhe aqui</div>`;
   }
-  const v1 = s1.cias.get(c)||0, v2 = s2.cias.get(c)||0;
+  const v1 = b1.get(c)||0, v2 = b2.get(c)||0;
   const delta = v2-v1;
-  const rows1 = malhaRowsDoMes(window._malhaMes1).filter(r => (r.cia||'SEM CIA')===c);
+  const rows1 = malhaAplicaCliente(malhaRowsBase(window._malhaMes1));
   const porDia = [0,0,0,0,0,0,0];
   rows1.forEach(r => { if (!r.data) return; const d = new Date(r.data+'T12:00:00'); porDia[d.getDay()]++; });
   const diasLbl = ['dom','seg','ter','qua','qui','sex','sáb'];
@@ -1363,20 +1463,139 @@ function adminMalhaDetailHTML(s1, s2) {
   `;
 }
 
+function adminMalhaTabelaHTML(mapa1, mapa2, titulo) {
+  const nomes = [...new Set([...mapa1.keys(), ...mapa2.keys()])]
+    .sort((a,b) => ((mapa2.get(b)||0)+(mapa1.get(b)||0)) - ((mapa2.get(a)||0)+(mapa1.get(a)||0)));
+  if (!nomes.length) return `<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px">Sem dados.</div>`;
+  let totM1=0, totM2=0;
+  nomes.forEach(n => { totM1+=mapa1.get(n)||0; totM2+=mapa2.get(n)||0; });
+  const totDelta = totM2-totM1;
+  return `
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr>
+        <th style="text-align:left;padding:6px;color:var(--text-muted);font-size:10px;text-transform:uppercase">${titulo}</th>
+        <th style="text-align:right;padding:6px;color:var(--text-muted);font-size:10px;text-transform:uppercase">M</th>
+        <th style="text-align:right;padding:6px;color:var(--text-muted);font-size:10px;text-transform:uppercase">M2</th>
+        <th style="text-align:right;padding:6px;color:var(--text-muted);font-size:10px;text-transform:uppercase">Delta</th>
+      </tr></thead>
+      <tbody>
+        ${nomes.map(n => {
+          const v1=mapa1.get(n)||0, v2=mapa2.get(n)||0, d=v2-v1;
+          return `<tr>
+            <td style="padding:6px;color:var(--text-primary);border-bottom:1px solid var(--border)">${n}</td>
+            <td style="text-align:right;padding:6px;color:var(--text-secondary);border-bottom:1px solid var(--border)">${v1}</td>
+            <td style="text-align:right;padding:6px;color:var(--text-secondary);border-bottom:1px solid var(--border)">${v2}</td>
+            <td style="text-align:right;padding:6px;font-weight:700;border-bottom:1px solid var(--border);color:${d>0?'#5fa87a':d<0?'#fc8181':'var(--text-muted)'}">${d>0?'+':''}${d}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+      <tfoot><tr style="border-top:1px solid var(--border-strong)">
+        <td style="padding:7px 6px;font-weight:700;color:var(--text-primary)">Total</td>
+        <td style="text-align:right;padding:7px 6px;font-weight:700;color:var(--text-primary)">${totM1}</td>
+        <td style="text-align:right;padding:7px 6px;font-weight:700;color:var(--text-primary)">${totM2}</td>
+        <td style="text-align:right;padding:7px 6px;font-weight:700;color:${totDelta>0?'#5fa87a':totDelta<0?'#fc8181':'var(--text-muted)'}">${totDelta>0?'+':''}${totDelta}</td>
+      </tr></tfoot>
+    </table>`;
+}
+
+function adminMalhaGradeSemanalHTML(mes) {
+  const grade = malhaGradeSemanal(mes);
+  if (!grade.length) return `<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px">Sem dados.</div>`;
+  const totais = { dom:0,seg:0,ter:0,qua:0,qui:0,sex:0,sab:0,total:0 };
+  grade.forEach(s => { MALHA_DIAS.forEach(d => totais[d]+=s[d]); totais.total+=s.total; });
+  const semanaAtiva = window._malhaSemana;
+  return `
+    <table style="width:100%;border-collapse:collapse;font-size:11px">
+      <thead><tr>
+        <th style="text-align:left;padding:5px 6px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase">Semana</th>
+        ${MALHA_DIAS.map(d=>`<th style="text-align:right;padding:5px 4px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase">${d}</th>`).join('')}
+        <th style="text-align:right;padding:5px 6px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase">Total</th>
+      </tr></thead>
+      <tbody>
+        ${grade.map(s => {
+          const active = semanaAtiva===s.key;
+          return `<tr onclick="adminMalhaSelectSemana('${s.key}')" style="cursor:pointer;background:${active?'rgba(0,160,210,.10)':'transparent'}">
+            <td style="padding:5px 6px;color:${active?'var(--blue)':'var(--text-primary)'};font-weight:${active?700:500}">${s.key}</td>
+            ${MALHA_DIAS.map(d=>`<td style="text-align:right;padding:5px 4px;color:var(--text-secondary)">${s[d]||''}</td>`).join('')}
+            <td style="text-align:right;padding:5px 6px;font-weight:700;color:var(--text-primary)">${s.total}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+      <tfoot><tr style="border-top:1px solid var(--border-strong)">
+        <td style="padding:6px;font-weight:700;color:var(--text-primary)">Total</td>
+        ${MALHA_DIAS.map(d=>`<td style="text-align:right;padding:6px 4px;font-weight:700;color:var(--text-primary)">${totais[d]}</td>`).join('')}
+        <td style="text-align:right;padding:6px;font-weight:700;color:var(--text-primary)">${totais.total}</td>
+      </tr></tfoot>
+    </table>`;
+}
+
+function adminMalhaGradeHorariaHTML(mes) {
+  const grade = malhaGradeHoraria(mes);
+  if (!grade.length) return `<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px">Sem dados.</div>`;
+  const totais = new Array(8).fill(0);
+  grade.forEach(s => s.slots.forEach((v,i)=>totais[i]+=v));
+  const semanaAtiva = window._malhaSemana;
+  return `
+    <table style="width:100%;border-collapse:collapse;font-size:10.5px">
+      <thead><tr>
+        <th style="text-align:left;padding:5px 6px;color:var(--text-muted);font-size:9px;text-transform:uppercase">Semana</th>
+        ${MALHA_SLOTS_LBL.map(l=>`<th style="text-align:right;padding:5px 3px;color:var(--text-muted);font-size:9px">${l}</th>`).join('')}
+      </tr></thead>
+      <tbody>
+        ${grade.map(s => {
+          const active = semanaAtiva===s.key;
+          return `<tr onclick="adminMalhaSelectSemana('${s.key}')" style="cursor:pointer;background:${active?'rgba(0,160,210,.10)':'transparent'}">
+            <td style="padding:5px 6px;color:${active?'var(--blue)':'var(--text-primary)'};font-weight:${active?700:500}">${s.key}</td>
+            ${s.slots.map(v=>`<td style="text-align:right;padding:5px 3px;color:var(--text-secondary)">${v||''}</td>`).join('')}
+          </tr>`;
+        }).join('')}
+      </tbody>
+      <tfoot><tr style="border-top:1px solid var(--border-strong)">
+        <td style="padding:6px">Total</td>
+        ${totais.map(v=>`<td style="text-align:right;padding:6px 3px;font-weight:700;color:var(--text-primary)">${v}</td>`).join('')}
+      </tr></tfoot>
+    </table>`;
+}
+
+function adminMalhaComparativoPiorSemanaHTML(mes1, mes2) {
+  const p1 = malhaPiorSemana(mes1), p2 = malhaPiorSemana(mes2);
+  if (!p1 && !p2) return `<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px">Sem dados.</div>`;
+  const h1 = p1 ? malhaHorasDaSemana(mes1, p1.key) : new Array(24).fill(0);
+  const h2 = p2 ? malhaHorasDaSemana(mes2, p2.key) : new Array(24).fill(0);
+  const max = Math.max(1, ...h1, ...h2);
+  const W=760, H=160, padL=26, padB=20, padT=10;
+  const stepX = (W-padL-10)/23;
+  const scaleY = v => H-padB-(v/max*(H-padB-padT));
+  const pathFor = arr => arr.map((v,i)=>`${i===0?'M':'L'} ${(padL+i*stepX).toFixed(1)} ${scaleY(v).toFixed(1)}`).join(' ');
+  const ticks = [0,3,6,9,12,15,18,21];
+  return `
+    <div style="display:flex;gap:16px;margin-bottom:10px;font-size:11px">
+      <span style="display:flex;align-items:center;gap:5px;color:var(--text-secondary)"><span style="width:10px;height:10px;border-radius:2px;background:#38bdf8;display:inline-block"></span>${malhaMesLabel(mes1)}${p1?` · semana ${p1.key} (a mais cheia)`:''}</span>
+      <span style="display:flex;align-items:center;gap:5px;color:var(--text-secondary)"><span style="width:10px;height:10px;border-radius:2px;background:#5fa87a;display:inline-block"></span>${malhaMesLabel(mes2)}${p2?` · semana ${p2.key} (a mais cheia)`:''}</span>
+    </div>
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:160px">
+      ${ticks.map(t => `<text x="${(padL+t*stepX).toFixed(1)}" y="${H-4}" font-size="9" text-anchor="middle" style="fill:var(--text-muted)">${String(t).padStart(2,'0')}h</text>`).join('')}
+      <path d="${pathFor(h1)}" fill="none" stroke="#38bdf8" stroke-width="2"/>
+      <path d="${pathFor(h2)}" fill="none" stroke="#5fa87a" stroke-width="2"/>
+    </svg>`;
+}
+
 function adminMalhaRenderDash(el) {
   const bases = malhaBasesDisponiveis();
   const meses = malhaMesesDisponiveis(window._malhaBase);
   const mes1 = window._malhaMes1, mes2 = window._malhaMes2;
   const s1 = malhaStatsDoMes(mes1), s2 = malhaStatsDoMes(mes2);
+  const b1 = malhaBreakdownDoMes(mes1), b2 = malhaBreakdownDoMes(mes2);
   const delta = s2.total - s1.total;
   const deltaPct = s1.total ? Math.round(delta/s1.total*1000)/10 : 0;
-  const nomesCia = [...new Set([...s1.cias.keys(), ...s2.cias.keys()])]
-    .sort((a,b) => ((s2.cias.get(b)||0)+(s1.cias.get(b)||0)) - ((s2.cias.get(a)||0)+(s1.cias.get(a)||0)));
+  const nomesCia = [...new Set([...b1.cias.keys(), ...b2.cias.keys()])]
+    .sort((a,b) => ((b2.cias.get(b)||0)+(b1.cias.get(b)||0)) - ((b2.cias.get(a)||0)+(b1.cias.get(a)||0)));
 
   el.innerHTML = `
     <div class="adm-section-header">
-      <span>Malha aérea · ${(adminFiles.malha?.count||0).toLocaleString('pt-BR')} voos no total</span>
+      <span>Malha aérea · ${(adminFiles.malha?.count||0).toLocaleString('pt-BR')} voos no total${window._malhaCliente?` · filtrado por ${window._malhaCliente}`:''}${window._malhaSemana?` · semana ${window._malhaSemana}`:''}</span>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        ${(window._malhaCliente||window._malhaSemana) ? `<button class="hc-grupo-clear" onclick="adminMalhaLimparFiltros()"><i class="ti ti-x" aria-hidden="true"></i> Limpar filtros</button>` : ''}
         <select class="adh-month-select" onchange="adminMalhaSetBase(this.value||null)">
           <option value="">Todas as bases</option>
           ${bases.map(b => `<option value="${b}" ${b===window._malhaBase?'selected':''}>${b}</option>`).join('')}
@@ -1406,12 +1625,50 @@ function adminMalhaRenderDash(el) {
       ]},
     ])}
 
-    <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+    <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;margin-bottom:16px">
+      <div class="hc-panel" style="flex:1;min-width:340px">
+        <div class="hc-panel-title">Grade semanal · ${malhaMesLabel(mes1)}</div>
+        <div style="overflow-x:auto">${adminMalhaGradeSemanalHTML(mes1)}</div>
+      </div>
+      <div class="hc-panel" style="flex:1;min-width:340px">
+        <div class="hc-panel-title">Grade semanal · ${malhaMesLabel(mes2)}</div>
+        <div style="overflow-x:auto">${adminMalhaGradeSemanalHTML(mes2)}</div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;margin-bottom:16px">
+      <div class="hc-panel" style="flex:1;min-width:340px">
+        <div class="hc-panel-title">Voos por horário · ${malhaMesLabel(mes1)}</div>
+        <div style="overflow-x:auto">${adminMalhaGradeHorariaHTML(mes1)}</div>
+      </div>
+      <div class="hc-panel" style="flex:1;min-width:340px">
+        <div class="hc-panel-title">Voos por horário · ${malhaMesLabel(mes2)}</div>
+        <div style="overflow-x:auto">${adminMalhaGradeHorariaHTML(mes2)}</div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;margin-bottom:16px">
       <div class="hc-panel" style="flex:1.6;min-width:320px">
         <div class="hc-panel-title">Voos por cia · ${malhaMesLabel(mes1)} × ${malhaMesLabel(mes2)}</div>
-        <div id="malha-cia-bars">${adminMalhaCiaBarsHTML(nomesCia, s1, s2)}</div>
+        <div id="malha-cia-bars">${adminMalhaCiaBarsHTML(nomesCia, b1.cias, b2.cias)}</div>
       </div>
-      <div class="hc-panel" style="flex:1;min-width:260px" id="malha-detail">${adminMalhaDetailHTML(s1, s2)}</div>
+      <div class="hc-panel" style="flex:1;min-width:260px" id="malha-detail">${adminMalhaDetailHTML(b1.cias, b2.cias)}</div>
+    </div>
+
+    <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;margin-bottom:16px">
+      <div class="hc-panel" style="flex:1;min-width:280px">
+        <div class="hc-panel-title">Cliente</div>
+        ${adminMalhaTabelaHTML(b1.cias, b2.cias, 'Cliente')}
+      </div>
+      <div class="hc-panel" style="flex:1;min-width:280px">
+        <div class="hc-panel-title">Aeronave</div>
+        ${adminMalhaTabelaHTML(b1.aeronaves, b2.aeronaves, 'Aeronave')}
+      </div>
+    </div>
+
+    <div class="hc-panel">
+      <div class="hc-panel-title">Comparativo de voos por horário · semana mais cheia de cada mês</div>
+      ${adminMalhaComparativoPiorSemanaHTML(mes1, mes2)}
     </div>
   `;
 }
@@ -1422,24 +1679,31 @@ function adminMalhaSetBase(base) {
   if (!meses.includes(window._malhaMes1)) window._malhaMes1 = meses[meses.length-2] || meses[0] || null;
   if (!meses.includes(window._malhaMes2)) window._malhaMes2 = meses[meses.length-1] || null;
   window._malhaCliente = null;
+  window._malhaSemana = null;
   adminMalhaRenderDash(document.getElementById('adm-tab-content'));
 }
 
 function adminMalhaSetMes(qual, mes) {
   if (qual === 1) window._malhaMes1 = mes; else window._malhaMes2 = mes;
   window._malhaCliente = null;
+  window._malhaSemana = null;
   adminMalhaRenderDash(document.getElementById('adm-tab-content'));
 }
 
 function adminMalhaSelectCia(nome) {
   window._malhaCliente = (window._malhaCliente === nome) ? null : nome;
-  const s1 = malhaStatsDoMes(window._malhaMes1), s2 = malhaStatsDoMes(window._malhaMes2);
-  const nomesCia = [...new Set([...s1.cias.keys(), ...s2.cias.keys()])]
-    .sort((a,b) => ((s2.cias.get(b)||0)+(s1.cias.get(b)||0)) - ((s2.cias.get(a)||0)+(s1.cias.get(a)||0)));
-  const bars = document.getElementById('malha-cia-bars');
-  if (bars) bars.innerHTML = adminMalhaCiaBarsHTML(nomesCia, s1, s2);
-  const detail = document.getElementById('malha-detail');
-  if (detail) detail.innerHTML = adminMalhaDetailHTML(s1, s2);
+  adminMalhaRenderDash(document.getElementById('adm-tab-content'));
+}
+
+function adminMalhaSelectSemana(key) {
+  window._malhaSemana = (window._malhaSemana === key) ? null : key;
+  adminMalhaRenderDash(document.getElementById('adm-tab-content'));
+}
+
+function adminMalhaLimparFiltros() {
+  window._malhaCliente = null;
+  window._malhaSemana = null;
+  adminMalhaRenderDash(document.getElementById('adm-tab-content'));
 }
 
 async function adminMalhaTab(el) {
@@ -1483,6 +1747,7 @@ async function adminMalhaTab(el) {
   if (!window._malhaMes1 || !meses.includes(window._malhaMes1)) window._malhaMes1 = meses[meses.length-2] || meses[0] || null;
   if (!window._malhaMes2 || !meses.includes(window._malhaMes2)) window._malhaMes2 = meses[meses.length-1] || null;
   window._malhaCliente = null;
+  window._malhaSemana = null;
 
   adminMalhaRenderDash(el);
 }
