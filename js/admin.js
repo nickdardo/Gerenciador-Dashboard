@@ -1476,6 +1476,16 @@ async function adminDeletePreconfig(id) {
 
 async function adminAutoLoadFiles() {
   try {
+    // ── Última atualização — usado como selo em Staff e Aderência pra
+    //    mostrar de quando é o dado que está sendo exibido. Pega o
+    //    updated_at mais recente do cadastro (colaboradores), que é
+    //    atualizado toda vez que alguém sobe uma planilha nova.
+    try {
+      const { data: lastUpd } = await db.from('colaboradores')
+        .select('updated_at').order('updated_at', { ascending:false }).limit(1);
+      window._lastDataUpdateAt = lastUpd?.[0]?.updated_at || null;
+    } catch(e) { console.warn('[autoLoad] última atualização:', e.message); window._lastDataUpdateAt = null; }
+
     // ── Colaboradores from DB (all records via pagination) ──
     const { count: totalColabs } = await db.from('colaboradores')
       .select('*', { count:'exact', head:true }).eq('ativo', true);

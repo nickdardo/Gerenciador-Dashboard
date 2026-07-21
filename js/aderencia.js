@@ -818,6 +818,7 @@ async function adhRenderMultiBase(el) {
         <div>
           <h1 class="adh-full-title">Aderência ao Ponto</h1>
           <p class="adh-full-sub">Todas as bases · ${adhMonthLabel(mes)}</p>
+          ${lastUpdateBadgeHTML()}
         </div>
         <div style="display:flex;align-items:center;gap:12px">
           ${adhMonthSelectorHTML()}
@@ -929,9 +930,9 @@ function adhRenderRankingBodyHTML() {
               return `<td><div style="display:flex;align-items:center;gap:6px"><div class="adh-exec-bar" style="width:50px;height:7px"><div style="width:${Math.round(v)}%;background:${adhBarColor(v)}"></div></div><span style="font-size:11.5px;font-weight:600">${v}%</span></div></td>`;
             }).join('')}
             <td>${adhDeltaHTML(d.pct, (window._adhPrevByBase||new Map()).get(base))}</td>
-            <td class="r" style="color:var(--text-muted)">+${adhFmtH(d.he_h)}</td>
-            <td class="r" style="color:var(--text-muted)">−${adhFmtH(d.falta_h)}</td>
-            <td class="r" style="color:var(--text-muted)">${d.colabs}</td>
+            <td class="r">+${adhFmtH(d.he_h)}</td>
+            <td class="r">−${adhFmtH(d.falta_h)}</td>
+            <td class="r">${d.colabs}</td>
             <td style="text-align:center">${adhStatusIcon(d.pct)}</td>
           </tr>`;
         }).join('')}
@@ -1288,6 +1289,7 @@ function adhRenderDetalhe(el, base, showBack) {
               ${base ? `<span class="adh-base-badge">${base}</span>` : ''}
             </h1>
             <p class="adh-full-sub">Horas trabalhadas ÷ horas programadas · ${adhMonthLabel(window._adhMes || adhCurrentMonth())}</p>
+            ${lastUpdateBadgeHTML()}
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:12px">
@@ -1509,11 +1511,11 @@ function adhRenderColabRows(list, base) {
       data-nodata="${c.semDados?1:0}"
       onmouseenter="adhShowTooltip(event,this,false).catch(console.warn)"
       onmouseleave="adhHideTooltip()">
-      <td style="font-family:monospace;font-size:11px">${mat}</td>
+      <td style="font-family:monospace">${mat}</td>
       <td style="font-weight:500">${c.nome}${pcdBadge}</td>
-      <td style="color:var(--text-muted);font-size:11px">${cargo}</td>
+      <td>${cargo}</td>
       <td style="text-align:center">${situBadge}</td>
-      <td class="r" style="color:var(--text-muted)">${ch ? ch+'h' : '—'}</td>
+      <td class="r">${ch ? ch+'h' : '—'}</td>
       <td class="r">${c.semDados ? '—' : adhHuman(c.min_prog/60)}</td>
       <td class="r" style="color:#f6ad55">${c.semDados ? '—' : adhHuman(c.he_h)}</td>
       <td class="r" style="color:#fc8181">${c.semDados ? '—' : adhHuman(c.falta_h)}</td>

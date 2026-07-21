@@ -24,6 +24,18 @@ async function dbFetchAll(table, columns) {
   return all;
 }
 
+// ── Selo "Atualizado em ..." — window._lastDataUpdateAt é preenchido em
+// adminAutoLoadFiles() com o updated_at mais recente do cadastro. Usado no
+// cabeçalho do Staff e da Aderência pra dar transparência de quão fresco é
+// o dado exibido (mesma fonte pras duas telas).
+function lastUpdateBadgeHTML() {
+  const v = window._lastDataUpdateAt;
+  if (!v) return '';
+  const d = new Date(v);
+  const label = d.toLocaleDateString('pt-BR') + ' às ' + d.toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
+  return `<span class="hc-last-update" title="Última vez que o cadastro de colaboradores foi atualizado"><i class="ti ti-clock" aria-hidden="true"></i> Atualizado em ${label}</span>`;
+}
+
 // ── Auth helpers ──────────────────────────────────────
 
 async function authSignIn(email, password) {

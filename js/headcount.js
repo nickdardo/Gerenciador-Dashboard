@@ -274,6 +274,7 @@ function hcRenderMain(el) {
         <div>
           <h1 class="page-title">Staff</h1>
           <p class="page-sub">Quadro de pessoal · cruza Colaboradores, Férias, Desligamentos e PCD</p>
+          ${lastUpdateBadgeHTML()}
         </div>
         <div style="display:flex;align-items:center;gap:10px">
           ${baseControlHTML}
@@ -440,14 +441,14 @@ function hcRenderColabRows(list) {
     const obs = c.desligado ? hcFmtISODate(c.demissao) : (c.emFerias ? `Férias até ${hcFmtISODate(c.feriasFim)}` : '');
     const pcdBadge = c.pcd ? `<i class="ti ti-wheelchair" style="color:#a78bfa;font-size:12px;margin-left:5px" title="PCD" aria-hidden="true"></i>` : '';
     return `<tr class="adh-colab-row">
-      <td style="font-family:monospace;font-size:11px">${c.mat}</td>
+      <td style="font-family:monospace">${c.mat}</td>
       <td>${c.filial}</td>
       <td style="font-weight:500">${c.nome||''}${pcdBadge}</td>
-      <td style="color:var(--text-muted);font-size:11px">${c.funcao||''}</td>
+      <td>${c.funcao||''}</td>
       <td class="r">${c.ch?c.ch+'h':'—'}</td>
       <td><span class="adh-situ-badge ${situClass}">${situTxt}</span></td>
-      <td style="font-size:11px;color:var(--text-muted)">${hcFmtISODate(c.admissao)||'—'}</td>
-      <td style="font-size:11px;color:var(--text-muted)">${obs||'—'}</td>
+      <td>${hcFmtISODate(c.admissao)||'—'}</td>
+      <td>${obs||'—'}</td>
     </tr>`;
   }).join('');
 }
@@ -488,6 +489,15 @@ function hcDeslFilteredRows() {
   let rows = hcDeslAllForBase();
   if (period === '12m') {
     rows = rows.filter(r => { const d = new Date(r.data_demissao); return d >= ha12m && d <= hoje; });
+  } else if (period === 'custom') {
+    const from = window._hcDeslFrom ? new Date(window._hcDeslFrom) : null;
+    const to   = window._hcDeslTo   ? new Date(window._hcDeslTo)   : null;
+    rows = rows.filter(r => {
+      const d = new Date(r.data_demissao);
+      if (from && d < from) return false;
+      if (to && d > to) return false;
+      return true;
+    });
   } else if (period !== 'todos') {
     rows = rows.filter(r => String(r.data_demissao).slice(0,7) === period);
   }
@@ -500,21 +510,57 @@ function hcDeslFilteredRows() {
   return rows.sort((a,b) => (b.data_demissao||'').localeCompare(a.data_demissao||''));
 }
 
+function hcDeslPeriodLabel() {
+  const period = window._hcDeslPeriod || '12m';
+  if (period === '12m')   return 'Últimos 12 meses';
+  if (period === 'todos') return 'Todo o período';
+  if (period === 'custom') {
+    const de  = window._hcDeslFrom ? hcFmtISODate(window._hcDeslFrom) : 'início';
+    const ate = window._hcDeslTo   ? hcFmtISODate(window._hcDeslTo)   : 'hoje';
+    return `De ${de} até ${ate}`;
+  }
+  return adhMonthLabel(period);
+}
+
 // "Últimos 12 meses" e "Tudo" sempre disponíveis; os meses específicos vêm
 // dinamicamente de quais meses realmente têm desligamento nessa base — se o
 // arquivo tiver 2024, 2025 e 2026, os três aparecem aqui sozinhos.
-function hcDeslPeriodOptionsHTML() {
+function hcDeslFilterPanelHTML() {
   const meses = [...new Set(hcDeslAllForBase().map(r => String(r.data_demissao).slice(0,7)))].sort().reverse();
-  const cur = window._hcDeslPeriod || '12m';
+  const period = window._hcDeslPeriod || '12m';
+  const quick = [['12m','Últimos 12 meses'], ['todos','Tudo'], ...meses.map(m => [m, adhMonthLabel(m)])];
   return `
-    <option value="12m"   ${cur==='12m'  ?'selected':''}>Últimos 12 meses</option>
-    <option value="todos" ${cur==='todos'?'selected':''}>Tudo</option>
-    ${meses.map(m => `<option value="${m}" ${cur===m?'selected':''}>${adhMonthLabel(m)}</option>`).join('')}
-  `;
+    <div class="hc-desl-filter-panel" id="hc-desl-filter-panel" style="display:none">
+      <div class="hc-desl-filter-quick">
+        ${quick.map(([v,label]) => `<button class="${period===v?'active':''}" onclick="hcSetDeslPeriod('${v}')">${label}</button>`).join('')}
+      </div>
+      <div class="hc-desl-filter-custom">
+        <div class="hc-desl-filter-custom-label">Ou escolha um período personalizado</div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <input type="date" id="hc-desl-from" class="adm-input" style="width:auto" value="${window._hcDeslFrom||''}">
+          <span style="color:var(--text-muted);font-size:12px">até</span>
+          <input type="date" id="hc-desl-to" class="adm-input" style="width:auto" value="${window._hcDeslTo||''}">
+          <button class="adh-refresh-btn" onclick="hcApplyDeslCustomRange()">Aplicar</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function hcToggleDeslFilter() {
+  const panel = document.getElementById('hc-desl-filter-panel');
+  if (!panel) return;
+  panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
 }
 
 function hcSetDeslPeriod(value) {
   window._hcDeslPeriod = value;
+  hcRenderDesligados(window._hcCurrentEl);
+}
+
+function hcApplyDeslCustomRange() {
+  window._hcDeslFrom = document.getElementById('hc-desl-from').value || null;
+  window._hcDeslTo   = document.getElementById('hc-desl-to').value || null;
+  window._hcDeslPeriod = 'custom';
   hcRenderDesligados(window._hcCurrentEl);
 }
 
@@ -532,21 +578,19 @@ function hcDeslRowsHTML() {
     return `<tr><td colspan="7" style="padding:24px 10px;text-align:center;color:var(--text-muted);font-size:12px">Nenhum desligamento encontrado nesse período.</td></tr>`;
   }
   return rows.map(r => `<tr class="adh-colab-row">
-    <td style="font-family:monospace;font-size:11px">${r.matricula}</td>
+    <td style="font-family:monospace">${r.matricula}</td>
     <td>${r.filial}</td>
     <td style="font-weight:500">${r.nome||''}</td>
-    <td style="color:var(--text-muted);font-size:11px">${r.cargo||''}</td>
+    <td>${r.cargo||''}</td>
     <td class="r">${r.ch?r.ch+'h':'—'}</td>
-    <td style="font-size:11px">${hcFmtISODate(r.data_demissao)||'—'}</td>
-    <td style="font-size:11px;color:var(--text-muted)">${r.causa_texto||'—'}</td>
+    <td>${hcFmtISODate(r.data_demissao)||'—'}</td>
+    <td>${r.causa_texto||'—'}</td>
   </tr>`).join('');
 }
 
 function hcRenderDesligados(el) {
   const base = window._hcBase;
   if (window._hcDeslPeriod == null) window._hcDeslPeriod = '12m';
-  const period = window._hcDeslPeriod;
-  const periodLabel = period === '12m' ? 'Últimos 12 meses' : period === 'todos' ? 'Todo o período' : adhMonthLabel(period);
   const rows = hcDeslFilteredRows();
 
   el.innerHTML = `
@@ -558,14 +602,15 @@ function hcRenderDesligados(el) {
               <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
             </svg>
           </button>
-          <div>
+          <div style="position:relative">
             <h1 class="page-title">Desligamentos ${base?`<span class="adh-base-badge">${base}</span>`:''}</h1>
-            <p class="page-sub">${periodLabel} · <span id="hc-desl-count">${rows.length.toLocaleString('pt-BR')} registro${rows.length===1?'':'s'}</span></p>
+            <p class="page-sub hc-desl-filter-trigger" onclick="hcToggleDeslFilter()">
+              ${hcDeslPeriodLabel()} <i class="ti ti-chevron-down" style="font-size:9px" aria-hidden="true"></i>
+              · <span id="hc-desl-count">${rows.length.toLocaleString('pt-BR')} registro${rows.length===1?'':'s'}</span>
+            </p>
+            ${hcDeslFilterPanelHTML()}
           </div>
         </div>
-        <select class="adh-month-select" onchange="hcSetDeslPeriod(this.value)">
-          ${hcDeslPeriodOptionsHTML()}
-        </select>
       </div>
 
       <div class="hc-panel">
@@ -585,3 +630,10 @@ function hcRenderDesligados(el) {
       </div>
     </div>`;
 }
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.hc-desl-filter-panel') && !e.target.closest('.hc-desl-filter-trigger')) {
+    const panel = document.getElementById('hc-desl-filter-panel');
+    if (panel) panel.style.display = 'none';
+  }
+});
