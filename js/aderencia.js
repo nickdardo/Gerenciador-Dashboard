@@ -718,7 +718,7 @@ function adhKpiCardHTML(card) {
         <span>${card.title}</span>
       </div>
       ${rows.map((r, i) => `
-        <div class="adh-kpi-row">
+        <div class="adh-kpi-row" ${r.sub ? `title="${r.sub}"` : ''}>
           <div>
             <div class="adh-kpi-row-l">${r.label}</div>
             ${r.sub ? `<div class="adh-kpi-row-s">${r.sub}</div>` : ''}

@@ -575,6 +575,7 @@ async function adminLoadDesligados(input) {
         if (!matRaw || isNaN(parseInt(matRaw))) return; // pula marcadores/cabeçalhos
         const mat = matRaw.padStart(6, '0');
         const nome          = String(row[1]||'').trim();
+        const ch            = parseInt(row[2]) || null;
         const filial        = String(row[3]||'').trim().toUpperCase();
         const data_admissao = adminXlsToISODate(row[4]);
         const data_demissao = adminXlsToISODate(row[5]);
@@ -582,7 +583,7 @@ async function adminLoadDesligados(input) {
         const causa_codigo  = String(row[7]||'').trim();
         const causa_texto   = String(row[8]||'').trim();
         if (!data_demissao) return;
-        records.push({ matricula: mat, nome, filial, cargo, data_admissao, data_demissao, causa_codigo, causa_texto, updated_at: new Date() });
+        records.push({ matricula: mat, nome, ch, filial, cargo, data_admissao, data_demissao, causa_codigo, causa_texto, updated_at: new Date() });
       });
 
       const total = records.length;

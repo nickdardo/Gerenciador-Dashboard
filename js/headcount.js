@@ -283,6 +283,22 @@ function hcRenderMain(el) {
         </div>
       </div>
 
+      ${adhKpiCardsHTML([
+        { key:'blue', icon:'ti-users', title:'Quadro', rows: [
+          { label:'Staff', sub:'total no cadastro', value: stats.headcount.toLocaleString('pt-BR') },
+          { label:'Ativos', sub:'trabalhando hoje', value: stats.ativos.toLocaleString('pt-BR') },
+        ]},
+        { key:'amber', icon:'ti-report-medical', title:'Situação', rows: [
+          { label:'Atestados', sub:'auxílio doença', value: stats.atestados.toLocaleString('pt-BR') },
+          { label:'Inativos', sub:'no cadastro, já desligados', value: stats.inativos.toLocaleString('pt-BR') },
+          { label:'PCD', sub:'pessoas com deficiência', value: stats.pcd.toLocaleString('pt-BR') },
+        ]},
+        { key:'red', icon:'ti-calendar-off', title:'Ausências', rows: [
+          { label:'Férias', sub:'ativas agora', value: stats.feriasAtivas.toLocaleString('pt-BR') },
+          { label:'Desligados', sub:'últimos 12 meses · clique p/ ver', value: `<span style="cursor:pointer" onclick="hcOpenDesligados()" title="Clique para ver a lista de desligados">${stats.desligados12m.toLocaleString('pt-BR')}</span>`, color:'#b56666' },
+        ]},
+      ], true)}
+
       <div class="hc-main-layout">
 
         <div class="hc-left-col">
@@ -382,23 +398,6 @@ function hcRenderMain(el) {
         </div>
 
       </div>
-
-      <div style="font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--text-muted);text-transform:uppercase;margin:20px 0 12px">Resumo</div>
-      ${adhKpiCardsHTML([
-        { key:'blue', icon:'ti-users', title:'Quadro', rows: [
-          { label:'Staff', sub:'total no cadastro', value: stats.headcount.toLocaleString('pt-BR') },
-          { label:'Ativos', sub:'trabalhando hoje', value: stats.ativos.toLocaleString('pt-BR') },
-        ]},
-        { key:'amber', icon:'ti-report-medical', title:'Situação', rows: [
-          { label:'Atestados', sub:'auxílio doença', value: stats.atestados.toLocaleString('pt-BR') },
-          { label:'Inativos', sub:'no cadastro, já desligados', value: stats.inativos.toLocaleString('pt-BR') },
-          { label:'PCD', sub:'pessoas com deficiência', value: stats.pcd.toLocaleString('pt-BR') },
-        ]},
-        { key:'red', icon:'ti-calendar-off', title:'Ausências', rows: [
-          { label:'Férias', sub:'ativas agora', value: stats.feriasAtivas.toLocaleString('pt-BR') },
-          { label:'Desligados', sub:'últimos 12 meses · clique p/ ver', value: `<span style="cursor:pointer" onclick="hcOpenDesligados()" title="Clique para ver a lista de desligados">${stats.desligados12m.toLocaleString('pt-BR')}</span>`, color:'#b56666' },
-        ]},
-      ], true)}
 
     </div>`;
 }
