@@ -160,7 +160,7 @@ function adminTabSwitch(tab, btn) {
     case 'users':    el.innerHTML = adminUsersTab(users||[], preconfig||[]); break;
     case 'files':    el.innerHTML = adminFilesTab();            break;
     case 'aderencia':adminAderenciaTab(el);                    break;
-    case 'malha':    el.innerHTML = adminMalhaTab();            break;
+    case 'malha':    adminMalhaTab(el);                        break;
     case 'logs':     el.innerHTML = adminLogsTab(logs||[]);     break;
   }
 }
@@ -265,6 +265,14 @@ const ADM_BATCH_PATTERNS = [
   { fn: 'adminLoadPcd',       label: 'PCD',                test: n => n.includes('hrcl114') || n.includes('pcd') },
 ];
 
+function adminLoadEach(input, fnName) {
+  const files = [...(input.files || [])];
+  const fn = window[fnName];
+  if (typeof fn !== 'function') { console.warn('[adminLoadEach] função não encontrada:', fnName); return; }
+  files.forEach(file => fn({ files: [file], value: '' }));
+  input.value = '';
+}
+
 function adminBatchUpload(input) {
   const files = [...(input.files || [])];
   if (!files.length) return;
@@ -348,9 +356,10 @@ function adminFilesTab() {
       icon: 'ti-plane',
       color: '#a78bfa',
       name: 'Malha aérea',
-      desc: 'RVPE127_*.CSV · voos por base',
+      desc: 'RVPE127_*.CSV · voos por base · pode subir vários meses de uma vez',
       accept: '.csv,.CSV',
       fn: 'adminLoadMalha',
+      multi: true,
       info: adminFiles.malha
         ? `${adminFiles.malha.count.toLocaleString()} voos · ${adminFiles.malha.bases} bases · ${adminFiles.malha.period}`
         : null,
@@ -440,8 +449,8 @@ function adminFilesTab() {
               <label class="adm-upload-btn">
                 <i class="ti ti-upload" style="font-size:11px" aria-hidden="true"></i>
                 ${f.info ? 'Atualizar' : 'Carregar'}
-                <input type="file" accept="${f.accept}" style="display:none"
-                  onchange="${f.fn}(this)">
+                <input type="file" accept="${f.accept}" ${f.multi ? 'multiple' : ''} style="display:none"
+                  onchange="${f.multi ? `adminLoadEach(this,'${f.fn}')` : `${f.fn}(this)`}">
               </label>
             </div>
 
@@ -1045,6 +1054,8 @@ async function adminLoadMalha(input) {
         adminSetFileStatus('malha',`Gravando... ${saved.toLocaleString()}/${total.toLocaleString()}`,'load');
       }
       adminFiles.malha={count:total,bases:basesSet.size,date:new Date().toLocaleDateString('pt-BR')};
+      window.malhaRows = null; // força recarregar na próxima vez que abrir o dashboard, já com esse mês
+      malhaVoos = undefined;
       adminAddHistory('malha',file.name);
       adminSetFileStatus('malha',`✓ ${total.toLocaleString()} voos · ${basesSet.size} bases`,'ok');
       if (typeof malhaParseCSV==='function') malhaParseCSV(text);
@@ -1240,55 +1251,240 @@ async function adminAderenciaTab(el) {
 // ══════════════════════════════════════════════════════
 // TAB: MALHA AÉREA
 // ══════════════════════════════════════════════════════
-function adminMalhaTab() {
-  if (!adminFiles.malha) {
+// ── Malha aérea — cálculo de PNT e agregações ──────────
+// PNT Previsto = % de voos com permanência em solo acima de 4h (confirmado
+// com o cliente). Ground time = hora_saida − hora_chegada, tratando virada
+// de meia-noite. Voos sem os dois horários ficam fora da conta (não dá pra
+// saber quanto tempo ficaram em solo).
+function malhaMinutos(hhmm) {
+  if (!hhmm) return null;
+  const m = String(hhmm).match(/(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  return parseInt(m[1],10)*60 + parseInt(m[2],10);
+}
+
+function malhaGroundMin(row) {
+  const cheg = malhaMinutos(row.hora_chegada);
+  const sai  = malhaMinutos(row.hora_saida);
+  if (cheg == null || sai == null) return null;
+  let diff = sai - cheg;
+  if (diff < 0) diff += 1440;
+  return diff;
+}
+
+function malhaIsPNT(row) {
+  const g = malhaGroundMin(row);
+  return g == null ? null : g > 240;
+}
+
+function malhaBasesDisponiveis() {
+  return [...new Set((window.malhaRows||[]).map(r => r.base))].filter(Boolean).sort();
+}
+
+function malhaMesesDisponiveis(base) {
+  const rows = base ? (window.malhaRows||[]).filter(r => r.base === base) : (window.malhaRows||[]);
+  return [...new Set(rows.map(r => (r.data||'').slice(0,7)))].filter(Boolean).sort();
+}
+
+function malhaRowsDoMes(mes) {
+  const base = window._malhaBase;
+  if (!mes) return [];
+  return (window.malhaRows||[]).filter(r =>
+    (!base || r.base === base) && (r.data||'').slice(0,7) === mes);
+}
+
+function malhaStatsDoMes(mes) {
+  const rows = malhaRowsDoMes(mes);
+  const total = rows.length;
+  const diasNoMes = mes && typeof adhDaysInMonth === 'function' ? adhDaysInMonth(mes) : (new Set(rows.map(r=>r.data)).size || 1);
+  const mediaDia = diasNoMes ? Math.round(total/diasNoMes*10)/10 : 0;
+  let pntSim = 0, pntElig = 0;
+  const cias = new Map();
+  rows.forEach(r => {
+    const c = r.cia || 'SEM CIA';
+    cias.set(c, (cias.get(c)||0)+1);
+    const p = malhaIsPNT(r);
+    if (p != null) { pntElig++; if (p) pntSim++; }
+  });
+  const pntPct = pntElig ? Math.round(pntSim/pntElig*1000)/10 : null;
+  return { total, mediaDia, pntPct, cias };
+}
+
+function malhaMesLabel(mes) {
+  if (!mes) return '—';
+  return typeof adhMonthLabel === 'function' ? adhMonthLabel(mes) : mes;
+}
+
+function adminMalhaCiaBarsHTML(nomesCia, s1, s2) {
+  if (!nomesCia.length) return `<div style="padding:24px 10px;text-align:center;color:var(--text-muted);font-size:12px">Sem voos nesse período.</div>`;
+  const max = Math.max(1, ...nomesCia.map(c => Math.max(s1.cias.get(c)||0, s2.cias.get(c)||0)));
+  const ativo = window._malhaCliente;
+  return nomesCia.map(c => {
+    const v1 = s1.cias.get(c)||0, v2 = s2.cias.get(c)||0;
+    const active = ativo === c;
     return `
+      <div onclick="adminMalhaSelectCia('${c.replace(/'/g,"\\'")}')" style="cursor:pointer;padding:8px 10px;border-radius:8px;margin-bottom:3px;background:${active?'rgba(0,160,210,.10)':'transparent'}">
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:5px">
+          <span style="color:${active?'var(--blue)':'var(--text-primary)'};font-weight:${active?700:500}">${c}</span>
+          <span style="color:var(--text-muted)">${v1} → ${v2}</span>
+        </div>
+        <div style="display:flex;gap:2px;height:7px">
+          <div style="width:${Math.round(v1/max*100)}%;background:#38bdf8;border-radius:3px 0 0 3px"></div>
+          <div style="width:${Math.round(v2/max*100)}%;background:#5fa87a;border-radius:0 3px 3px 0"></div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function adminMalhaDetailHTML(s1, s2) {
+  const c = window._malhaCliente;
+  if (!c) {
+    return `<div class="hc-panel-title">Detalhe</div><div style="padding:24px 0;text-align:center;color:var(--text-muted);font-size:12px">Clique numa cia à esquerda<br>pra ver o detalhe aqui</div>`;
+  }
+  const v1 = s1.cias.get(c)||0, v2 = s2.cias.get(c)||0;
+  const delta = v2-v1;
+  const rows1 = malhaRowsDoMes(window._malhaMes1).filter(r => (r.cia||'SEM CIA')===c);
+  const porDia = [0,0,0,0,0,0,0];
+  rows1.forEach(r => { if (!r.data) return; const d = new Date(r.data+'T12:00:00'); porDia[d.getDay()]++; });
+  const diasLbl = ['dom','seg','ter','qua','qui','sex','sáb'];
+  const maxDia = Math.max(1, ...porDia);
+  return `
+    <div class="hc-panel-title" style="color:var(--blue)">${c}</div>
+    <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="font-size:12px;color:var(--text-muted)">${malhaMesLabel(window._malhaMes1)}</span><span style="font-size:18px;font-weight:700;color:var(--text-primary)">${v1}</span></div>
+    <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="font-size:12px;color:var(--text-muted)">${malhaMesLabel(window._malhaMes2)}</span><span style="font-size:18px;font-weight:700;color:var(--text-primary)">${v2}</span></div>
+    <div style="display:flex;justify-content:space-between;margin-bottom:16px;padding-top:8px;border-top:1px solid var(--border)"><span style="font-size:12px;color:var(--text-muted)">Delta</span><span style="font-size:15px;font-weight:700;color:${delta>=0?'#5fa87a':'#fc8181'}">${delta>=0?'+':''}${delta}</span></div>
+    <div style="font-size:10px;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Por dia da semana · ${malhaMesLabel(window._malhaMes1)}</div>
+    ${diasLbl.map((d,i) => `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+        <span style="font-size:11px;color:var(--text-muted);width:26px">${d}</span>
+        <div style="flex:1;height:6px;background:var(--border-strong);border-radius:3px;overflow:hidden"><div style="width:${Math.round(porDia[i]/maxDia*100)}%;height:100%;background:#38bdf8"></div></div>
+        <span style="font-size:11px;color:var(--text-secondary);width:22px;text-align:right">${porDia[i]}</span>
+      </div>`).join('')}
+  `;
+}
+
+function adminMalhaRenderDash(el) {
+  const bases = malhaBasesDisponiveis();
+  const meses = malhaMesesDisponiveis(window._malhaBase);
+  const mes1 = window._malhaMes1, mes2 = window._malhaMes2;
+  const s1 = malhaStatsDoMes(mes1), s2 = malhaStatsDoMes(mes2);
+  const delta = s2.total - s1.total;
+  const deltaPct = s1.total ? Math.round(delta/s1.total*1000)/10 : 0;
+  const nomesCia = [...new Set([...s1.cias.keys(), ...s2.cias.keys()])]
+    .sort((a,b) => ((s2.cias.get(b)||0)+(s1.cias.get(b)||0)) - ((s2.cias.get(a)||0)+(s1.cias.get(a)||0)));
+
+  el.innerHTML = `
+    <div class="adm-section-header">
+      <span>Malha aérea · ${(adminFiles.malha?.count||0).toLocaleString('pt-BR')} voos no total</span>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <select class="adh-month-select" onchange="adminMalhaSetBase(this.value||null)">
+          <option value="">Todas as bases</option>
+          ${bases.map(b => `<option value="${b}" ${b===window._malhaBase?'selected':''}>${b}</option>`).join('')}
+        </select>
+        <select class="adh-month-select" onchange="adminMalhaSetMes(1,this.value)">
+          ${meses.map(m => `<option value="${m}" ${m===mes1?'selected':''}>${malhaMesLabel(m)}</option>`).join('')}
+        </select>
+        <span style="color:var(--text-muted);font-size:12px">×</span>
+        <select class="adh-month-select" onchange="adminMalhaSetMes(2,this.value)">
+          ${meses.map(m => `<option value="${m}" ${m===mes2?'selected':''}>${malhaMesLabel(m)}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+
+    ${adhKpiCardsHTML([
+      { key:'blue', icon:'ti-plane-departure', title:'Voos previstos', rows: [
+        { label: malhaMesLabel(mes1), sub:`${s1.mediaDia}/dia em média`, value: s1.total.toLocaleString('pt-BR') },
+        { label: malhaMesLabel(mes2), sub:`${s2.mediaDia}/dia em média`, value: s2.total.toLocaleString('pt-BR') },
+      ]},
+      { key: delta>=0?'green':'red', icon:'ti-arrows-diff', title:'Variação', rows: [
+        { label:'Voos a mais/menos', sub:`${malhaMesLabel(mes1)} → ${malhaMesLabel(mes2)}`, value: `${delta>=0?'+':''}${delta}`, color: delta>=0?'#5fa87a':'#fc8181' },
+        { label:'Variação percentual', sub:'sobre o mês 1', value: `${deltaPct>=0?'+':''}${deltaPct}%`, color: delta>=0?'#5fa87a':'#fc8181' },
+      ]},
+      { key:'amber', icon:'ti-clock-exclamation', title:'PNT previsto', rows: [
+        { label: malhaMesLabel(mes1), sub:'permanência em solo > 4h', value: s1.pntPct!=null ? s1.pntPct+'%' : '—' },
+        { label: malhaMesLabel(mes2), sub:'permanência em solo > 4h', value: s2.pntPct!=null ? s2.pntPct+'%' : '—' },
+      ]},
+    ])}
+
+    <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+      <div class="hc-panel" style="flex:1.6;min-width:320px">
+        <div class="hc-panel-title">Voos por cia · ${malhaMesLabel(mes1)} × ${malhaMesLabel(mes2)}</div>
+        <div id="malha-cia-bars">${adminMalhaCiaBarsHTML(nomesCia, s1, s2)}</div>
+      </div>
+      <div class="hc-panel" style="flex:1;min-width:260px" id="malha-detail">${adminMalhaDetailHTML(s1, s2)}</div>
+    </div>
+  `;
+}
+
+function adminMalhaSetBase(base) {
+  window._malhaBase = base || null;
+  const meses = malhaMesesDisponiveis(window._malhaBase);
+  if (!meses.includes(window._malhaMes1)) window._malhaMes1 = meses[meses.length-2] || meses[0] || null;
+  if (!meses.includes(window._malhaMes2)) window._malhaMes2 = meses[meses.length-1] || null;
+  window._malhaCliente = null;
+  adminMalhaRenderDash(document.getElementById('adm-tab-content'));
+}
+
+function adminMalhaSetMes(qual, mes) {
+  if (qual === 1) window._malhaMes1 = mes; else window._malhaMes2 = mes;
+  window._malhaCliente = null;
+  adminMalhaRenderDash(document.getElementById('adm-tab-content'));
+}
+
+function adminMalhaSelectCia(nome) {
+  window._malhaCliente = (window._malhaCliente === nome) ? null : nome;
+  const s1 = malhaStatsDoMes(window._malhaMes1), s2 = malhaStatsDoMes(window._malhaMes2);
+  const nomesCia = [...new Set([...s1.cias.keys(), ...s2.cias.keys()])]
+    .sort((a,b) => ((s2.cias.get(b)||0)+(s1.cias.get(b)||0)) - ((s2.cias.get(a)||0)+(s1.cias.get(a)||0)));
+  const bars = document.getElementById('malha-cia-bars');
+  if (bars) bars.innerHTML = adminMalhaCiaBarsHTML(nomesCia, s1, s2);
+  const detail = document.getElementById('malha-detail');
+  if (detail) detail.innerHTML = adminMalhaDetailHTML(s1, s2);
+}
+
+async function adminMalhaTab(el) {
+  el.innerHTML = `
+    <div class="adm-section-header"><span>Malha aérea</span></div>
+    <div class="adm-empty-state">
+      <i class="ti ti-loader-2" style="font-size:32px;opacity:.4;animation:spin 1s linear infinite" aria-hidden="true"></i>
+      <p>Verificando dados...</p>
+    </div>`;
+
+  if (!adminFiles.malha) {
+    el.innerHTML = `
       <div class="adm-section-header"><span>Malha aérea</span></div>
       <div class="adm-empty-state">
         <i class="ti ti-plane-off" style="font-size:32px;opacity:.2" aria-hidden="true"></i>
-        <p>Carregue o arquivo <strong>Malha aérea</strong> (RVPE127_*.CSV) na aba Arquivos.</p>
+        <p>Carregue o arquivo <strong>Malha aérea</strong> (RVPE127_*.CSV) na aba Arquivos. Dá pra subir os meses que quiser de uma vez, tanto pelo card quanto pelo upload em lote.</p>
         <button class="adm-btn-primary" onclick="adminTabSwitch('files', document.querySelectorAll('.adm-tab-btn')[1])">
           Ir para Arquivos
         </button>
       </div>`;
+    return;
   }
 
-  // Build ranking from malhaVoos if available
-  const rows = [];
-  if (typeof malhaVoos !== 'undefined' && malhaVoos.size) {
-    for (const [base, dayMap] of malhaVoos) {
-      const total = [...dayMap.values()].reduce((a,b)=>a+b,0);
-      const avg   = Math.round(total / dayMap.size);
-      const max   = Math.max(...dayMap.values());
-      const min   = Math.min(...dayMap.values());
-      rows.push({ base, total, avg, max, min });
-    }
-    rows.sort((a,b)=>b.total-a.total);
+  el.innerHTML = `
+    <div class="adm-section-header"><span>Malha aérea</span></div>
+    ${adminProgressHTML('adm-malha-progress', 'Carregando voos...')}`;
+
+  await adminLoadFileOnDemand('malha', (loaded, total) =>
+    adminUpdateProgress('adm-malha-progress', loaded, total, 'Carregando voos...'));
+
+  if (!window.malhaRows?.length) {
+    el.innerHTML = `
+      <div class="adm-section-header"><span>Malha aérea</span></div>
+      <div class="adm-empty-state"><p>Não foi possível carregar os dados da malha.</p></div>`;
+    return;
   }
 
-  return `
-    <div class="adm-section-header">
-      <span>Malha aérea · ${adminFiles.malha.count.toLocaleString()} voos · ${adminFiles.malha.bases} bases</span>
-      <span style="font-size:11px;color:var(--text-muted)">${adminFiles.malha.period}</span>
-    </div>
-    ${rows.length ? `
-    <div class="adm-table-wrap">
-      <table class="adm-table">
-        <thead>
-          <tr><th>Base</th><th class="r">Total voos</th><th class="r">Média/dia</th><th class="r">Dia mais tranquilo</th><th class="r">Dia mais intenso</th></tr>
-        </thead>
-        <tbody>
-          ${rows.map(r => `
-            <tr>
-              <td style="font-weight:600"><span class="adm-base-tag">${r.base}</span></td>
-              <td class="r">${r.total.toLocaleString()}</td>
-              <td class="r">${r.avg}</td>
-              <td class="r" style="color:#72c02c">${r.min} voos</td>
-              <td class="r" style="color:#ef4444">${r.max} voos</td>
-            </tr>`).join('')}
-        </tbody>
-      </table>
-    </div>` : `<div class="adm-empty-state"><p>Dados da malha carregados. Processe para ver o ranking.</p></div>`}`;
+  const bases = malhaBasesDisponiveis();
+  if (window._malhaBase === undefined) window._malhaBase = bases[0] || null;
+  const meses = malhaMesesDisponiveis(window._malhaBase);
+  if (!window._malhaMes1 || !meses.includes(window._malhaMes1)) window._malhaMes1 = meses[meses.length-2] || meses[0] || null;
+  if (!window._malhaMes2 || !meses.includes(window._malhaMes2)) window._malhaMes2 = meses[meses.length-1] || null;
+  window._malhaCliente = null;
+
+  adminMalhaRenderDash(el);
 }
 
 // ══════════════════════════════════════════════════════
@@ -1850,12 +2046,13 @@ async function _adminLoadFileOnDemandRun(folder, onProgress) {
   }
 
   if (folder === 'malha') {
-    if (typeof malhaVoos !== 'undefined' && malhaVoos?.size > 0) return true;
+    if (window.malhaRows?.length) return true;
     try {
-      console.log('[onDemand] Loading malha from DB...');
-      const { data, error } = await db.from('malha').select('base,data,hora_chegada,hora_saida');
-      if (error || !data?.length) return false;
-      // Build malhaVoos Map<base, Map<date, count>>
+      const { count } = await db.from('malha').select('*', { count:'exact', head:true });
+      if (!count) return false;
+      const data = await _adminFetchAllPaged('malha', count, onProgress);
+      if (!data.length) return false;
+      window.malhaRows = data; // histórico completo, granular — usado no dashboard de comparação
       malhaVoos = new Map();
       data.forEach(r => {
         if (!malhaVoos.has(r.base)) malhaVoos.set(r.base, new Map());
