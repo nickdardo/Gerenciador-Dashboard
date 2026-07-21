@@ -1524,40 +1524,41 @@ async function adminAutoLoadFiles() {
       console.log(`[autoLoad] malha: ${cMal} registros no banco`);
     }
 
-    // ── Férias, Desligamentos, PCD (pequenos — carrega tudo de uma vez) ──
-    const [feriasRes, desligRes, pcdRes] = await Promise.all([
-      db.from('colaboradores_ferias').select('matricula,data_inicio,data_fim,dias'),
-      db.from('colaboradores_desligados').select('matricula,data_demissao,causa_texto'),
-      db.from('colaboradores_pcd').select('matricula,deficiencia,base'),
+    // ── Férias, Desligamentos, PCD — podem passar de 1000 linhas com o
+    //    histórico acumulado, então usamos dbFetchAll (pagina sozinho) ──
+    const [feriasData, desligData, pcdData] = await Promise.all([
+      dbFetchAll('colaboradores_ferias', 'matricula,data_inicio,data_fim,dias'),
+      dbFetchAll('colaboradores_desligados', 'matricula,data_demissao,causa_texto'),
+      dbFetchAll('colaboradores_pcd', 'matricula,deficiencia,base'),
     ]);
 
-    if (feriasRes.data?.length) {
+    if (feriasData.length) {
       // Mantém, por matrícula, o período de férias mais relevante (o que
       // termina mais tarde — cobre o caso de estar em férias agora).
       const byMat = new Map();
-      for (const r of feriasRes.data) {
+      for (const r of feriasData) {
         const prev = byMat.get(r.matricula);
         if (!prev || (r.data_fim||'') > (prev.data_fim||'')) byMat.set(r.matricula, r);
       }
       window.eoFerias = byMat;
-      adminFiles.ferias = { count: feriasRes.data.length, date: 'banco' };
-      console.log(`[autoLoad] ferias: ${feriasRes.data.length} registros no banco`);
+      adminFiles.ferias = { count: feriasData.length, date: 'banco' };
+      console.log(`[autoLoad] ferias: ${feriasData.length} registros no banco`);
     }
 
-    if (desligRes.data?.length) {
+    if (desligData.length) {
       const byMat = new Map();
-      for (const r of desligRes.data) {
+      for (const r of desligData) {
         const prev = byMat.get(r.matricula);
         if (!prev || (r.data_demissao||'') > (prev.data_demissao||'')) byMat.set(r.matricula, r);
       }
       window.eoDesligados = byMat;
-      adminFiles.desligados = { count: desligRes.data.length, date: 'banco' };
-      console.log(`[autoLoad] desligados: ${desligRes.data.length} registros no banco`);
+      adminFiles.desligados = { count: desligData.length, date: 'banco' };
+      console.log(`[autoLoad] desligados: ${desligData.length} registros no banco`);
     }
 
-    if (pcdRes.data?.length) {
-      window.eoPcd = new Map(pcdRes.data.map(r => [r.matricula, r]));
-      adminFiles.pcd = { count: pcdRes.data.length, date: 'banco' };
+    if (pcdData.length) {
+      window.eoPcd = new Map(pcdData.map(r => [r.matricula, r]));
+      adminFiles.pcd = { count: pcdData.length, date: 'banco' };
       console.log(`[autoLoad] pcd: ${pcdRes.data.length} colaboradores no banco`);
     }
 
@@ -1813,7 +1814,7 @@ async function adminPrecomputeAderencia(mes) {
   // excluir essas matrículas do cálculo de aderência).
   if (!window.eoDesligados) {
     try {
-      const { data } = await db.from('colaboradores_desligados').select('matricula,data_demissao,causa_texto');
+      const data = await dbFetchAll('colaboradores_desligados', 'matricula,data_demissao,causa_texto');
       if (data?.length) {
         const byMat = new Map();
         for (const r of data) {

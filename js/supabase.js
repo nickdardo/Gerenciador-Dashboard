@@ -6,6 +6,24 @@ const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFz
 
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 
+// ── Busca TODAS as linhas de uma tabela, ignorando o limite padrão de 1000
+// linhas por consulta do Supabase. Usar sempre que a tabela puder crescer
+// além disso (histórico acumulado de férias/desligamentos/pcd, por ex.) —
+// um select() simples trunca silenciosamente, sem erro, então é fácil passar
+// despercebido até os dados crescerem o suficiente pra estourar o limite.
+async function dbFetchAll(table, columns) {
+  const { count } = await db.from(table).select('*', { count: 'exact', head: true });
+  if (!count) return [];
+  const PAGE = 1000;
+  const all = [];
+  for (let from = 0; from < count; from += PAGE) {
+    const { data, error } = await db.from(table).select(columns).range(from, from + PAGE - 1);
+    if (error) throw new Error(error.message);
+    if (data) all.push(...data);
+  }
+  return all;
+}
+
 // ── Auth helpers ──────────────────────────────────────
 
 async function authSignIn(email, password) {

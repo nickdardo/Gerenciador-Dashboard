@@ -62,7 +62,7 @@ async function hcEnsureData() {
   if (typeof adhEnsureRoster === 'function') await adhEnsureRoster();
   if (!window.eoFerias) {
     try {
-      const { data } = await db.from('colaboradores_ferias').select('matricula,data_inicio,data_fim,dias');
+      const data = await dbFetchAll('colaboradores_ferias', 'matricula,data_inicio,data_fim,dias');
       const byMat = new Map();
       for (const r of (data||[])) {
         const prev = byMat.get(r.matricula);
@@ -73,7 +73,7 @@ async function hcEnsureData() {
   }
   if (!window.eoDesligadosAll) {
     try {
-      const { data } = await db.from('colaboradores_desligados').select('matricula,filial,nome,cargo,ch,data_demissao,causa_texto');
+      const data = await dbFetchAll('colaboradores_desligados', 'matricula,filial,nome,cargo,ch,data_demissao,causa_texto');
       const byMat = new Map();
       for (const r of (data||[])) {
         const prev = byMat.get(r.matricula);
@@ -85,7 +85,7 @@ async function hcEnsureData() {
   }
   if (!window.eoPcd) {
     try {
-      const { data } = await db.from('colaboradores_pcd').select('matricula,nome,cargo,deficiencia,base');
+      const data = await dbFetchAll('colaboradores_pcd', 'matricula,nome,cargo,deficiencia,base');
       window.eoPcd = new Map((data||[]).map(r => [r.matricula, r]));
     } catch(e) { console.warn('[headcount] pcd:', e.message); window.eoPcd = new Map(); }
   }
@@ -471,18 +471,83 @@ function hcOpenDesligados() {
   hcRenderDesligados(window._hcCurrentEl);
 }
 
-function hcRenderDesligados(el) {
+function hcDeslAllForBase() {
   const base = window._hcBase;
+  return (window.eoDesligadosAll || []).filter(r => {
+    if (base && (r.filial||'').toUpperCase() !== base.toUpperCase()) return false;
+    return !!r.data_demissao;
+  });
+}
+
+function hcDeslFilteredRows() {
+  const period = window._hcDeslPeriod || '12m';
+  const term = (window._hcDeslSearch || '').trim().toUpperCase();
   const hoje = new Date();
   const ha12m = new Date(hoje.getFullYear(), hoje.getMonth()-12, hoje.getDate());
 
-  let rows = (window.eoDesligadosAll || []).filter(r => {
-    if (base && (r.filial||'').toUpperCase() !== base.toUpperCase()) return false;
-    if (!r.data_demissao) return false;
-    const d = new Date(r.data_demissao);
-    return d >= ha12m && d <= hoje;
-  });
-  rows = rows.sort((a,b) => (b.data_demissao||'').localeCompare(a.data_demissao||''));
+  let rows = hcDeslAllForBase();
+  if (period === '12m') {
+    rows = rows.filter(r => { const d = new Date(r.data_demissao); return d >= ha12m && d <= hoje; });
+  } else if (period !== 'todos') {
+    rows = rows.filter(r => String(r.data_demissao).slice(0,7) === period);
+  }
+  if (term) {
+    rows = rows.filter(r =>
+      (r.nome||'').toUpperCase().includes(term) ||
+      String(r.matricula||'').includes(term) ||
+      (r.causa_texto||'').toUpperCase().includes(term));
+  }
+  return rows.sort((a,b) => (b.data_demissao||'').localeCompare(a.data_demissao||''));
+}
+
+// "Últimos 12 meses" e "Tudo" sempre disponíveis; os meses específicos vêm
+// dinamicamente de quais meses realmente têm desligamento nessa base — se o
+// arquivo tiver 2024, 2025 e 2026, os três aparecem aqui sozinhos.
+function hcDeslPeriodOptionsHTML() {
+  const meses = [...new Set(hcDeslAllForBase().map(r => String(r.data_demissao).slice(0,7)))].sort().reverse();
+  const cur = window._hcDeslPeriod || '12m';
+  return `
+    <option value="12m"   ${cur==='12m'  ?'selected':''}>Últimos 12 meses</option>
+    <option value="todos" ${cur==='todos'?'selected':''}>Tudo</option>
+    ${meses.map(m => `<option value="${m}" ${cur===m?'selected':''}>${adhMonthLabel(m)}</option>`).join('')}
+  `;
+}
+
+function hcSetDeslPeriod(value) {
+  window._hcDeslPeriod = value;
+  hcRenderDesligados(window._hcCurrentEl);
+}
+
+function hcSetDeslSearch(value) {
+  window._hcDeslSearch = value;
+  const body = document.getElementById('hc-desl-tbody');
+  if (body) body.innerHTML = hcDeslRowsHTML();
+  const countEl = document.getElementById('hc-desl-count');
+  if (countEl) { const n = hcDeslFilteredRows().length; countEl.textContent = `${n.toLocaleString('pt-BR')} registro${n===1?'':'s'}`; }
+}
+
+function hcDeslRowsHTML() {
+  const rows = hcDeslFilteredRows();
+  if (!rows.length) {
+    return `<tr><td colspan="7" style="padding:24px 10px;text-align:center;color:var(--text-muted);font-size:12px">Nenhum desligamento encontrado nesse período.</td></tr>`;
+  }
+  return rows.map(r => `<tr class="adh-colab-row">
+    <td style="font-family:monospace;font-size:11px">${r.matricula}</td>
+    <td>${r.filial}</td>
+    <td style="font-weight:500">${r.nome||''}</td>
+    <td style="color:var(--text-muted);font-size:11px">${r.cargo||''}</td>
+    <td class="r">${r.ch?r.ch+'h':'—'}</td>
+    <td style="font-size:11px">${hcFmtISODate(r.data_demissao)||'—'}</td>
+    <td style="font-size:11px;color:var(--text-muted)">${r.causa_texto||'—'}</td>
+  </tr>`).join('');
+}
+
+function hcRenderDesligados(el) {
+  const base = window._hcBase;
+  if (window._hcDeslPeriod == null) window._hcDeslPeriod = '12m';
+  const period = window._hcDeslPeriod;
+  const periodLabel = period === '12m' ? 'Últimos 12 meses' : period === 'todos' ? 'Todo o período' : adhMonthLabel(period);
+  const rows = hcDeslFilteredRows();
 
   el.innerHTML = `
     <div class="hc-wrap">
@@ -495,29 +560,26 @@ function hcRenderDesligados(el) {
           </button>
           <div>
             <h1 class="page-title">Desligamentos ${base?`<span class="adh-base-badge">${base}</span>`:''}</h1>
-            <p class="page-sub">Últimos 12 meses · ${rows.length.toLocaleString('pt-BR')} registros</p>
+            <p class="page-sub">${periodLabel} · <span id="hc-desl-count">${rows.length.toLocaleString('pt-BR')} registro${rows.length===1?'':'s'}</span></p>
           </div>
         </div>
+        <select class="adh-month-select" onchange="hcSetDeslPeriod(this.value)">
+          ${hcDeslPeriodOptionsHTML()}
+        </select>
       </div>
 
       <div class="hc-panel">
+        <div class="adh-search-wrap" style="margin-bottom:12px;max-width:340px">
+          <i class="ti ti-search" aria-hidden="true"></i>
+          <input type="text" class="adh-search-input" placeholder="Buscar por nome, matrícula ou causa..." oninput="hcSetDeslSearch(this.value)" value="${window._hcDeslSearch||''}">
+        </div>
         <div class="adh-colab-table-wrap">
           <table class="adh-colab-table">
             <thead><tr>
               <th>Matrícula</th><th>Filial</th><th>Nome</th><th>Cargo</th>
               <th class="r">CH</th><th>Demissão</th><th>Causa</th>
             </tr></thead>
-            <tbody>
-              ${rows.map(r => `<tr class="adh-colab-row">
-                <td style="font-family:monospace;font-size:11px">${r.matricula}</td>
-                <td>${r.filial}</td>
-                <td style="font-weight:500">${r.nome||''}</td>
-                <td style="color:var(--text-muted);font-size:11px">${r.cargo||''}</td>
-                <td class="r">${r.ch?r.ch+'h':'—'}</td>
-                <td style="font-size:11px">${hcFmtISODate(r.data_demissao)||'—'}</td>
-                <td style="font-size:11px;color:var(--text-muted)">${r.causa_texto||'—'}</td>
-              </tr>`).join('')}
-            </tbody>
+            <tbody id="hc-desl-tbody">${hcDeslRowsHTML()}</tbody>
           </table>
         </div>
       </div>
