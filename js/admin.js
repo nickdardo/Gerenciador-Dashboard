@@ -209,7 +209,10 @@ function adminUsersTab(users, preconfig = []) {
                 <span style="font-size:11px">${u.ativo?'Ativo':'Inativo'}</span>
               </td>
               <td style="color:var(--text-muted);font-size:11px">${new Date(u.created_at).toLocaleDateString('pt-BR')}</td>
-              <td><button class="adm-btn-edit" onclick="adminEditUser('${u.id}')">Editar</button></td>
+              <td style="white-space:nowrap">
+                <button class="adm-btn-edit" onclick="adminEditUser('${u.id}')">Editar</button>
+                ${u.id === currentUser?.id ? '' : `<button class="adm-btn-edit" style="color:#fc8181" onclick="adminDeleteUser('${u.id}','${(u.nome||u.email).replace(/'/g,"\\'")}')">Excluir</button>`}
+              </td>
             </tr>`).join('')}
         </tbody>
       </table>
@@ -2085,6 +2088,13 @@ async function adminDeletePreconfig(id) {
   adminRender();
 }
 
+async function adminDeleteUser(userId, nome) {
+  if (!confirm(`Excluir a conta de ${nome}?\n\nEssa ação é irreversível: a pessoa perde o acesso agora mesmo e o cadastro é apagado de vez.`)) return;
+  const { error } = await db.rpc('admin_delete_user', { p_user_id: userId });
+  if (error) { alert('Não foi possível excluir: ' + error.message); return; }
+  adminRender();
+}
+
 // ══════════════════════════════════════════════════════
 // AUTO-LOAD — Lightweight startup, heavy files on demand
 // ══════════════════════════════════════════════════════
@@ -2430,6 +2440,16 @@ async function adminPrecomputeAderencia(mes) {
     return `${p[2]}-${p[1]}`;
   }
 
+  // D-1: só considera dias até ONTEM (exclui hoje) — igual o cálculo em
+  // tempo real (aderencia.js), pra não desalinhar o valor pré-computado.
+  function adminDataAteOntem(dstr) {
+    const p = String(dstr||'').split('/');
+    if (p.length !== 3) return true;
+    const d = new Date(parseInt(p[2],10), parseInt(p[1],10)-1, parseInt(p[0],10));
+    const hoje = new Date(); hoje.setHours(0,0,0,0);
+    return d < hoje;
+  }
+
   // Precisamos do cadastro completo (cargo de cada matrícula) para aplicar a
   // isenção de ponto de Gerentes/Coordenadores — garante que já carregou.
   if (!window.eoColabs?.size && typeof adhEnsureRoster === 'function') {
@@ -2465,7 +2485,7 @@ async function adminPrecomputeAderencia(mes) {
   const horByKey = new Map();
   for (const [key, h] of pontoHorarios) {
     const [filialRaw, mat, data] = key.split('|');
-    if (adminMesDaData(data) !== mes) continue; // fora do mês alvo
+    if (adminMesDaData(data) !== mes || !adminDataAteOntem(data)) continue; // fora do mês alvo ou é hoje/futuro (D-1)
     horByKey.set(`${(filialRaw||'').toUpperCase()}|${mat}|${data}`, h);
   }
 
@@ -2477,7 +2497,7 @@ async function adminPrecomputeAderencia(mes) {
   const colabAcc = new Map(); // "FILIAL|mat" → accum
   for (const [key, m] of pontoMarcacao) {
     const [filialRaw, mat, data] = key.split('|');
-    if (adminMesDaData(data) !== mes) continue; // fora do mês alvo
+    if (adminMesDaData(data) !== mes || !adminDataAteOntem(data)) continue; // fora do mês alvo ou é hoje/futuro (D-1)
     const filial = (filialRaw||'').toUpperCase();
     if (ADH_EXCL.has(filial)) continue;
 
@@ -2529,7 +2549,7 @@ async function adminPrecomputeAderencia(mes) {
     const filial = (h.filial||'').toUpperCase();
     if (ADH_EXCL.has(filial)) continue;
     const [, , data] = key.split('|');
-    if (adminMesDaData(data) !== mes) continue; // fora do mês alvo
+    if (adminMesDaData(data) !== mes || !adminDataAteOntem(data)) continue; // fora do mês alvo ou é hoje/futuro (D-1)
     const ck = `${filial}|${h.mat}`;
     const minP = dfc(h.ent1,h.sai1) + (h.ent2 && h.sai2 ? dfc(h.ent2,h.sai2) : 0);
     if (!totalMpByPerson.has(ck)) totalMpByPerson.set(ck, { mp: 0, nome: h.nome || '' });

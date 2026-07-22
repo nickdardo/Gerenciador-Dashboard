@@ -219,6 +219,26 @@ function adhMesDaData(dstr) {
   return `${p[2]}-${p[1]}`;
 }
 
+// D-1: só considera dias até ONTEM (exclui hoje) — um turno em andamento
+// mostra "horas trabalhadas" abaixo do "programado" só porque ainda não
+// acabou, o que infla artificialmente o déficit do dia. Confirmado com o
+// cliente que isso deixa o número mais real.
+function adhDataAteOntem(dstr) {
+  const p = String(dstr||'').split('/');
+  if (p.length !== 3) return true; // não conseguiu ler a data — não filtra
+  const d = new Date(parseInt(p[2],10), parseInt(p[1],10)-1, parseInt(p[0],10));
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  return d < hoje;
+}
+
+// Rótulo "até DD/MM" (ontem) — mostrado no cabeçalho pra deixar claro que
+// hoje não entra no cálculo (D-1), evitando um turno em andamento inflar
+// o déficit do dia.
+function adhOntemLabel() {
+  const ontem = new Date(); ontem.setHours(0,0,0,0); ontem.setDate(ontem.getDate()-1);
+  return `${String(ontem.getDate()).padStart(2,'0')}/${String(ontem.getMonth()+1).padStart(2,'0')}`;
+}
+
 const ADH_MESES_PT = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 function adhMonthLabel(mes) {
   const [y,m] = String(mes||'').split('-');
@@ -296,7 +316,7 @@ function adhBuildKPI(mes) {
   const horByKey = new Map();
   for (const [key, h] of pontoHorarios) {
     const [filialRaw, mat, data] = key.split('|');
-    if (adhMesDaData(data) !== mes) continue; // fora do mês alvo
+    if (adhMesDaData(data) !== mes || !adhDataAteOntem(data)) continue; // fora do mês alvo ou é hoje/futuro (D-1)
     horByKey.set(`${(filialRaw||'').toUpperCase()}|${mat}|${data}`, h);
   }
 
@@ -307,7 +327,7 @@ function adhBuildKPI(mes) {
   const colabAcc = new Map(); // "FILIAL|mat" → accum
   for (const [key, m] of pontoMarcacao) {
     const [filialRaw, mat, data] = key.split('|');
-    if (adhMesDaData(data) !== mes) continue; // fora do mês alvo
+    if (adhMesDaData(data) !== mes || !adhDataAteOntem(data)) continue; // fora do mês alvo ou é hoje/futuro (D-1)
     const filial = (filialRaw||'').toUpperCase();
     if (ADH_EXCLUDE.has(filial)) continue;
 
@@ -357,7 +377,7 @@ function adhBuildKPI(mes) {
     const filial = (h.filial||'').toUpperCase();
     if (ADH_EXCLUDE.has(filial)) continue;
     const [, , data] = key.split('|');
-    if (adhMesDaData(data) !== mes) continue; // fora do mês alvo
+    if (adhMesDaData(data) !== mes || !adhDataAteOntem(data)) continue; // fora do mês alvo ou é hoje/futuro (D-1)
     const ck = `${filial}|${h.mat}`;
     const minP = adhMinDiff(adhTimeToMin(h.ent1), adhTimeToMin(h.sai1))
       + (h.ent2 && h.sai2 ? adhMinDiff(adhTimeToMin(h.ent2), adhTimeToMin(h.sai2)) : 0);
@@ -519,7 +539,7 @@ async function pageAderencia(el) {
   el.innerHTML = `
     <div class="page-header">
       <div><h1 class="page-title">Aderência ao Ponto</h1>
-        <p class="page-sub">Planejado vs realizado · fórmula: MAX(0, 100 - Desvio/Programado × 100) · ${adhMonthLabel(mes)}</p>
+        <p class="page-sub">Planejado vs realizado · fórmula: MAX(0, 100 - Desvio/Programado × 100) · ${adhMonthLabel(mes)} · dados até ${adhOntemLabel()}</p>
       </div>
     </div>
     <div class="adm-progress-wrap" id="adh-load-progress">
@@ -543,8 +563,8 @@ async function pageAderencia(el) {
   const rosterPromise = adhEnsureRoster();
 
   // ── LAYER 1: localStorage cache (instantâneo) — uma cache por mês ──
-  const CACHE_KEY = 'adh_kpi_cache_' + mes;
-  const CACHE_TS  = 'adh_kpi_ts_' + mes;
+  const CACHE_KEY = 'adh_kpi_cache_v2_' + mes;
+  const CACHE_TS  = 'adh_kpi_ts_v2_' + mes;
   const CACHE_MAX = 8 * 60 * 60 * 1000; // 8 hours
 
   try {
@@ -817,7 +837,7 @@ async function adhRenderMultiBase(el) {
       <div class="adh-full-header">
         <div>
           <h1 class="adh-full-title">Aderência ao Ponto</h1>
-          <p class="adh-full-sub">Todas as bases · ${adhMonthLabel(mes)}</p>
+          <p class="adh-full-sub">Todas as bases · ${adhMonthLabel(mes)} · dados até ${adhOntemLabel()}</p>
           ${lastUpdateBadgeHTML()}
         </div>
         <div style="display:flex;align-items:center;gap:12px">
@@ -1288,7 +1308,7 @@ function adhRenderDetalhe(el, base, showBack) {
               Aderência ao Ponto
               ${base ? `<span class="adh-base-badge">${base}</span>` : ''}
             </h1>
-            <p class="adh-full-sub">Horas trabalhadas ÷ horas programadas · ${adhMonthLabel(window._adhMes || adhCurrentMonth())}</p>
+            <p class="adh-full-sub">Horas trabalhadas ÷ horas programadas · ${adhMonthLabel(window._adhMes || adhCurrentMonth())} · dados até ${adhOntemLabel()}</p>
             ${lastUpdateBadgeHTML()}
           </div>
         </div>
