@@ -41,24 +41,8 @@ async function pageEscala(el) {
     window._escalaMes = window._genMes || (typeof adhCurrentMonth === 'function' ? adhCurrentMonth() : null);
   }
   if (!window._escalaDiaSelecionado) window._escalaDiaSelecionado = 1;
-  if (!window._escalaModo) window._escalaModo = 'geral';
 
-  if (window._escalaModo === 'grade') await escalaRenderGrade(el);
-  else await escalaRenderDash(el);
-}
-
-function escalaModoTogglesHTML() {
-  const modo = window._escalaModo || 'geral';
-  return `
-    <div class="malha-toggle-group">
-      <button class="malha-toggle ${modo==='geral'?'active':''}" onclick="escalaSetModo('geral')">Visão geral</button>
-      <button class="malha-toggle ${modo==='grade'?'active':''}" onclick="escalaSetModo('grade')">Montar escala</button>
-    </div>`;
-}
-
-function escalaSetModo(modo) {
-  window._escalaModo = modo;
-  pageEscala(document.getElementById('page-content'));
+  await escalaRenderGrade(el);
 }
 
 function escalaMesOptionsHTML(mesAtualSelecionado) {
@@ -136,7 +120,6 @@ async function escalaRenderDash(el) {
         <p class="page-sub">Calendário mensal · ${base} · ${typeof adhMonthLabel==='function'?adhMonthLabel(mes):mes}${demandaPorDia?' · demanda real (malha de voos)':''}</p>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
-        ${escalaModoTogglesHTML()}
         ${bases.length>1
           ? `<select class="adh-month-select" onchange="escalaSetBase(this.value)">${bases.map(b=>`<option value="${b}" ${b===base?'selected':''}>${b}</option>`).join('')}</select>`
           : `<span class="adh-base-badge">${base||'—'}</span>`}
@@ -394,16 +377,39 @@ async function escalaRenderGrade(el) {
   window._escalaColabs = colabs || [];
   window._escalaDias = new Map((dias||[]).map(d => [`${d.matricula}|${d.dia}`, d]));
 
-  // Demanda de voos/dia desse mês, pra alinhar em cima da grade e alimentar
-  // a geração automática de folgas (mesma malha real da Parte 2).
+  // Demanda de pessoal por dia — reaproveita o motor da Parte 2 (parâmetros
+  // de solo × malha de voos real). Isso alimenta a linha "NECESSÁRIO" no
+  // topo da grade e a geração automática de folgas.
   const [ano, mesNum] = mes.split('-').map(Number);
   const diasNoMes = new Date(ano, mesNum, 0).getDate();
   const mesInicioStr = `${mes}-01`;
   const mesFimStr = `${mes}-${String(diasNoMes).padStart(2,'0')}`;
-  const { data: voos } = await db.from('malha').select('data').eq('base', base).gte('data', mesInicioStr).lte('data', mesFimStr);
+
+  const { data: paramRows } = await db.from('escala_parametro_solo')
+    .select('*').in('base', [base, '']).eq('ativo', true);
+  const parametrosEfetivos = escalaMesclarParametros(paramRows || [], base);
+
+  const { data: voosRows } = await db.from('malha')
+    .select('data,tipo,cia,hora_chegada,hora_saida')
+    .eq('base', base).gte('data', mesInicioStr).lte('data', mesFimStr);
+
+  window._escalaDemandaPorDia = null;
   const voosPorDia = new Array(diasNoMes).fill(0);
-  (voos||[]).forEach(v => { const d = parseInt(v.data.slice(8,10),10); if (d>=1 && d<=diasNoMes) voosPorDia[d-1]++; });
+  (voosRows||[]).forEach(v => { const d = parseInt(v.data.slice(8,10),10); if (d>=1 && d<=diasNoMes) voosPorDia[d-1]++; });
   window._escalaVoosPorDia = voosPorDia;
+
+  if (parametrosEfetivos.length && voosRows?.length) {
+    const voosPorDiaMap = new Map();
+    voosRows.forEach(v => {
+      const dia = parseInt(v.data.slice(8,10), 10);
+      if (!voosPorDiaMap.has(dia)) voosPorDiaMap.set(dia, []);
+      voosPorDiaMap.get(dia).push(v);
+    });
+    window._escalaDemandaPorDia = new Map();
+    for (const [dia, voosDoDia] of voosPorDiaMap) {
+      window._escalaDemandaPorDia.set(dia, escalaDemandaDoDia(voosDoDia, parametrosEfetivos));
+    }
+  }
 
   escalaGradeRenderShell(el, ano, mesNum, diasNoMes);
 }
@@ -418,7 +424,6 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
         <p class="page-sub">Montar escala · ${base} · ${typeof adhMonthLabel==='function'?adhMonthLabel(mes):mes}</p>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
-        ${escalaModoTogglesHTML()}
         <select class="adh-month-select" onchange="escalaSetMes(this.value)">${escalaMesOptionsHTML(mes)}</select>
       </div>
     </div>
@@ -436,10 +441,11 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
     </div>
 
     <div class="hc-panel">
-      <div style="display:flex;gap:14px;margin-bottom:12px;font-size:11px;color:var(--text-secondary)">
+      <div style="display:flex;gap:14px;margin-bottom:12px;font-size:11px;color:var(--text-secondary);flex-wrap:wrap">
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:var(--text-muted);margin-right:5px"></span>F · Folga</span>
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#a78bfa;margin-right:5px"></span>FA · Folga agrupada</span>
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#c9a24a;margin-right:5px"></span>J · Afastado (férias)</span>
+        <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#fc8181;margin-right:5px"></span>L · Licença</span>
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#38bdf8;margin-right:5px"></span>K · Cursos</span>
         <span style="color:var(--text-muted)">clique numa célula vazia ou de trabalho pra marcar F/K</span>
       </div>
@@ -475,58 +481,106 @@ function escalaHorarioPlanejado(base, matricula, ano, mesNum, dia) {
   return h.sai1 ? `${h.ent1}-${h.sai1}` : h.ent1;
 }
 
-function escalaCelulaConteudo(c, ano, mesNum, dia) {
-  const key = `${c.matricula}|${dia}`;
-  const manual = window._escalaDias.get(key);
-  if (manual) {
-    const cor = manual.status === 'K' ? '#38bdf8' : 'var(--text-muted)';
-    return { html: `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:${cor}22;color:${cor};border-radius:4px;font-weight:700;font-size:10px">${manual.status}</div>`, editavel: true };
+function escalaConteudoDoMes(c, ano, mesNum, diasNoMes) {
+  const base = window._escalaBase;
+  const brutos = [];
+  for (let d = 1; d <= diasNoMes; d++) {
+    const key = `${c.matricula}|${d}`;
+    const manual = window._escalaDias.get(key);
+    if (manual) { brutos.push(manual.status); continue; } // 'F' | 'K' | 'L'
+    if (escalaEstaDeFerias(c.matricula, ano, mesNum, d)) { brutos.push('J'); continue; }
+    brutos.push(null); // dia de trabalho
   }
-  if (escalaEstaDeFerias(c.matricula, ano, mesNum, dia)) {
-    return { html: `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:#c9a24a22;color:#c9a24a;border-radius:4px;font-weight:700;font-size:10px" title="Férias — vem do cadastro, automático">J</div>`, editavel: false };
+  return brutos.map((s, i) => {
+    if (s === 'F') {
+      const antes  = brutos[i-1] === 'F';
+      const depois = brutos[i+1] === 'F';
+      return { status: 'F', exibido: (antes||depois) ? 'FA' : 'F', editavel: true };
+    }
+    if (s === 'K') return { status: 'K', exibido: 'K', editavel: true };
+    if (s === 'L') return { status: 'L', exibido: 'L', editavel: true };
+    if (s === 'J') return { status: 'J', exibido: 'J', editavel: false };
+    const dia = i+1;
+    const horario = escalaHorarioPlanejado(base, c.matricula, ano, mesNum, dia);
+    return { status: null, exibido: horario, editavel: true, horario: !!horario };
+  });
+}
+
+function escalaCelHTML(item) {
+  if (!item.exibido) return '';
+  if (item.horario) {
+    return `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--text-secondary);font-size:9px" title="Horário planejado (automático, vem do arquivo Horários)">${item.exibido}</div>`;
   }
-  const horario = escalaHorarioPlanejado(window._escalaBase, c.matricula, ano, mesNum, dia);
-  if (horario) {
-    return { html: `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--text-secondary);font-size:9px" title="Horário planejado (automático)">${horario}</div>`, editavel: true };
-  }
-  return { html: '', editavel: true };
+  const cores = { F:'#8896aa', FA:'#a78bfa', J:'#c9a24a', L:'#fc8181', K:'#38bdf8' };
+  const cor = cores[item.exibido] || '#8896aa';
+  const titulo = item.status === 'J' ? 'Férias — automático, vem do cadastro' : '';
+  return `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:${cor}22;color:${cor};border-radius:4px;font-weight:700;font-size:10px" title="${titulo}">${item.exibido}</div>`;
 }
 
 function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   const colabs = window._escalaColabs || [];
+  const demandaPorDia = window._escalaDemandaPorDia;
   const voosPorDia = window._escalaVoosPorDia || [];
-  const maxVoos = Math.max(1, ...voosPorDia);
+
+  const necessidade = new Array(diasNoMes).fill(0);
+  for (let d = 1; d <= diasNoMes; d++) {
+    necessidade[d-1] = demandaPorDia ? escalaPicoDoDia(d) : (voosPorDia[d-1] || 0);
+  }
+  const maxNec = Math.max(1, ...necessidade);
+  const labelTopo = demandaPorDia ? 'NECESSÁRIO' : 'VOOS/DIA';
 
   let html = `<table style="border-collapse:collapse;font-size:11px;width:100%"><thead><tr>`;
-  html += `<th style="text-align:left;padding:6px 10px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;position:sticky;left:0;background:var(--bg-surface);min-width:190px">Colaborador</th>`;
+  html += `<th style="text-align:left;padding:6px 8px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;position:sticky;left:0;background:var(--bg-surface);min-width:80px">Matrícula</th>`;
+  html += `<th style="text-align:left;padding:6px 8px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;position:sticky;left:80px;background:var(--bg-surface);min-width:170px">Colaborador</th>`;
+  html += `<th style="text-align:left;padding:6px 8px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;min-width:140px">Cargo</th>`;
+  html += `<th style="text-align:center;padding:6px 4px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;width:44px">Jorn.</th>`;
   for (let d = 1; d <= diasNoMes; d++) {
     const dow = new Date(ano, mesNum-1, d).getDay();
     html += `<th style="padding:3px 2px;color:var(--text-muted);font-size:9px;font-weight:600;width:26px;text-align:center">${ESCALA_DIAS_SEMANA[dow]}<br><span style="color:var(--text-secondary);font-size:10px">${d}</span></th>`;
   }
+  html += `<th style="text-align:center;padding:6px 4px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;width:50px">Folgas</th>`;
+  html += `<th style="text-align:center;padding:6px 4px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;width:60px">Horas trab.</th>`;
   html += `</tr></thead><tbody>`;
 
-  html += `<tr><td style="position:sticky;left:0;background:var(--bg-surface);padding:4px 10px 10px;color:#5fa87a;font-size:9px;font-weight:700;vertical-align:bottom">VOOS/DIA</td>`;
+  html += `<tr><td colspan="4" style="position:sticky;left:0;background:var(--bg-surface);padding:4px 8px 10px;color:#5fa87a;font-size:9px;font-weight:700;vertical-align:bottom">${labelTopo}</td>`;
   for (let d = 1; d <= diasNoMes; d++) {
-    const v = voosPorDia[d-1] || 0;
-    const baixa = maxVoos > 0 && v <= maxVoos*0.4;
-    html += `<td style="vertical-align:bottom;padding:0 2px 4px"><div style="height:${Math.round(v/maxVoos*36)}px;background:${baixa?'#5fa87a':'#38bdf8'};border-radius:2px 2px 0 0;margin:0 auto;width:14px" title="${v} voos"></div></td>`;
+    const v = necessidade[d-1];
+    const baixa = maxNec > 0 && v <= maxNec*0.4;
+    html += `<td style="vertical-align:bottom;padding:0 2px 4px">
+      <div style="height:${Math.round(v/maxNec*30)}px;background:${baixa?'#5fa87a':'#38bdf8'};border-radius:2px 2px 0 0;margin:0 auto;width:14px" title="${v}"></div>
+      <div style="font-size:7.5px;color:var(--text-muted);text-align:center;margin-top:2px">${v}</div>
+    </td>`;
   }
-  html += `</tr>`;
+  html += `<td></td><td></td></tr>`;
 
   if (!colabs.length) {
-    html += `<tr><td colspan="${diasNoMes+1}" style="padding:24px;text-align:center;color:var(--text-muted);font-size:11.5px;border-top:1px solid var(--border)">Nenhum colaborador adicionado ainda — busque por matrícula ou nome acima.</td></tr>`;
+    html += `<tr><td colspan="${diasNoMes+6}" style="padding:24px;text-align:center;color:var(--text-muted);font-size:11.5px;border-top:1px solid var(--border)">Nenhum colaborador adicionado ainda — busque por matrícula ou nome acima.</td></tr>`;
   }
 
   colabs.forEach(c => {
+    const info = window.eoColabs?.get(c.matricula);
+    const cargo = info?.funcao || '—';
+    const chNum = parseInt(String(info?.ch||'').replace(/\D/g,''), 10) || null;
+    const jornada = chNum ? Math.round(chNum/30*10)/10 : '—';
+
+    const conteudo = escalaConteudoDoMes(c, ano, mesNum, diasNoMes);
+    const folgas = conteudo.filter(x => x.status === 'F').length;
+    const diasTrabalhados = conteudo.filter(x => !x.status).length; // sem F/FA/J/L/K = trabalhando
+    const horasTrab = jornada !== '—' ? Math.round(diasTrabalhados * jornada) : '—';
+    const corFolgas = folgas > 10 ? '#fc8181' : folgas > 8 ? '#f6ad55' : 'var(--text-primary)';
+
     html += `<tr>`;
-    html += `<td style="padding:6px 10px;color:var(--text-primary);font-weight:500;border-top:1px solid var(--border);position:sticky;left:0;background:var(--bg-surface);white-space:nowrap">
-      <span style="color:var(--text-muted);font-family:monospace;font-size:10px;margin-right:6px">${c.matricula}</span>${c.nome||''}
-      <span onclick="escalaRemoverColab('${c.matricula}')" style="cursor:pointer;color:#fc8181;margin-left:4px" title="Remover da escala">✕</span>
-    </td>`;
-    for (let d = 1; d <= diasNoMes; d++) {
-      const cel = escalaCelulaConteudo(c, ano, mesNum, d);
-      html += `<td onclick="${cel.editavel?`escalaClicarCelula('${c.matricula}',${d})`:''}" style="padding:2px;border-top:1px solid var(--border);height:28px;width:26px;cursor:${cel.editavel?'pointer':'default'}">${cel.html}</td>`;
-    }
+    html += `<td style="padding:6px 8px;color:var(--text-muted);font-family:monospace;font-size:10px;border-top:1px solid var(--border);position:sticky;left:0;background:var(--bg-surface)">${c.matricula}</td>`;
+    html += `<td style="padding:6px 8px;color:var(--text-primary);font-weight:500;border-top:1px solid var(--border);position:sticky;left:80px;background:var(--bg-surface);white-space:nowrap">${c.nome||''}
+      <span onclick="escalaRemoverColab('${c.matricula}')" style="cursor:pointer;color:#fc8181;margin-left:4px" title="Remover da escala">✕</span></td>`;
+    html += `<td style="padding:6px 8px;color:var(--text-secondary);border-top:1px solid var(--border);white-space:nowrap">${cargo}</td>`;
+    html += `<td style="padding:6px 4px;color:var(--text-secondary);text-align:center;border-top:1px solid var(--border)">${jornada}</td>`;
+    conteudo.forEach((item, i) => {
+      const dia = i+1;
+      html += `<td onclick="${item.editavel?`escalaClicarCelula('${c.matricula}',${dia})`:''}" style="padding:2px;border-top:1px solid var(--border);height:28px;width:26px;cursor:${item.editavel?'pointer':'default'}">${escalaCelHTML(item)}</td>`;
+    });
+    html += `<td style="text-align:center;font-weight:700;color:${corFolgas};border-top:1px solid var(--border)">${folgas}</td>`;
+    html += `<td style="text-align:center;color:var(--text-secondary);border-top:1px solid var(--border)">${horasTrab}</td>`;
     html += `</tr>`;
   });
 
@@ -590,7 +644,7 @@ async function escalaRemoverColab(matricula) {
   escalaGradeAtualiza();
 }
 
-const ESCALA_CICLO_MANUAL = ['F', 'K', null];
+const ESCALA_CICLO_MANUAL = ['F', 'K', 'L', null];
 
 async function escalaClicarCelula(matricula, dia) {
   const key = `${matricula}|${dia}`;
@@ -618,7 +672,17 @@ async function escalaClicarCelula(matricula, dia) {
 // folga suficiente no mês — não mexe em dias já ocupados (F/K manuais ou
 // férias). Simples de propósito na v1: mesma quantidade de folga-alvo pra
 // todo mundo, sem levar em conta função/carga horária ainda.
-const ESCALA_META_FOLGAS_MES = 6;
+// Meta de folgas por mês, de acordo com a carga horária (CH) do colaborador
+// e a quantidade de dias do mês — confirmado com o cliente:
+//   180h → precisa trabalhar 150h/mês → 6 folgas
+//   90h  → precisa trabalhar 72h/mês  → 6 folgas em mês de 30 dias, 7 em mês de 31 dias
+// (100h/120h/210h ainda não confirmados — usam 6 como padrão até confirmar)
+function escalaMetaFolgasDoColab(ch, diasNoMes) {
+  const chNum = parseInt(String(ch||'').replace(/\D/g,''), 10);
+  if (chNum === 180) return 6;
+  if (chNum === 90)  return diasNoMes >= 31 ? 7 : 6;
+  return 6; // padrão — 100h/120h/210h ainda precisam de confirmação
+}
 
 async function escalaGerarFolgasAuto() {
   const colabs = window._escalaColabs || [];
@@ -630,14 +694,19 @@ async function escalaGerarFolgasAuto() {
   const diasOrdenados = voosPorDia.map((v,i) => ({ dia: i+1, v })).sort((a,b) => a.v-b.v);
 
   const inserts = [];
+  const metasUsadas = new Set();
   for (const c of colabs) {
+    const chColab = window.eoColabs?.get(c.matricula)?.ch;
+    const meta = escalaMetaFolgasDoColab(chColab, diasNoMes);
+    metasUsadas.add(meta);
+
     let folgasAtuais = 0;
     for (let d = 1; d <= diasNoMes; d++) {
       const manual = window._escalaDias.get(`${c.matricula}|${d}`);
       if (manual?.status === 'F') folgasAtuais++;
       if (escalaEstaDeFerias(c.matricula, ano, mesNum, d)) folgasAtuais++; // já afastado, conta como "resolvido" no mês
     }
-    let faltam = ESCALA_META_FOLGAS_MES - folgasAtuais;
+    let faltam = meta - folgasAtuais;
     if (faltam <= 0) continue;
 
     for (const { dia } of diasOrdenados) {
@@ -659,7 +728,7 @@ async function escalaGerarFolgasAuto() {
   const { error } = await db.from('escala_dia').upsert(inserts, { onConflict: 'base,mes,matricula,dia' });
   if (error) { escalaMsg('Erro ao gerar: ' + error.message, true); return; }
   escalaGradeAtualiza();
-  escalaMsg(`✓ ${inserts.length} folga(s) geradas nos dias de menor demanda de voos (meta: ${ESCALA_META_FOLGAS_MES}/mês por pessoa).`);
+  escalaMsg(`✓ ${inserts.length} folga(s) geradas nos dias de menor demanda de voos (meta por CH: ${[...metasUsadas].sort((a,b)=>a-b).join('/')} folgas/mês).`);
 }
 
 function escalaMsg(texto, erro) {
