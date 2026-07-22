@@ -1102,52 +1102,62 @@ function escalaRenderVoosPanel(ano, mesNum, diasNoMes) {
 
   const painel = document.getElementById('escala-voos-panel');
   if (!painel) return;
+  const mesLbl = typeof adhMonthLabel === 'function' ? adhMonthLabel(`${ano}-${String(mesNum).padStart(2,'0')}`) : `${mesNum}/${ano}`;
   painel.innerHTML = `
-    <div class="hc-panel">
-      <div style="display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap">
-        <div style="flex:1;min-width:140px;background:rgba(255,255,255,.02);border-radius:8px;padding:10px 12px">
-          <div style="font-size:9.5px;color:var(--text-muted);text-transform:uppercase">Total no mês</div>
-          <div style="font-size:20px;font-weight:700;color:var(--text-primary)">${totalMes.toLocaleString('pt-BR')}</div>
+    <div class="hc-panel" style="margin-bottom:16px">
+      <div style="display:flex;gap:16px;flex-wrap:wrap">
+        <div style="flex:1;min-width:200px">
+          <div style="font-size:10px;font-weight:700;color:#38bdf8;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">${mesLbl}</div>
+          <div style="font-size:26px;font-weight:700;color:#38bdf8">${totalMes.toLocaleString('pt-BR')}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Pico ${String(piorDia).padStart(2,'0')}/${String(mesNum).padStart(2,'0')} (${piorDiaValor} voos)</div>
         </div>
-        <div style="flex:1;min-width:140px;background:rgba(255,255,255,.02);border-radius:8px;padding:10px 12px">
-          <div style="font-size:9.5px;color:var(--text-muted);text-transform:uppercase">Pior dia</div>
-          <div style="font-size:20px;font-weight:700;color:#fc8181">${String(piorDia).padStart(2,'0')}/${String(mesNum).padStart(2,'0')} <span style="font-size:11px;font-weight:400;color:var(--text-muted)">(${piorDiaValor} voos)</span></div>
-        </div>
-        <div style="flex:1;min-width:140px;background:rgba(255,255,255,.02);border-radius:8px;padding:10px 12px">
-          <div style="font-size:9.5px;color:var(--text-muted);text-transform:uppercase">Pior semana</div>
-          <div style="font-size:20px;font-weight:700;color:#fc8181">${piorSemana}</div>
+        <div style="flex:1;min-width:200px">
+          <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Pior semana</div>
+          <div style="font-size:26px;font-weight:700;color:#fc8181">${piorSemana}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:4px">${piorSemanaValor} voos nessa semana</div>
         </div>
       </div>
-      <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">Curva do mês — passe o mouse pra ver voos e clientes do dia</div>
+    </div>
+
+    <div class="hc-panel">
+      <div class="hc-panel-title" style="margin-bottom:2px">Curva de voos (${mesLbl})</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:14px">Passe o mouse pra ver voos e clientes do dia</div>
       <div style="position:relative">
-        <svg id="escala-voos-svg" viewBox="0 0 900 110" style="width:100%;height:100px;cursor:crosshair"
+        <svg id="escala-voos-svg" viewBox="0 0 900 260" style="width:100%;height:220px;cursor:crosshair"
           onmousemove="escalaVoosHover(event,this,${ano},${mesNum},${diasNoMes})" onmouseleave="escalaVoosLeave()">
+          <g id="escala-voos-grade"></g>
           <path id="escala-voos-area" fill="#38bdf8" opacity="0.12" stroke="none" d=""/>
           <path id="escala-voos-linha" fill="none" stroke="#38bdf8" stroke-width="2" d=""/>
-          <line id="escala-voos-crosshair" x1="0" y1="0" x2="0" y2="90" stroke="var(--text-muted)" stroke-width="1" stroke-dasharray="3,3" style="display:none"/>
+          <line id="escala-voos-crosshair" x1="0" y1="10" x2="0" y2="230" stroke="var(--text-muted)" stroke-width="1" stroke-dasharray="3,3" style="display:none"/>
           <circle id="escala-voos-dot" r="3.5" fill="#38bdf8" stroke="#0b0f1a" stroke-width="1.5" style="display:none"/>
         </svg>
-        <div id="escala-voos-tooltip" style="position:absolute;display:none;pointer-events:none;background:#141b2c;border:1px solid var(--border-strong);border-radius:8px;padding:8px 10px;font-size:11px;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.4);z-index:10;top:0"></div>
+        <div id="escala-voos-tooltip" style="position:absolute;display:none;pointer-events:none;background:#141b2c;border:1px solid var(--border-strong);border-radius:8px;padding:8px 10px;font-size:11px;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.4);z-index:10;top:6px"></div>
       </div>
     </div>
   `;
 
-  // desenha a curva
-  const W = 900, H = 110, padB = 16;
+  // desenha a curva — mesma técnica de suavização e grade da Malha Aérea
+  const W = 900, H = 260, padL = 32, padR = 10, padT = 10, padB = 24;
   const valores = [];
   for (let d = 1; d <= diasNoMes; d++) valores.push(porDia.get(d).total);
-  const max = Math.max(1, ...valores);
-  const stepX = W/(diasNoMes-1 || 1);
-  const scaleY = v => H-padB-(v/max*(H-padB-6));
-  let d1 = '', d2 = '';
-  valores.forEach((v,i) => {
-    const x = i*stepX, y = scaleY(v);
-    d1 += (i===0?'M':'L') + ` ${x.toFixed(1)} ${y.toFixed(1)}`;
-  });
-  d2 = d1 + ` L ${((diasNoMes-1)*stepX).toFixed(1)} ${H} L 0 ${H} Z`;
-  document.getElementById('escala-voos-linha').setAttribute('d', d1);
-  document.getElementById('escala-voos-area').setAttribute('d', d2);
-  window._escalaVoosChartMeta = { W, H, padB, diasNoMes, max };
+  const max = Math.max(3, ...valores);
+  const stepX = (W-padL-padR)/(diasNoMes-1 || 1);
+  const scaleY = v => H-padB-(v/max*(H-padB-padT));
+  const pontos = valores.map((v,i) => [padL+i*stepX, scaleY(v)]);
+  const linha = typeof malhaSmoothPath === 'function' ? malhaSmoothPath(pontos) : pontos.map((p,i)=>`${i===0?'M':'L'} ${p[0]} ${p[1]}`).join(' ');
+  const area = `${linha} L ${(padL+(diasNoMes-1)*stepX).toFixed(1)} ${H-padB} L ${padL} ${H-padB} Z`;
+
+  const yStep = max<=6?1:max<=12?3:Math.ceil(max/4);
+  const yTicks = [];
+  for (let v=0; v<=max; v+=yStep) yTicks.push(v);
+  const xTicks = [1, 5, 10, 15, 20, 25, diasNoMes].filter((v,i,arr) => arr.indexOf(v)===i);
+
+  let grade = yTicks.map(v => `<line x1="${padL}" y1="${scaleY(v).toFixed(1)}" x2="${W-padR}" y2="${scaleY(v).toFixed(1)}" stroke="var(--border)" stroke-width="1"/><text x="4" y="${(scaleY(v)+3).toFixed(1)}" font-size="9" style="fill:var(--text-muted)">${v}</text>`).join('');
+  grade += xTicks.map(d => `<text x="${(padL+(d-1)*stepX).toFixed(1)}" y="${H-6}" font-size="8.5" text-anchor="middle" style="fill:var(--text-muted)">${d}</text>`).join('');
+  document.getElementById('escala-voos-grade').innerHTML = grade;
+  document.getElementById('escala-voos-linha').setAttribute('d', linha);
+  document.getElementById('escala-voos-area').setAttribute('d', area);
+  window._escalaVoosChartMeta = { W, H, padL, padR, padT, padB, diasNoMes, max };
 }
 
 function escalaVoosHover(evt, svg, ano, mesNum, diasNoMes) {
@@ -1156,15 +1166,15 @@ function escalaVoosHover(evt, svg, ano, mesNum, diasNoMes) {
   if (!meta || !porDia) return;
   const rect = svg.getBoundingClientRect();
   const xSvg = (evt.clientX - rect.left) * (meta.W / rect.width);
-  const stepX = meta.W/(diasNoMes-1 || 1);
-  let idx = Math.round(xSvg/stepX);
+  const stepX = (meta.W-meta.padL-meta.padR)/(diasNoMes-1 || 1);
+  let idx = Math.round((xSvg - meta.padL) / stepX);
   idx = Math.max(0, Math.min(diasNoMes-1, idx));
   const dia = idx+1;
   const info = porDia.get(dia);
   if (!info) return;
 
-  const scaleY = v => meta.H-meta.padB-(v/meta.max*(meta.H-meta.padB-6));
-  const xPos = idx*stepX, yPos = scaleY(info.total);
+  const scaleY = v => meta.H-meta.padB-(v/meta.max*(meta.H-meta.padB-meta.padT));
+  const xPos = meta.padL + idx*stepX, yPos = scaleY(info.total);
 
   const crosshair = document.getElementById('escala-voos-crosshair');
   const dot = document.getElementById('escala-voos-dot');
