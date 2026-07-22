@@ -1753,7 +1753,8 @@ function adhBuildPanelContent(mat, filial, nome, cargo, compact = false) {
     const h    = pontoHorarios.get(key);
     const marc = pontoMarcacao.get(key);
     const diaYMD = `${anoM}${String(mesM).padStart(2,'0')}${String(dia).padStart(2,'0')}`;
-    const futuro = diaYMD > hojeYMD; // dia ainda não aconteceu — não julgar como falta
+    const aindaNaoOcorreu = diaYMD > hojeYMD; // só isso esconde as batidas (dia genuinamente futuro)
+    const futuro = diaYMD >= hojeYMD; // hoje e dias seguintes não são julgados no cálculo (D-1)
     const minP = h ? diff(h.ent1,h.sai1) + (h.ent2&&h.sai2?diff(h.ent2,h.sai2):0) : 0;
     const { valor: bat1, recuperado: bat1Recuperado } = adhResolveBat1(h?.ent1, marc);
     let minT=0;
@@ -1774,7 +1775,7 @@ function adhBuildPanelContent(mat, filial, nome, cargo, compact = false) {
     days.push({dstr,ent1:h?.ent1,sai1:h?.sai1,ent2:h?.ent2,sai2:h?.sai2,
       bat1,bat1Recuperado,bat2:marc?.bat2,bat3:marc?.bat3,bat4:marc?.bat4,
       bat5:marc?.bat5,bat6:marc?.bat6,bat7:marc?.bat7,bat8:marc?.bat8,
-      minP,minT,he,falta,pct,folga,trabalhouNaFolga,finalDeSemana,futuro,semMarcacao});
+      minP,minT,he,falta,pct,folga,trabalhouNaFolga,finalDeSemana,futuro,aindaNaoOcorreu,semMarcacao});
   }
 
   const totP = days.reduce((s,d)=>s+((d.futuro||d.semMarcacao)?0:d.minP),0);
@@ -1879,7 +1880,7 @@ function adhBuildPanelContent(mat, filial, nome, cargo, compact = false) {
       : '';
     const bat58Colspan = temBat5a8 ? 8 : 4;
 
-    if (d.futuro) {
+    if (d.aindaNaoOcorreu) {
       return `<tr${rowClass} style="opacity:.45">
         <td>${d.dstr}</td>
         <td style="color:#00a0d2">${d.ent1||'—'}</td>
