@@ -137,6 +137,9 @@ async function adminRender() {
       <button class="adm-tab-btn" onclick="adminTabSwitch('malha',this)">
         <i class="ti ti-plane" aria-hidden="true"></i> Malha aérea
       </button>
+      <button class="adm-tab-btn" onclick="adminTabSwitch('parametros',this)">
+        <i class="ti ti-adjustments" aria-hidden="true"></i> Parâmetros de Solo
+      </button>
       <button class="adm-tab-btn" onclick="adminTabSwitch('logs',this)">
         <i class="ti ti-list" aria-hidden="true"></i> Log de acessos
       </button>
@@ -161,6 +164,7 @@ function adminTabSwitch(tab, btn) {
     case 'files':    el.innerHTML = adminFilesTab();            break;
     case 'aderencia':adminAderenciaTab(el);                    break;
     case 'malha':    adminMalhaTab(el);                        break;
+    case 'parametros':adminParametrosTab(el);                  break;
     case 'logs':     el.innerHTML = adminLogsTab(logs||[]);     break;
   }
 }
@@ -1780,6 +1784,156 @@ function adminMalhaSetAgregacao(a) {
   adminMalhaRenderDash(document.getElementById('adm-tab-content'));
 }
 
+
+// ══════════════════════════════════════════════════════
+// TAB: PARÂMETROS DE SOLO
+// Define quantas pessoas de cada função um voo precisa, e por quanto tempo
+// antes/depois do horário do voo essa função fica ocupada. É o dado que
+// falta pra transformar "chegou um voo" em "preciso de X rampeiros" — base
+// do motor de demanda horária que vai puxar da malha de voos real.
+// ══════════════════════════════════════════════════════
+async function adminParametrosTab(el) {
+  el.innerHTML = `
+    <div class="adm-section-header"><span>Parâmetros de Solo</span></div>
+    <div class="adm-empty-state">
+      <i class="ti ti-loader-2" style="font-size:32px;opacity:.4;animation:spin 1s linear infinite" aria-hidden="true"></i>
+      <p>Carregando...</p>
+    </div>`;
+
+  const { data, error } = await db.from('escala_parametro_solo').select('*').order('base').order('funcao');
+  if (error) {
+    el.innerHTML = `<div class="adm-section-header"><span>Parâmetros de Solo</span></div><div class="adm-empty-state"><p>Erro ao carregar: ${error.message}</p></div>`;
+    return;
+  }
+  window._paramRows = data || [];
+  if (window._paramBaseAtiva === undefined) window._paramBaseAtiva = '';
+  adminParametrosRenderList(el);
+}
+
+function adminParametrosRenderList(el) {
+  const bases = adminAllBases();
+  const baseAtiva = window._paramBaseAtiva ?? '';
+  const rows = (window._paramRows || []).filter(r => r.base === baseAtiva);
+
+  el.innerHTML = `
+    <div class="adm-section-header">
+      <span>Parâmetros de Solo</span>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select class="adh-month-select" onchange="adminParametrosSetBase(this.value)">
+          <option value="" ${baseAtiva===''?'selected':''}>Padrão (todas as bases)</option>
+          ${bases.map(b => `<option value="${b}" ${b===baseAtiva?'selected':''}>${b}</option>`).join('')}
+        </select>
+        <button class="adm-btn-primary" onclick="adminParametrosNovo()">+ Adicionar função</button>
+      </div>
+    </div>
+
+    <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:14px;line-height:1.5">
+      Define quantas pessoas de cada função um voo precisa, e por quanto tempo antes/depois do horário do voo essa
+      função fica ocupada. É a base pro próximo passo (calcular a demanda de cada dia a partir da malha de voos real).
+      ${baseAtiva===''
+        ? ' Isso aqui é o <strong>padrão</strong>, usado por qualquer base que não tenha uma configuração própria.'
+        : ` Isso aqui <strong>sobrescreve o padrão só pra ${baseAtiva}</strong>.`}
+    </div>
+
+    <div class="adm-table-wrap">
+      <table class="adm-table">
+        <thead><tr>
+          <th>Função</th><th class="r">Pessoas/voo</th><th class="r">Antes (min)</th><th class="r">Depois (min)</th><th>Status</th><th></th>
+        </tr></thead>
+        <tbody>
+          ${rows.length ? rows.map(r => `
+            <tr>
+              <td style="font-weight:500">${r.funcao}</td>
+              <td class="r">${r.qtd_por_voo}</td>
+              <td class="r">${r.min_antes_chegada}</td>
+              <td class="r">${r.min_depois_saida}</td>
+              <td><span class="adm-status-dot ${r.ativo?'on':'off'}"></span><span style="font-size:11px">${r.ativo?'Ativo':'Inativo'}</span></td>
+              <td style="white-space:nowrap">
+                <button class="adm-btn-edit" onclick="adminParametrosEditar(${r.id})">Editar</button>
+                <button class="adm-btn-edit" style="color:#fc8181" onclick="adminParametrosExcluir(${r.id})">Excluir</button>
+              </td>
+            </tr>`).join('') : `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px">Nenhuma função configurada ${baseAtiva===''?'no padrão':'pra '+baseAtiva} ainda.</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function adminParametrosSetBase(base) {
+  window._paramBaseAtiva = base;
+  adminParametrosRenderList(document.getElementById('adm-tab-content'));
+}
+
+function adminParametrosNovo() {
+  adminParametrosAbrirModal(null);
+}
+
+function adminParametrosEditar(id) {
+  const row = (window._paramRows || []).find(r => r.id === id);
+  if (row) adminParametrosAbrirModal(row);
+}
+
+function adminParametrosAbrirModal(row) {
+  const baseAtiva = window._paramBaseAtiva ?? '';
+  const overlay = document.createElement('div');
+  overlay.className = 'adm-overlay';
+  overlay.innerHTML = `
+    <div class="adm-modal">
+      <div class="adm-modal-header">
+        <span>${row ? 'Editar função' : 'Adicionar função'} · ${baseAtiva || 'padrão'}</span>
+        <button onclick="this.closest('.adm-overlay').remove()"><i class="ti ti-x" aria-hidden="true"></i></button>
+      </div>
+      <div class="adm-modal-body">
+        <div class="adm-field"><label>Função</label>
+          <input id="param-funcao" class="adm-input" value="${row?.funcao||''}" placeholder="Ex: Auxiliar de Rampa I" ${row?'disabled style="opacity:.6"':''}></div>
+        <div class="adm-field"><label>Pessoas por voo</label>
+          <input id="param-qtd" type="number" min="1" class="adm-input" value="${row?.qtd_por_voo ?? 1}"></div>
+        <div class="adm-field"><label>Começa a trabalhar (min antes do pouso)</label>
+          <input id="param-antes" type="number" min="0" class="adm-input" value="${row?.min_antes_chegada ?? 15}"></div>
+        <div class="adm-field"><label>Continua trabalhando (min depois da decolagem)</label>
+          <input id="param-depois" type="number" min="0" class="adm-input" value="${row?.min_depois_saida ?? 15}"></div>
+        <div class="adm-field" style="flex-direction:row;align-items:center;gap:10px">
+          <label style="margin:0">Ativo</label>
+          <input type="checkbox" id="param-ativo" ${row?.ativo!==false?'checked':''} style="width:16px;height:16px;accent-color:#00a0d2">
+        </div>
+      </div>
+      <div class="adm-modal-footer">
+        <button class="adm-btn-sec" onclick="this.closest('.adm-overlay').remove()">Cancelar</button>
+        <button class="adm-btn-primary" onclick="adminParametrosSalvar(${row?.id ?? 'null'})">Salvar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+async function adminParametrosSalvar(id) {
+  const base   = window._paramBaseAtiva ?? '';
+  const funcao = document.getElementById('param-funcao').value.trim();
+  const qtd    = parseInt(document.getElementById('param-qtd').value) || 1;
+  const antes  = parseInt(document.getElementById('param-antes').value) || 0;
+  const depois = parseInt(document.getElementById('param-depois').value) || 0;
+  const ativo  = document.getElementById('param-ativo').checked;
+  if (!funcao) { alert('Preencha a função.'); return; }
+
+  const payload = {
+    base, funcao, qtd_por_voo: qtd, min_antes_chegada: antes, min_depois_saida: depois, ativo,
+    updated_at: new Date(), updated_by: currentUserProfile?.id || currentUser?.id || null,
+  };
+
+  const { error } = id
+    ? await db.from('escala_parametro_solo').update(payload).eq('id', id)
+    : await db.from('escala_parametro_solo').upsert(payload, { onConflict: 'base,funcao' });
+
+  if (error) { alert('Erro ao salvar: ' + error.message); return; }
+  document.querySelector('.adm-overlay')?.remove();
+  adminParametrosTab(document.getElementById('adm-tab-content'));
+}
+
+async function adminParametrosExcluir(id) {
+  if (!confirm('Remover esse parâmetro de solo? A demanda calculada vai parar de considerar essa função.')) return;
+  const { error } = await db.from('escala_parametro_solo').delete().eq('id', id);
+  if (error) { alert('Erro: ' + error.message); return; }
+  adminParametrosTab(document.getElementById('adm-tab-content'));
+}
 
 async function adminMalhaTab(el) {
   el.innerHTML = `
