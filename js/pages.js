@@ -448,6 +448,12 @@ async function escalaRenderGrade(el) {
   window._escalaAutoPopulado = autoPopulado;
   window._escalaDias = new Map((dias||[]).map(d => [`${d.matricula}|${d.dia}`, d]));
 
+  const [ano0] = mes.split('-').map(Number);
+  const { data: feriadosBase } = await db.from('escala_feriado').select('*').eq('base', base);
+  window._escalaFeriados = new Map();
+  escalaFeriadosNacionais(ano0).forEach(f => window._escalaFeriados.set(f.data, { nome: f.nome, tipo: 'nacional' }));
+  (feriadosBase || []).forEach(f => window._escalaFeriados.set(f.data, { nome: f.nome, tipo: f.tipo }));
+
   // Demanda de pessoal por dia — reaproveita o motor da Parte 2 (parâmetros
   // de solo × malha de voos real). Isso alimenta a linha "NECESSÁRIO" no
   // topo da grade e a geração automática de folgas.
@@ -520,6 +526,7 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
           <div id="escala-busca-resultados" style="position:absolute;top:calc(100% + 4px);left:0;right:0;background:#141b2c;border:1px solid var(--border-strong);border-radius:8px;z-index:20;display:none;max-height:220px;overflow-y:auto;box-shadow:var(--adh-shadow-card)"></div>
         </div>
         <button class="adh-refresh-btn" style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600" onclick="escalaGerarFolgasAuto()">⚡ Gerar folgas automáticas</button>
+        <button class="adh-refresh-btn" onclick="escalaAdicionarFeriado()">📅 + Feriado dessa base</button>
       </div>
       <div id="escala-status-msg" style="font-size:11px;color:var(--text-muted);margin-top:8px;min-height:14px"></div>
     </div>
@@ -532,7 +539,7 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#fc8181;margin-right:5px"></span>J · Afastado</span>
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#38bdf8;margin-right:5px"></span>K · Cursos</span>
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#fb923c;margin-right:5px"></span>CH · Folga compensa</span>
-        <span style="color:var(--text-muted)">clique numa célula vazia ou de trabalho pra marcar F/K</span>
+        <span style="color:var(--text-muted)">clique numa célula vazia ou de trabalho pra marcar F/K · fim de semana e feriado ficam destacados nas colunas</span>
       </div>
       <div id="escala-grade-wrap" style="overflow-x:auto">${escalaGradeTabelaHTML(ano, mesNum, diasNoMes)}</div>
     </div>
@@ -626,6 +633,52 @@ function escalaSetorDoTurno(entradaStr) {
   return 'Turno Delta';
 }
 
+// Calcula a data da Páscoa (algoritmo de Gauss/Meeus) — usado pra achar os
+// feriados móveis (Carnaval, Sexta-feira Santa, Corpus Christi).
+function escalaCalcularPascoa(ano) {
+  const a = ano % 19, b = Math.floor(ano/100), c = ano % 100;
+  const d = Math.floor(b/4), e = b % 4, f = Math.floor((b+8)/25);
+  const g = Math.floor((b-f+1)/3), h = (19*a+b-d-g+15) % 30;
+  const i = Math.floor(c/4), k = c % 4, l = (32+2*e+2*i-h-k) % 7;
+  const m = Math.floor((a+11*h+22*l)/451);
+  const mes = Math.floor((h+l-7*m+114)/31);
+  const dia = ((h+l-7*m+114) % 31) + 1;
+  return new Date(ano, mes-1, dia);
+}
+
+function escalaFmtISO(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function escalaSomaDias(d, n) {
+  const novo = new Date(d);
+  novo.setDate(novo.getDate() + n);
+  return novo;
+}
+
+// Feriados nacionais — fixos + móveis (calculados a partir da Páscoa).
+// Carnaval é ponto facultativo em muitos lugares, mas incluído aqui porque
+// na prática quase todo mundo trata como feriado operacional.
+function escalaFeriadosNacionais(ano) {
+  const pascoa = escalaCalcularPascoa(ano);
+  const feriados = [
+    { data: `${ano}-01-01`, nome: 'Confraternização Universal' },
+    { data: `${ano}-04-21`, nome: 'Tiradentes' },
+    { data: `${ano}-05-01`, nome: 'Dia do Trabalho' },
+    { data: `${ano}-09-07`, nome: 'Independência do Brasil' },
+    { data: `${ano}-10-12`, nome: 'Nossa Senhora Aparecida' },
+    { data: `${ano}-11-02`, nome: 'Finados' },
+    { data: `${ano}-11-15`, nome: 'Proclamação da República' },
+    { data: `${ano}-11-20`, nome: 'Consciência Negra' },
+    { data: `${ano}-12-25`, nome: 'Natal' },
+    { data: escalaFmtISO(escalaSomaDias(pascoa, -47)), nome: 'Carnaval (segunda)' },
+    { data: escalaFmtISO(escalaSomaDias(pascoa, -46)), nome: 'Carnaval (terça)' },
+    { data: escalaFmtISO(escalaSomaDias(pascoa, -2)),  nome: 'Sexta-feira Santa' },
+    { data: escalaFmtISO(escalaSomaDias(pascoa, 60)),  nome: 'Corpus Christi' },
+  ];
+  return feriados;
+}
+
 function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   const colabs = [...(window._escalaColabs || [])].sort((a, b) => {
     const fa = window.eoColabs?.get(a.matricula)?.funcao || '';
@@ -653,7 +706,11 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   html += `<th style="text-align:center;padding:6px 4px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase">CH</th>`;
   for (let d = 1; d <= diasNoMes; d++) {
     const dow = new Date(ano, mesNum-1, d).getDay();
-    html += `<th style="padding:3px 2px;color:var(--text-muted);font-size:9px;font-weight:600;text-align:center">${ESCALA_DIAS_SEMANA[dow]}<br><span style="color:var(--text-secondary);font-size:10px">${d}</span></th>`;
+    const dataISO = `${ano}-${String(mesNum).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const feriado = window._escalaFeriados?.get(dataISO);
+    const fimDeSemana = dow === 0 || dow === 6;
+    const bg = feriado ? 'rgba(252,129,129,.14)' : fimDeSemana ? 'rgba(255,255,255,.05)' : 'transparent';
+    html += `<th style="padding:3px 2px;color:${feriado?'#fc8181':'var(--text-muted)'};font-size:9px;font-weight:600;text-align:center;background:${bg}" title="${feriado?feriado.nome:''}">${ESCALA_DIAS_SEMANA[dow]}<br><span style="color:${feriado?'#fc8181':'var(--text-secondary)'};font-size:10px">${d}</span></th>`;
   }
   html += `</tr></thead><tbody>`;
 
@@ -683,7 +740,12 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     html += `<td style="text-align:center;color:var(--text-secondary);border-top:1px solid var(--border);font-size:10px">${ch}</td>`;
     conteudo.forEach((item, i) => {
       const dia = i+1;
-      html += `<td data-mat="${c.matricula}" data-dia="${dia}" onclick="${item.editavel?`escalaSelecionarCelula('${c.matricula}',${dia},this)`:''}" style="padding:2px;border-top:1px solid var(--border);height:28px;width:26px;cursor:${item.editavel?'pointer':'default'}">${escalaCelHTML(item)}</td>`;
+      const dow = new Date(ano, mesNum-1, dia).getDay();
+      const dataISO = `${ano}-${String(mesNum).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
+      const feriado = window._escalaFeriados?.get(dataISO);
+      const fimDeSemana = dow === 0 || dow === 6;
+      const bgCel = feriado ? 'rgba(252,129,129,.08)' : fimDeSemana ? 'rgba(255,255,255,.03)' : 'transparent';
+      html += `<td data-mat="${c.matricula}" data-dia="${dia}" onclick="${item.editavel?`escalaSelecionarCelula('${c.matricula}',${dia},this)`:''}" style="padding:2px;border-top:1px solid var(--border);height:28px;width:26px;cursor:${item.editavel?'pointer':'default'};background:${bgCel}" title="${feriado?feriado.nome:''}">${escalaCelHTML(item)}</td>`;
     });
     html += `</tr>`;
   });
@@ -924,6 +986,26 @@ async function escalaGerarFolgasAuto() {
 function escalaMsg(texto, erro) {
   const el = document.getElementById('escala-status-msg');
   if (el) el.innerHTML = `<span style="color:${erro?'#fc8181':'#5fa87a'}">${texto}</span>`;
+}
+
+async function escalaAdicionarFeriado() {
+  const base = window._escalaBase;
+  const dataStr = prompt(`Data do feriado estadual/municipal de ${base} (formato DD/MM/AAAA):`);
+  if (!dataStr) return;
+  const partes = dataStr.trim().split('/');
+  if (partes.length !== 3) { alert('Data inválida. Use o formato DD/MM/AAAA.'); return; }
+  const [dd, mm, yyyy] = partes;
+  const dataISO = `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
+  const nome = prompt('Nome do feriado (ex: Aniversário da cidade):');
+  if (!nome) return;
+  const tipo = confirm('É feriado ESTADUAL? (Cancelar = municipal)') ? 'estadual' : 'municipal';
+
+  const { error } = await db.from('escala_feriado').upsert(
+    { base, data: dataISO, nome, tipo }, { onConflict: 'base,data' }
+  );
+  if (error) { escalaMsg('Erro ao salvar feriado: ' + error.message, true); return; }
+  escalaMsg(`✓ Feriado "${nome}" adicionado em ${dataStr} pra ${base}.`);
+  escalaRenderGrade(document.getElementById('page-content'));
 }
 
 
