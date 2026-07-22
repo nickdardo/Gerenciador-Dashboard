@@ -375,6 +375,42 @@ function escalaSetMes(mes) {
 //   horário de trabalho → pontoHorarios (Horarios.xlsx, já existe)
 // ══════════════════════════════════════════════════════
 
+// Na primeira vez que uma base+mês é aberta (sem ninguém adicionado ainda),
+// carrega sozinho todo mundo que tem horário planejado ali naquele mês —
+// cruzando com o pontoHorarios (Horarios.xlsx já carregado). Assim o gestor
+// só precisa fazer o ajuste fino (F/FA/CH), não montar a equipe do zero.
+async function escalaPopularAutomaticamente(base, mes) {
+  if (typeof pontoHorarios === 'undefined' || !pontoHorarios.size) return [];
+
+  const matriculas = new Map(); // matricula -> nome
+  for (const [key, h] of pontoHorarios) {
+    const partes = key.split('|');
+    if (partes.length !== 3) continue;
+    const [filial, mat, dstr] = partes;
+    if (filial !== base) continue;
+    const dataPartes = dstr.split('/');
+    if (dataPartes.length !== 3) continue;
+    const mesDoRegistro = `${dataPartes[2]}-${dataPartes[1]}`;
+    if (mesDoRegistro !== mes) continue;
+    if (!matriculas.has(mat)) matriculas.set(mat, h.nome || window.eoColabs?.get(mat)?.nome || '');
+  }
+  if (!matriculas.size) return [];
+
+  const linhas = [...matriculas.entries()].map(([matricula, nome]) => ({
+    base, mes, matricula, nome,
+    created_by: currentUserProfile?.id || currentUser?.id || null,
+  }));
+
+  const BATCH = 200;
+  for (let i = 0; i < linhas.length; i += BATCH) {
+    const { error } = await db.from('escala_colaborador').upsert(linhas.slice(i, i+BATCH), { onConflict: 'base,mes,matricula' });
+    if (error) { console.warn('[escala] erro ao pré-popular:', error.message); break; }
+  }
+
+  const { data } = await db.from('escala_colaborador').select('*').eq('base', base).eq('mes', mes).order('nome');
+  return data || [];
+}
+
 async function escalaRenderGrade(el) {
   el.innerHTML = `
     <div class="page-header"><div>
@@ -394,11 +430,19 @@ async function escalaRenderGrade(el) {
   const base = window._escalaBase;
   const mes  = window._escalaMes;
 
-  const [{ data: colabs }, { data: dias }] = await Promise.all([
+  const [{ data: colabsIniciais }, { data: dias }] = await Promise.all([
     db.from('escala_colaborador').select('*').eq('base', base).eq('mes', mes).order('created_at'),
     db.from('escala_dia').select('*').eq('base', base).eq('mes', mes),
   ]);
-  window._escalaColabs = colabs || [];
+
+  let colabs = colabsIniciais || [];
+  let autoPopulado = false;
+  if (!colabs.length) {
+    colabs = await escalaPopularAutomaticamente(base, mes);
+    autoPopulado = colabs.length > 0;
+  }
+  window._escalaColabs = colabs;
+  window._escalaAutoPopulado = autoPopulado;
   window._escalaDias = new Map((dias||[]).map(d => [`${d.matricula}|${d.dia}`, d]));
 
   // Demanda de pessoal por dia — reaproveita o motor da Parte 2 (parâmetros
@@ -459,6 +503,11 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
         <select class="adh-month-select" onchange="escalaSetMes(this.value)">${escalaMesOptionsHTML(mes)}</select>
       </div>
     </div>
+
+    ${window._escalaAutoPopulado ? `
+    <div style="font-size:11.5px;color:#5fa87a;background:rgba(95,168,122,.08);border:1px solid rgba(95,168,122,.25);border-radius:8px;padding:8px 14px;margin-bottom:14px">
+      ✓ ${(window._escalaColabs||[]).length} colaborador(es) carregados automaticamente, cruzando com o horário planejado (ponto) dessa base nesse mês. Use a busca abaixo só se faltar alguém, ou o ✕ na linha se alguém não devia estar aqui.
+    </div>` : ''}
 
     <div class="hc-panel" style="margin-bottom:16px">
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
