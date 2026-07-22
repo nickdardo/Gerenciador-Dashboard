@@ -632,49 +632,30 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     const fb = window.eoColabs?.get(b.matricula)?.funcao || '';
     return fa.localeCompare(fb) || String(a.nome||'').localeCompare(String(b.nome||''));
   });
-  const demandaPorDia = window._escalaDemandaPorDia;
-  const voosPorDia = window._escalaVoosPorDia || [];
   const NCOLS_FIXAS = 8; // Matrícula, Nome, Setor, Função, Entrada, Saída, Horário, CH
-
-  let html = `<table style="border-collapse:collapse;font-size:11px;width:100%"><thead><tr>`;
-  html += `<th style="text-align:left;padding:6px 8px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;position:sticky;left:0;background:var(--bg-surface);min-width:76px">Matrícula</th>`;
-  html += `<th style="text-align:left;padding:6px 8px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;position:sticky;left:76px;background:var(--bg-surface);min-width:170px">Nome</th>`;
-  html += `<th style="text-align:left;padding:6px 8px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;min-width:96px">Setor</th>`;
-  html += `<th style="text-align:left;padding:6px 8px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;min-width:140px">Função</th>`;
-  html += `<th style="text-align:center;padding:6px 4px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;width:50px">Entrada</th>`;
-  html += `<th style="text-align:center;padding:6px 4px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;width:50px">Saída</th>`;
-  html += `<th style="text-align:center;padding:6px 4px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;width:74px">Horário</th>`;
-  html += `<th style="text-align:center;padding:6px 4px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;width:36px">CH</th>`;
-  for (let d = 1; d <= diasNoMes; d++) {
-    const dow = new Date(ano, mesNum-1, d).getDay();
-    html += `<th style="padding:3px 2px;color:var(--text-muted);font-size:9px;font-weight:600;width:26px;text-align:center">${ESCALA_DIAS_SEMANA[dow]}<br><span style="color:var(--text-secondary);font-size:10px">${d}</span></th>`;
-  }
-  html += `</tr></thead><tbody>`;
-
   const NCOLS = NCOLS_FIXAS + diasNoMes;
 
-  if (demandaPorDia) {
-    ESCALA_TURNOS.forEach(t => {
-      html += `<tr><td colspan="${NCOLS_FIXAS}" style="position:sticky;left:0;background:var(--bg-surface);padding:3px 8px;color:${t.cor};font-size:8.5px;font-weight:700">TURNO ${t.nome} · ${t.label}</td>`;
-      for (let d = 1; d <= diasNoMes; d++) {
-        const v = escalaDemandaPorTurno(d)[ESCALA_TURNOS.indexOf(t)];
-        html += `<td style="text-align:center;font-size:8px;color:${t.cor};font-weight:600">${v}</td>`;
-      }
-      html += `</tr>`;
-    });
-  } else {
-    const maxNec = Math.max(1, ...voosPorDia);
-    html += `<tr><td colspan="${NCOLS_FIXAS}" style="position:sticky;left:0;background:var(--bg-surface);padding:4px 8px 10px;color:#5fa87a;font-size:9px;font-weight:700;vertical-align:bottom">VOOS/DIA</td>`;
-    for (let d = 1; d <= diasNoMes; d++) {
-      const v = voosPorDia[d-1] || 0;
-      const baixa = maxNec > 0 && v <= maxNec*0.4;
-      html += `<td style="vertical-align:bottom;padding:0 2px 4px">
-        <div style="height:${Math.round(v/maxNec*30)}px;background:${baixa?'#5fa87a':'#38bdf8'};border-radius:2px 2px 0 0;margin:0 auto;width:14px" title="${v}"></div>
-        <div style="font-size:7.5px;color:var(--text-muted);text-align:center;margin-top:2px">${v}</div>
-      </td>`;
-    }
-    html += `</tr>`;
+  const LARG = { mat:70, nome:190, setor:90, funcao:170, entrada:50, saida:50, horario:80, ch:40, dia:24 };
+  const leftNome = LARG.mat;
+
+  let html = `<table style="border-collapse:collapse;font-size:11px;width:100%;table-layout:fixed"><colgroup>
+    <col style="width:${LARG.mat}px"><col style="width:${LARG.nome}px"><col style="width:${LARG.setor}px"><col style="width:${LARG.funcao}px">
+    <col style="width:${LARG.entrada}px"><col style="width:${LARG.saida}px"><col style="width:${LARG.horario}px"><col style="width:${LARG.ch}px">
+    ${Array(diasNoMes).fill(`<col style="width:${LARG.dia}px">`).join('')}
+  </colgroup><thead><tr>`;
+  html += `<th style="text-align:left;padding:6px 8px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;position:sticky;left:0;background:var(--bg-surface);z-index:2">Matrícula</th>`;
+  html += `<th style="text-align:left;padding:6px 8px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;position:sticky;left:${leftNome}px;background:var(--bg-surface);z-index:2">Nome</th>`;
+  html += `<th style="text-align:left;padding:6px 8px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase">Setor</th>`;
+  html += `<th style="text-align:left;padding:6px 8px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase">Função</th>`;
+  html += `<th style="text-align:center;padding:6px 4px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase">Entrada</th>`;
+  html += `<th style="text-align:center;padding:6px 4px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase">Saída</th>`;
+  html += `<th style="text-align:center;padding:6px 4px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase">Horário</th>`;
+  html += `<th style="text-align:center;padding:6px 4px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase">CH</th>`;
+  for (let d = 1; d <= diasNoMes; d++) {
+    const dow = new Date(ano, mesNum-1, d).getDay();
+    html += `<th style="padding:3px 2px;color:var(--text-muted);font-size:9px;font-weight:600;text-align:center">${ESCALA_DIAS_SEMANA[dow]}<br><span style="color:var(--text-secondary);font-size:10px">${d}</span></th>`;
   }
+  html += `</tr></thead><tbody>`;
 
   if (!colabs.length) {
     html += `<tr><td colspan="${NCOLS}" style="padding:24px;text-align:center;color:var(--text-muted);font-size:11.5px;border-top:1px solid var(--border)">Nenhum colaborador ativo encontrado pra essa base+mês — busque por matrícula ou nome acima.</td></tr>`;
@@ -691,11 +672,11 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     const conteudo = escalaConteudoDoMes(c, ano, mesNum, diasNoMes);
 
     html += `<tr>`;
-    html += `<td style="padding:6px 8px;color:var(--text-muted);font-family:monospace;font-size:10px;border-top:1px solid var(--border);position:sticky;left:0;background:var(--bg-surface)">${c.matricula}</td>`;
-    html += `<td style="padding:6px 8px;color:var(--text-primary);font-weight:500;border-top:1px solid var(--border);position:sticky;left:76px;background:var(--bg-surface);white-space:nowrap">${c.nome||''}
+    html += `<td style="padding:6px 8px;color:var(--text-muted);font-family:monospace;font-size:10px;border-top:1px solid var(--border);position:sticky;left:0;background:var(--bg-surface);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.matricula}</td>`;
+    html += `<td style="padding:6px 8px;color:var(--text-primary);font-weight:500;border-top:1px solid var(--border);position:sticky;left:${leftNome}px;background:var(--bg-surface);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${c.nome||''}">${c.nome||''}
       <span onclick="escalaRemoverColab('${c.matricula}')" style="cursor:pointer;color:#fc8181;margin-left:4px" title="Remover da escala">✕</span></td>`;
-    html += `<td style="padding:6px 8px;color:var(--text-secondary);border-top:1px solid var(--border);white-space:nowrap;font-size:10px">${setor}</td>`;
-    html += `<td style="padding:6px 8px;color:var(--text-secondary);border-top:1px solid var(--border);white-space:nowrap">${funcao}</td>`;
+    html += `<td style="padding:6px 8px;color:var(--text-secondary);border-top:1px solid var(--border);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px">${setor}</td>`;
+    html += `<td style="padding:6px 8px;color:var(--text-secondary);border-top:1px solid var(--border);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${funcao}">${funcao}</td>`;
     html += `<td style="text-align:center;color:var(--text-secondary);border-top:1px solid var(--border);font-size:10px">${entrada||'—'}</td>`;
     html += `<td style="text-align:center;color:var(--text-secondary);border-top:1px solid var(--border);font-size:10px">${saida||'—'}</td>`;
     html += `<td style="text-align:center;color:var(--text-secondary);border-top:1px solid var(--border);font-size:9.5px;white-space:nowrap">${horarioFixo||'—'}</td>`;
