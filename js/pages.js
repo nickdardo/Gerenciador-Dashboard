@@ -526,6 +526,7 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:var(--text-muted);margin-right:5px"></span>F · Folga</span>
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#a78bfa;margin-right:5px"></span>FA · Folga agrupada</span>
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#c9a24a;margin-right:5px"></span>L · Férias (automático)</span>
+        <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#fc8181;margin-right:5px"></span>J · Afastado</span>
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#38bdf8;margin-right:5px"></span>K · Cursos</span>
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#fb923c;margin-right:5px"></span>CH · Folga compensa</span>
         <span style="color:var(--text-muted)">clique numa célula vazia ou de trabalho pra marcar F/K</span>
@@ -596,6 +597,7 @@ function escalaConteudoDoMes(c, ano, mesNum, diasNoMes, horarioFixo) {
     }
     if (s === 'K') return { status: 'K', exibido: 'K', editavel: true };
     if (s === 'CH') return { status: 'CH', exibido: 'CH', editavel: true };
+    if (s === 'J') return { status: 'J', exibido: 'J', editavel: true };
     if (s === 'L') return { status: 'L', exibido: 'L', editavel: false };
     const dia = i+1;
     const horario = escalaHorarioPlanejado(base, c.matricula, ano, mesNum, dia);
@@ -612,9 +614,9 @@ function escalaCelHTML(item) {
   if (item.excecao) {
     return `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:#f6ad5522;color:#f6ad55;border-radius:4px;font-weight:600;font-size:8.5px" title="Horário diferente do fixo desse colaborador">${item.exibido}</div>`;
   }
-  const cores = { F:'#8896aa', FA:'#a78bfa', L:'#c9a24a', K:'#38bdf8', CH:'#fb923c' };
+  const cores = { F:'#8896aa', FA:'#a78bfa', L:'#c9a24a', K:'#38bdf8', CH:'#fb923c', J:'#fc8181' };
   const cor = cores[item.exibido] || '#8896aa';
-  const titulo = item.status === 'L' ? 'Férias — automático, vem do cadastro' : item.status === 'CH' ? 'Folga compensa (banco de horas)' : '';
+  const titulo = item.status === 'L' ? 'Férias — automático, vem do cadastro' : item.status === 'CH' ? 'Folga compensa (banco de horas)' : item.status === 'J' ? 'Afastado' : '';
   return `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:${cor}22;color:${cor};border-radius:4px;font-weight:700;font-size:10px" title="${titulo}">${item.exibido}</div>`;
 }
 
@@ -693,7 +695,7 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
       conteudo.forEach((item, i) => {
         if (item.status === 'F') { if (item.exibido === 'FA') totFA[i]++; else totF[i]++; }
       });
-      const folgas = conteudo.filter(x => x.status === 'F' || x.status === 'CH').length;
+      const folgas = conteudo.filter(x => x.status === 'F' || x.status === 'CH' || x.status === 'J').length;
       const diasTrabalhados = conteudo.filter(x => !x.status).length;
       const horasTrab = jornada !== '—' ? Math.round(diasTrabalhados * jornada) : '—';
       const corFolgas = folgas > 10 ? '#fc8181' : folgas > 8 ? '#f6ad55' : 'var(--text-primary)';
@@ -706,7 +708,7 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
       html += `<td style="padding:6px 4px;color:var(--text-secondary);text-align:center;border-top:1px solid var(--border);font-size:9.5px;white-space:nowrap">${horarioFixo||'—'}</td>`;
       conteudo.forEach((item, i) => {
         const dia = i+1;
-        html += `<td onclick="${item.editavel?`escalaClicarCelula('${c.matricula}',${dia})`:''}" style="padding:2px;border-top:1px solid var(--border);height:28px;width:26px;cursor:${item.editavel?'pointer':'default'}">${escalaCelHTML(item)}</td>`;
+        html += `<td data-mat="${c.matricula}" data-dia="${dia}" onclick="${item.editavel?`escalaSelecionarCelula('${c.matricula}',${dia},this)`:''}" style="padding:2px;border-top:1px solid var(--border);height:28px;width:26px;cursor:${item.editavel?'pointer':'default'}">${escalaCelHTML(item)}</td>`;
       });
       html += `<td style="text-align:center;font-weight:700;color:${corFolgas};border-top:1px solid var(--border)">${folgas}</td>`;
       html += `<td style="text-align:center;color:var(--text-secondary);border-top:1px solid var(--border)">${horasTrab}</td>`;
@@ -792,28 +794,88 @@ async function escalaRemoverColab(matricula) {
   escalaGradeAtualiza();
 }
 
-const ESCALA_CICLO_MANUAL = ['F', 'K', 'CH', null];
+// ── Digitação por teclado ──────────────────────────────
+// Clica na célula pra selecionar (fica com contorno azul), depois digita
+// F, J ou K pra marcar — L é recusado (férias é automático, não digitável),
+// e qualquer outra tecla também é recusada. Backspace/Delete limpa.
+const ESCALA_TECLAS_VALIDAS = ['F', 'J', 'K'];
 
-async function escalaClicarCelula(matricula, dia) {
-  const key = `${matricula}|${dia}`;
-  const atual = window._escalaDias.get(key)?.status || null;
-  const idx = ESCALA_CICLO_MANUAL.indexOf(atual);
-  const proximo = ESCALA_CICLO_MANUAL[(idx+1) % ESCALA_CICLO_MANUAL.length];
+function escalaSelecionarCelula(matricula, dia, elCel) {
+  if (window._escalaCelSelecionadaEl) {
+    window._escalaCelSelecionadaEl.style.outline = '';
+    window._escalaCelSelecionadaEl.style.outlineOffset = '';
+  }
+  if (elCel) {
+    elCel.style.outline = '2px solid var(--blue)';
+    elCel.style.outlineOffset = '-2px';
+  }
+  window._escalaCelSelecionadaEl = elCel;
+  window._escalaCelulaSelecionada = { matricula, dia };
+  escalaMsg('Célula selecionada — digite F, J ou K. Backspace limpa.');
+}
+
+function escalaRestaurarSelecaoVisual() {
+  const sel = window._escalaCelulaSelecionada;
+  if (!sel) return;
+  const el = document.querySelector(`[data-mat="${sel.matricula}"][data-dia="${sel.dia}"]`);
+  if (el) {
+    el.style.outline = '2px solid var(--blue)';
+    el.style.outlineOffset = '-2px';
+    window._escalaCelSelecionadaEl = el;
+  }
+}
+
+async function escalaAplicarTeclaNaCelula(tecla) {
+  const sel = window._escalaCelulaSelecionada;
+  if (!sel) return;
+  const { matricula, dia } = sel;
   const base = window._escalaBase, mes = window._escalaMes;
+  const key = `${matricula}|${dia}`;
 
-  if (proximo) {
-    const payload = {
-      base, mes, matricula, dia, status: proximo, origem: 'manual',
-      updated_at: new Date(), updated_by: currentUserProfile?.id || currentUser?.id || null,
-    };
-    const { error } = await db.from('escala_dia').upsert(payload, { onConflict: 'base,mes,matricula,dia' });
-    if (error) { alert('Erro ao salvar: ' + error.message); return; }
-    window._escalaDias.set(key, payload);
-  } else {
+  if (tecla === 'BACKSPACE' || tecla === 'DELETE') {
     await db.from('escala_dia').delete().eq('base', base).eq('mes', mes).eq('matricula', matricula).eq('dia', dia);
     window._escalaDias.delete(key);
+    escalaGradeAtualiza();
+    escalaRestaurarSelecaoVisual();
+    escalaMsg('Célula limpa.');
+    return;
   }
+
+  if (tecla === 'L') {
+    escalaMsg('L não pode ser digitado — férias vem automático do cadastro, não é manual.', true);
+    return;
+  }
+
+  if (ESCALA_TECLAS_VALIDAS.indexOf(tecla) === -1) {
+    escalaMsg(`"${tecla}" não é uma letra válida nessa célula. Use F, J ou K.`, true);
+    return;
+  }
+
+  const payload = {
+    base, mes, matricula, dia, status: tecla, origem: 'manual',
+    updated_at: new Date(), updated_by: currentUserProfile?.id || currentUser?.id || null,
+  };
+  const { error } = await db.from('escala_dia').upsert(payload, { onConflict: 'base,mes,matricula,dia' });
+  if (error) { escalaMsg('Erro ao salvar: ' + error.message, true); return; }
+  window._escalaDias.set(key, payload);
   escalaGradeAtualiza();
+  escalaRestaurarSelecaoVisual();
+  escalaMsg(`✓ Marcado como ${tecla}.`);
+}
+
+function escalaKeydownHandler(e) {
+  if (!window._escalaCelulaSelecionada) return;
+  const tag = document.activeElement?.tagName;
+  if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return; // não interfere na busca/seletores
+  const tecla = e.key.toUpperCase();
+  if (tecla.length !== 1 && tecla !== 'BACKSPACE' && tecla !== 'DELETE') return;
+  e.preventDefault();
+  escalaAplicarTeclaNaCelula(tecla);
+}
+
+if (!window._escalaKeydownRegistrado) {
+  window._escalaKeydownRegistrado = true;
+  document.addEventListener('keydown', escalaKeydownHandler);
 }
 
 // Gera folgas nos dias de menor demanda de voos, pra quem ainda não tem
@@ -830,6 +892,26 @@ function escalaMetaFolgasDoColab(ch, diasNoMes) {
   if (chNum === 180) return 6;
   if (chNum === 90)  return diasNoMes >= 31 ? 7 : 6;
   return 6; // padrão — 100h/120h/210h ainda precisam de confirmação
+}
+
+function escalaMesAnterior(mes) {
+  const [ano, mesNum] = mes.split('-').map(Number);
+  const d = new Date(ano, mesNum-2, 1);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+}
+
+// Regra de rotação: quem teve folga agrupada (2+ F seguidos) no mês
+// passado não recebe de novo nesse mês — evita bater sempre na mesma
+// pessoa. Confirmado com o cliente.
+async function escalaTeveFAMesPassado(base, matricula, mesAtual) {
+  const mesAnterior = escalaMesAnterior(mesAtual);
+  const { data } = await db.from('escala_dia').select('dia').eq('base', base).eq('matricula', matricula).eq('mes', mesAnterior).eq('status', 'F').order('dia');
+  if (!data || data.length < 2) return false;
+  const dias = data.map(r => r.dia);
+  for (let i = 0; i < dias.length - 1; i++) {
+    if (dias[i+1] === dias[i] + 1) return true;
+  }
+  return false;
 }
 
 async function escalaGerarFolgasAuto() {
@@ -856,12 +938,18 @@ async function escalaGerarFolgasAuto() {
     }
     let faltam = meta - folgasAtuais;
     if (faltam <= 0) continue;
+    const teveFA = await escalaTeveFAMesPassado(window._escalaBase, c.matricula, window._escalaMes);
 
     for (const { dia } of diasOrdenados) {
       if (faltam <= 0) break;
       const key = `${c.matricula}|${dia}`;
       if (window._escalaDias.has(key)) continue;
       if (escalaEstaDeFerias(c.matricula, ano, mesNum, dia)) continue;
+      if (teveFA) {
+        const antesOcupado = window._escalaDias.get(`${c.matricula}|${dia-1}`)?.status === 'F';
+        const depoisOcupado = window._escalaDias.get(`${c.matricula}|${dia+1}`)?.status === 'F';
+        if (antesOcupado || depoisOcupado) continue; // evita gerar FA de novo pra quem já teve mês passado
+      }
       inserts.push({
         base: window._escalaBase, mes: window._escalaMes, matricula: c.matricula, dia, status: 'F', origem: 'auto',
         updated_at: new Date(), updated_by: currentUserProfile?.id || currentUser?.id || null,
