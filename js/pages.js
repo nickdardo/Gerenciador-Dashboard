@@ -333,13 +333,13 @@ function escalaSelecionarDia(dia, elCel) {
 function escalaSetBase(base) {
   window._escalaBase = base;
   window._escalaDiaSelecionado = 1;
-  escalaRenderDash(document.getElementById('page-content'));
+  escalaRenderGrade(document.getElementById('page-content'));
 }
 
 function escalaSetMes(mes) {
   window._escalaMes = mes;
   window._escalaDiaSelecionado = 1;
-  escalaRenderDash(document.getElementById('page-content'));
+  escalaRenderGrade(document.getElementById('page-content'));
 }
 
 // ══════════════════════════════════════════════════════
@@ -417,6 +417,11 @@ async function escalaRenderGrade(el) {
 function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
   const base = window._escalaBase;
   const mes  = window._escalaMes;
+  const role = currentUserProfile?.role;
+  const myBases = (currentUserProfile?.bases || []).filter(b => b !== '*');
+  const isAdmin = role === 'admin';
+  const bases = isAdmin ? (typeof hcAllBases === 'function' ? hcAllBases() : []) : myBases;
+
   el.innerHTML = `
     <div class="page-header">
       <div>
@@ -424,6 +429,9 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
         <p class="page-sub">Montar escala · ${base} · ${typeof adhMonthLabel==='function'?adhMonthLabel(mes):mes}</p>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
+        ${bases.length>1
+          ? `<select class="adh-month-select" onchange="escalaSetBase(this.value)">${bases.map(b=>`<option value="${b}" ${b===base?'selected':''}>${b}</option>`).join('')}</select>`
+          : `<span class="adh-base-badge">${base||'—'}</span>`}
         <select class="adh-month-select" onchange="escalaSetMes(this.value)">${escalaMesOptionsHTML(mes)}</select>
       </div>
     </div>
