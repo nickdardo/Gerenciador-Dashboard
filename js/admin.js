@@ -1792,6 +1792,52 @@ function adminMalhaSetAgregacao(a) {
 // falta pra transformar "chegou um voo" em "preciso de X rampeiros" — base
 // do motor de demanda horária que vai puxar da malha de voos real.
 // ══════════════════════════════════════════════════════
+// ── Classificadores confirmados com o cliente ──────────
+// Categoria de aeronave: C208=C208, AT72=ATR, {B738,A320,E295,E190}=NARROW,
+// A321=A321. Tipos maiores (wide-body) ainda não apareceram na malha real,
+// então ficam de fora até surgir dado de verdade pra mapear.
+const ESCALA_CATEGORIA_MAP = {
+  'C208': 'C208',
+  'AT72': 'ATR',
+  'B738': 'NARROW',
+  'A320': 'NARROW',
+  'E295': 'NARROW',
+  'E190': 'NARROW',
+  'A321': 'A321',
+};
+function escalaCategoriaBase(tipo) {
+  return ESCALA_CATEGORIA_MAP[String(tipo||'').toUpperCase().trim()] || null;
+}
+
+// Doméstico x Internacional: voos que não são AZUL/LATAM/GOL (nem
+// subsidiárias, ex. Azul Conecta, Gol Cargo) contam como internacional.
+function escalaDomOuInter(cia) {
+  const c = String(cia||'').toUpperCase();
+  if (c.includes('AZUL') || c.includes('GOL') || c.includes('TAM') || c.includes('LATAM')) return 'DOM';
+  return 'INTER';
+}
+
+// Categoria completa pra um voo (usada pelo motor de demanda, passo 2) —
+// C208 e ATR não variam por dom/inter, o resto varia.
+function escalaCategoriaDoVoo(tipo, cia) {
+  const base = escalaCategoriaBase(tipo);
+  if (!base) return null;
+  if (base === 'C208' || base === 'ATR') return base;
+  return `${base} ${escalaDomOuInter(cia)}`;
+}
+
+const ESCALA_CATEGORIAS_OPCOES = [
+  ['', 'Geral (qualquer aeronave)'],
+  ['C208', 'C208'],
+  ['ATR', 'ATR'],
+  ['NARROW DOM', 'Narrow · Doméstico'],
+  ['NARROW INTER', 'Narrow · Internacional'],
+  ['A321 DOM', 'A321 · Doméstico'],
+  ['A321 INTER', 'A321 · Internacional'],
+  ['WIDE', 'Wide-body'],
+  ['SUPER', 'Super'],
+];
+
 async function adminParametrosTab(el) {
   el.innerHTML = `
     <div class="adm-section-header"><span>Parâmetros de Solo</span></div>
@@ -1838,12 +1884,13 @@ function adminParametrosRenderList(el) {
     <div class="adm-table-wrap">
       <table class="adm-table">
         <thead><tr>
-          <th>Função</th><th class="r">Pessoas/voo</th><th class="r">Antes (min)</th><th class="r">Depois (min)</th><th>Status</th><th></th>
+          <th>Função</th><th>Categoria</th><th class="r">Pessoas/voo</th><th class="r">Antes (min)</th><th class="r">Depois (min)</th><th>Status</th><th></th>
         </tr></thead>
         <tbody>
-          ${rows.length ? rows.map(r => `
+          ${rows.length ? [...rows].sort((a,b)=>a.funcao.localeCompare(b.funcao)||a.categoria.localeCompare(b.categoria)).map(r => `
             <tr>
               <td style="font-weight:500">${r.funcao}</td>
+              <td>${r.categoria ? `<span class="adm-base-tag">${r.categoria}</span>` : `<span style="color:var(--text-muted);font-size:11px">Geral</span>`}</td>
               <td class="r">${r.qtd_por_voo}</td>
               <td class="r">${r.min_antes_chegada}</td>
               <td class="r">${r.min_depois_saida}</td>
@@ -1852,7 +1899,7 @@ function adminParametrosRenderList(el) {
                 <button class="adm-btn-edit" onclick="adminParametrosEditar(${r.id})">Editar</button>
                 <button class="adm-btn-edit" style="color:#fc8181" onclick="adminParametrosExcluir(${r.id})">Excluir</button>
               </td>
-            </tr>`).join('') : `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px">Nenhuma função configurada ${baseAtiva===''?'no padrão':'pra '+baseAtiva} ainda.</td></tr>`}
+            </tr>`).join('') : `<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:24px">Nenhuma função configurada ${baseAtiva===''?'no padrão':'pra '+baseAtiva} ainda.</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -1886,8 +1933,13 @@ function adminParametrosAbrirModal(row) {
       <div class="adm-modal-body">
         <div class="adm-field"><label>Função</label>
           <input id="param-funcao" class="adm-input" value="${row?.funcao||''}" placeholder="Ex: Auxiliar de Rampa I" ${row?'disabled style="opacity:.6"':''}></div>
+        <div class="adm-field"><label>Categoria de aeronave</label>
+          <select id="param-categoria" class="adm-input" ${row?'disabled style="opacity:.6"':''}>
+            ${ESCALA_CATEGORIAS_OPCOES.map(([v,l]) => `<option value="${v}" ${(row?.categoria||'')===v?'selected':''}>${l}</option>`).join('')}
+          </select>
+        </div>
         <div class="adm-field"><label>Pessoas por voo</label>
-          <input id="param-qtd" type="number" min="1" class="adm-input" value="${row?.qtd_por_voo ?? 1}"></div>
+          <input id="param-qtd" type="number" min="0" step="0.5" class="adm-input" value="${row?.qtd_por_voo ?? 1}"></div>
         <div class="adm-field"><label>Começa a trabalhar (min antes do pouso)</label>
           <input id="param-antes" type="number" min="0" class="adm-input" value="${row?.min_antes_chegada ?? 15}"></div>
         <div class="adm-field"><label>Continua trabalhando (min depois da decolagem)</label>
@@ -1906,22 +1958,23 @@ function adminParametrosAbrirModal(row) {
 }
 
 async function adminParametrosSalvar(id) {
-  const base   = window._paramBaseAtiva ?? '';
-  const funcao = document.getElementById('param-funcao').value.trim();
-  const qtd    = parseInt(document.getElementById('param-qtd').value) || 1;
-  const antes  = parseInt(document.getElementById('param-antes').value) || 0;
-  const depois = parseInt(document.getElementById('param-depois').value) || 0;
-  const ativo  = document.getElementById('param-ativo').checked;
+  const base     = window._paramBaseAtiva ?? '';
+  const funcao   = document.getElementById('param-funcao').value.trim();
+  const categoria= document.getElementById('param-categoria').value;
+  const qtd      = parseFloat(document.getElementById('param-qtd').value) || 0;
+  const antes    = parseInt(document.getElementById('param-antes').value) || 0;
+  const depois   = parseInt(document.getElementById('param-depois').value) || 0;
+  const ativo    = document.getElementById('param-ativo').checked;
   if (!funcao) { alert('Preencha a função.'); return; }
 
   const payload = {
-    base, funcao, qtd_por_voo: qtd, min_antes_chegada: antes, min_depois_saida: depois, ativo,
+    base, funcao, categoria, qtd_por_voo: qtd, min_antes_chegada: antes, min_depois_saida: depois, ativo,
     updated_at: new Date(), updated_by: currentUserProfile?.id || currentUser?.id || null,
   };
 
   const { error } = id
     ? await db.from('escala_parametro_solo').update(payload).eq('id', id)
-    : await db.from('escala_parametro_solo').upsert(payload, { onConflict: 'base,funcao' });
+    : await db.from('escala_parametro_solo').upsert(payload, { onConflict: 'base,funcao,categoria' });
 
   if (error) { alert('Erro ao salvar: ' + error.message); return; }
   document.querySelector('.adm-overlay')?.remove();
