@@ -510,8 +510,11 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
           ? `<select class="adh-month-select" onchange="escalaSetBase(this.value)">${bases.map(b=>`<option value="${b}" ${b===base?'selected':''}>${b}</option>`).join('')}</select>`
           : `<span class="adh-base-badge">${base||'—'}</span>`}
         <select class="adh-month-select" onchange="escalaSetMes(this.value)">${escalaMesOptionsHTML(mes)}</select>
+        <button class="adh-refresh-btn" style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600" onclick="escalaToggleVoosPanel()">✈ Voos &amp; demanda</button>
       </div>
     </div>
+
+    <div id="escala-voos-panel" style="display:none;margin-bottom:16px"></div>
 
     ${window._escalaAutoPopulado ? `
     <div style="font-size:11.5px;color:#5fa87a;background:rgba(95,168,122,.08);border:1px solid rgba(95,168,122,.25);border-radius:8px;padding:8px 14px;margin-bottom:14px">
@@ -1046,6 +1049,147 @@ async function escalaGerarFolgasAuto() {
   if (error) { escalaMsg('Erro ao gerar: ' + error.message, true); return; }
   escalaGradeAtualiza();
   escalaMsg(`✓ ${inserts.length} folga(s) geradas nos dias de menor demanda de voos (meta por CH: ${[...metasUsadas].sort((a,b)=>a-b).join('/')} folgas/mês).`);
+}
+
+// ── Painel "Voos & demanda" — toggle no cabeçalho ──────
+async function escalaToggleVoosPanel() {
+  const painel = document.getElementById('escala-voos-panel');
+  if (!painel) return;
+  const abrindo = painel.style.display === 'none';
+  if (!abrindo) { painel.style.display = 'none'; return; }
+
+  painel.style.display = 'block';
+  painel.innerHTML = `<div class="hc-panel"><div style="text-align:center;padding:20px;color:var(--text-muted);font-size:12px"><i class="ti ti-loader-2" style="font-size:22px;opacity:.4;animation:spin 1s linear infinite" aria-hidden="true"></i><br>Carregando voos...</div></div>`;
+
+  const base = window._escalaBase, mes = window._escalaMes;
+  const [ano, mesNum] = mes.split('-').map(Number);
+  const diasNoMes = new Date(ano, mesNum, 0).getDate();
+  const mesInicioStr = `${mes}-01`;
+  const mesFimStr = `${mes}-${String(diasNoMes).padStart(2,'0')}`;
+
+  const { data: voosRows } = await db.from('malha').select('data,cia').eq('base', base).gte('data', mesInicioStr).lte('data', mesFimStr);
+  window._escalaVoosDetalhe = voosRows || [];
+  escalaRenderVoosPanel(ano, mesNum, diasNoMes);
+}
+
+function escalaRenderVoosPanel(ano, mesNum, diasNoMes) {
+  const rows = window._escalaVoosDetalhe || [];
+  const porDia = new Map(); // dia(1-31) -> { total, cias: Map<cia,count> }
+  for (let d = 1; d <= diasNoMes; d++) porDia.set(d, { total: 0, cias: new Map() });
+
+  rows.forEach(r => {
+    const d = parseInt(r.data.slice(8,10), 10);
+    const info = porDia.get(d);
+    if (!info) return;
+    info.total++;
+    const cia = r.cia || 'Sem cia';
+    info.cias.set(cia, (info.cias.get(cia)||0)+1);
+  });
+
+  const totalMes = rows.length;
+  let piorDia = 1, piorDiaValor = 0;
+  for (const [d, info] of porDia) { if (info.total > piorDiaValor) { piorDiaValor = info.total; piorDia = d; } }
+
+  const porSemana = new Map(); // key -> total
+  rows.forEach(r => {
+    const { key } = typeof malhaSemanaChave === 'function' ? malhaSemanaChave(r.data) : { key: '—' };
+    porSemana.set(key, (porSemana.get(key)||0)+1);
+  });
+  let piorSemana = '—', piorSemanaValor = 0;
+  for (const [key, total] of porSemana) { if (total > piorSemanaValor) { piorSemanaValor = total; piorSemana = key; } }
+
+  window._escalaVoosPorDiaDetalhe = porDia;
+
+  const painel = document.getElementById('escala-voos-panel');
+  if (!painel) return;
+  painel.innerHTML = `
+    <div class="hc-panel">
+      <div style="display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap">
+        <div style="flex:1;min-width:140px;background:rgba(255,255,255,.02);border-radius:8px;padding:10px 12px">
+          <div style="font-size:9.5px;color:var(--text-muted);text-transform:uppercase">Total no mês</div>
+          <div style="font-size:20px;font-weight:700;color:var(--text-primary)">${totalMes.toLocaleString('pt-BR')}</div>
+        </div>
+        <div style="flex:1;min-width:140px;background:rgba(255,255,255,.02);border-radius:8px;padding:10px 12px">
+          <div style="font-size:9.5px;color:var(--text-muted);text-transform:uppercase">Pior dia</div>
+          <div style="font-size:20px;font-weight:700;color:#fc8181">${String(piorDia).padStart(2,'0')}/${String(mesNum).padStart(2,'0')} <span style="font-size:11px;font-weight:400;color:var(--text-muted)">(${piorDiaValor} voos)</span></div>
+        </div>
+        <div style="flex:1;min-width:140px;background:rgba(255,255,255,.02);border-radius:8px;padding:10px 12px">
+          <div style="font-size:9.5px;color:var(--text-muted);text-transform:uppercase">Pior semana</div>
+          <div style="font-size:20px;font-weight:700;color:#fc8181">${piorSemana}</div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">Curva do mês — passe o mouse pra ver voos e clientes do dia</div>
+      <div style="position:relative">
+        <svg id="escala-voos-svg" viewBox="0 0 900 110" style="width:100%;height:100px;cursor:crosshair"
+          onmousemove="escalaVoosHover(event,this,${ano},${mesNum},${diasNoMes})" onmouseleave="escalaVoosLeave()">
+          <path id="escala-voos-area" fill="#38bdf8" opacity="0.12" stroke="none" d=""/>
+          <path id="escala-voos-linha" fill="none" stroke="#38bdf8" stroke-width="2" d=""/>
+          <line id="escala-voos-crosshair" x1="0" y1="0" x2="0" y2="90" stroke="var(--text-muted)" stroke-width="1" stroke-dasharray="3,3" style="display:none"/>
+          <circle id="escala-voos-dot" r="3.5" fill="#38bdf8" stroke="#0b0f1a" stroke-width="1.5" style="display:none"/>
+        </svg>
+        <div id="escala-voos-tooltip" style="position:absolute;display:none;pointer-events:none;background:#141b2c;border:1px solid var(--border-strong);border-radius:8px;padding:8px 10px;font-size:11px;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.4);z-index:10;top:0"></div>
+      </div>
+    </div>
+  `;
+
+  // desenha a curva
+  const W = 900, H = 110, padB = 16;
+  const valores = [];
+  for (let d = 1; d <= diasNoMes; d++) valores.push(porDia.get(d).total);
+  const max = Math.max(1, ...valores);
+  const stepX = W/(diasNoMes-1 || 1);
+  const scaleY = v => H-padB-(v/max*(H-padB-6));
+  let d1 = '', d2 = '';
+  valores.forEach((v,i) => {
+    const x = i*stepX, y = scaleY(v);
+    d1 += (i===0?'M':'L') + ` ${x.toFixed(1)} ${y.toFixed(1)}`;
+  });
+  d2 = d1 + ` L ${((diasNoMes-1)*stepX).toFixed(1)} ${H} L 0 ${H} Z`;
+  document.getElementById('escala-voos-linha').setAttribute('d', d1);
+  document.getElementById('escala-voos-area').setAttribute('d', d2);
+  window._escalaVoosChartMeta = { W, H, padB, diasNoMes, max };
+}
+
+function escalaVoosHover(evt, svg, ano, mesNum, diasNoMes) {
+  const meta = window._escalaVoosChartMeta;
+  const porDia = window._escalaVoosPorDiaDetalhe;
+  if (!meta || !porDia) return;
+  const rect = svg.getBoundingClientRect();
+  const xSvg = (evt.clientX - rect.left) * (meta.W / rect.width);
+  const stepX = meta.W/(diasNoMes-1 || 1);
+  let idx = Math.round(xSvg/stepX);
+  idx = Math.max(0, Math.min(diasNoMes-1, idx));
+  const dia = idx+1;
+  const info = porDia.get(dia);
+  if (!info) return;
+
+  const scaleY = v => meta.H-meta.padB-(v/meta.max*(meta.H-meta.padB-6));
+  const xPos = idx*stepX, yPos = scaleY(info.total);
+
+  const crosshair = document.getElementById('escala-voos-crosshair');
+  const dot = document.getElementById('escala-voos-dot');
+  if (crosshair) { crosshair.setAttribute('x1', xPos); crosshair.setAttribute('x2', xPos); crosshair.style.display = 'block'; }
+  if (dot) { dot.setAttribute('cx', xPos); dot.setAttribute('cy', yPos); dot.style.display = 'block'; }
+
+  const top5 = [...info.cias.entries()].sort((a,b) => b[1]-a[1]).slice(0,5);
+  const tooltip = document.getElementById('escala-voos-tooltip');
+  if (tooltip) {
+    tooltip.innerHTML = `
+      <div style="font-weight:700;color:var(--text-primary);margin-bottom:5px">${String(dia).padStart(2,'0')}/${String(mesNum).padStart(2,'0')} · ${info.total} voo(s)</div>
+      ${top5.map(([cia,n]) => `<div style="color:var(--text-secondary);font-size:10.5px">${cia}: <strong>${n}</strong></div>`).join('') || '<div style="color:var(--text-muted);font-size:10.5px">Sem voos nesse dia</div>'}
+    `;
+    const leftPct = xPos/meta.W*100;
+    if (leftPct > 65) { tooltip.style.left = 'auto'; tooltip.style.right = `${100-leftPct}%`; }
+    else { tooltip.style.right = 'auto'; tooltip.style.left = `${leftPct}%`; }
+    tooltip.style.display = 'block';
+  }
+}
+
+function escalaVoosLeave() {
+  ['escala-voos-crosshair','escala-voos-dot','escala-voos-tooltip'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
 }
 
 function escalaMsg(texto, erro) {
