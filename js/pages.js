@@ -444,8 +444,7 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
       <div style="display:flex;gap:14px;margin-bottom:12px;font-size:11px;color:var(--text-secondary);flex-wrap:wrap">
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:var(--text-muted);margin-right:5px"></span>F · Folga</span>
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#a78bfa;margin-right:5px"></span>FA · Folga agrupada</span>
-        <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#c9a24a;margin-right:5px"></span>J · Afastado (férias)</span>
-        <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#fc8181;margin-right:5px"></span>L · Licença</span>
+        <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#c9a24a;margin-right:5px"></span>L · Férias (automático)</span>
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#38bdf8;margin-right:5px"></span>K · Cursos</span>
         <span style="color:var(--text-muted)">clique numa célula vazia ou de trabalho pra marcar F/K</span>
       </div>
@@ -488,7 +487,7 @@ function escalaConteudoDoMes(c, ano, mesNum, diasNoMes) {
     const key = `${c.matricula}|${d}`;
     const manual = window._escalaDias.get(key);
     if (manual) { brutos.push(manual.status); continue; } // 'F' | 'K' | 'L'
-    if (escalaEstaDeFerias(c.matricula, ano, mesNum, d)) { brutos.push('J'); continue; }
+    if (escalaEstaDeFerias(c.matricula, ano, mesNum, d)) { brutos.push('L'); continue; }
     brutos.push(null); // dia de trabalho
   }
   return brutos.map((s, i) => {
@@ -498,8 +497,7 @@ function escalaConteudoDoMes(c, ano, mesNum, diasNoMes) {
       return { status: 'F', exibido: (antes||depois) ? 'FA' : 'F', editavel: true };
     }
     if (s === 'K') return { status: 'K', exibido: 'K', editavel: true };
-    if (s === 'L') return { status: 'L', exibido: 'L', editavel: true };
-    if (s === 'J') return { status: 'J', exibido: 'J', editavel: false };
+    if (s === 'L') return { status: 'L', exibido: 'L', editavel: false };
     const dia = i+1;
     const horario = escalaHorarioPlanejado(base, c.matricula, ano, mesNum, dia);
     return { status: null, exibido: horario, editavel: true, horario: !!horario };
@@ -513,7 +511,7 @@ function escalaCelHTML(item) {
   }
   const cores = { F:'#8896aa', FA:'#a78bfa', J:'#c9a24a', L:'#fc8181', K:'#38bdf8' };
   const cor = cores[item.exibido] || '#8896aa';
-  const titulo = item.status === 'J' ? 'Férias — automático, vem do cadastro' : '';
+  const titulo = item.status === 'L' ? 'Férias — automático, vem do cadastro' : '';
   return `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:${cor}22;color:${cor};border-radius:4px;font-weight:700;font-size:10px" title="${titulo}">${item.exibido}</div>`;
 }
 
@@ -644,7 +642,7 @@ async function escalaRemoverColab(matricula) {
   escalaGradeAtualiza();
 }
 
-const ESCALA_CICLO_MANUAL = ['F', 'K', 'L', null];
+const ESCALA_CICLO_MANUAL = ['F', 'K', null];
 
 async function escalaClicarCelula(matricula, dia) {
   const key = `${matricula}|${dia}`;
