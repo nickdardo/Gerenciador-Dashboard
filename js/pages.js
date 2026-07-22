@@ -65,22 +65,59 @@ async function escalaRenderDash(el) {
   const isAdmin = role === 'admin';
   const bases = isAdmin ? (typeof hcAllBases === 'function' ? hcAllBases() : []) : myBases;
 
-  const { data, error } = await db.from('escala_dimensionamento').select('*').eq('base', base).eq('mes', mes).order('entrada');
-  if (error) console.warn('[escala] erro ao carregar:', error.message);
-  const linhas = data || [];
-  window._escalaLinhas = linhas;
-
-  const totalPosicoes = linhas.reduce((s,r) => s+r.qtd, 0);
-  const funcoesUnicas = new Set(linhas.map(r=>r.funcao)).size;
   const [ano, mesNum] = mes.split('-').map(Number);
   const diasNoMes = new Date(ano, mesNum, 0).getDate();
   const primeiroDiaSemana = new Date(ano, mesNum-1, 1).getDay();
+  const mesInicioStr = `${mes}-01`;
+  const mesFimStr = `${mes}-${String(diasNoMes).padStart(2,'0')}`;
+
+  // ── Motor de demanda real: voos de verdade da malha + parâmetros de solo ──
+  const { data: paramRows } = await db.from('escala_parametro_solo')
+    .select('*').in('base', [base, '']).eq('ativo', true);
+  const parametrosEfetivos = escalaMesclarParametros(paramRows || [], base);
+
+  const { data: voosRows } = await db.from('malha')
+    .select('data,tipo,cia,hora_chegada,hora_saida')
+    .eq('base', base).gte('data', mesInicioStr).lte('data', mesFimStr);
+
+  let demandaPorDia = null; // Map<dia(1-31), Map<funcao, array(48) de 30min>>
+  if (parametrosEfetivos.length && voosRows?.length) {
+    const voosPorDia = new Map();
+    voosRows.forEach(v => {
+      const dia = parseInt(v.data.slice(8,10), 10);
+      if (!voosPorDia.has(dia)) voosPorDia.set(dia, []);
+      voosPorDia.get(dia).push(v);
+    });
+    demandaPorDia = new Map();
+    for (const [dia, voosDoDia] of voosPorDia) {
+      demandaPorDia.set(dia, escalaDemandaDoDia(voosDoDia, parametrosEfetivos));
+    }
+  }
+
+  // ── Reserva: dimensionamento estático do Gerador (só se o motor real não tiver dado) ──
+  let linhasEstaticas = [];
+  if (!demandaPorDia) {
+    const { data } = await db.from('escala_dimensionamento').select('*').eq('base', base).eq('mes', mes).order('entrada');
+    linhasEstaticas = data || [];
+  }
+
+  window._escalaDemandaPorDia = demandaPorDia;
+  window._escalaLinhasEstaticas = linhasEstaticas;
+  window._escalaModoReal = !!demandaPorDia;
+
+  const semDados = !demandaPorDia && !linhasEstaticas.length;
+  const funcoesUnicas = demandaPorDia
+    ? new Set([...demandaPorDia.values()].flatMap(m => [...m.keys()])).size
+    : new Set(linhasEstaticas.map(r=>r.funcao)).size;
+  const picoDoMes = demandaPorDia
+    ? Math.max(0, ...[...demandaPorDia.keys()].map(d => escalaPicoDoDia(d)))
+    : linhasEstaticas.reduce((s,r)=>s+r.qtd, 0);
 
   el.innerHTML = `
     <div class="page-header">
       <div>
         <h1 class="page-title">Escala Online</h1>
-        <p class="page-sub">Calendário mensal · ${base} · ${typeof adhMonthLabel==='function'?adhMonthLabel(mes):mes}</p>
+        <p class="page-sub">Calendário mensal · ${base} · ${typeof adhMonthLabel==='function'?adhMonthLabel(mes):mes}${demandaPorDia?' · demanda real (malha de voos)':''}</p>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
         ${bases.length>1
@@ -90,16 +127,24 @@ async function escalaRenderDash(el) {
       </div>
     </div>
 
-    ${!linhas.length ? `
+    ${semDados ? `
       <div class="adh-denied">
         <i class="ti ti-calendar-off" style="font-size:36px;opacity:.2" aria-hidden="true"></i>
-        <p>Nenhum dimensionamento gerado ainda pra <strong>${base}</strong> em <strong>${typeof adhMonthLabel==='function'?adhMonthLabel(mes):mes}</strong>.<br>
-          <a href="#" onclick="navigateTo('gerador')" style="color:#00a0d2">Ir pro Gerador</a> pra criar um e depois clicar em "Escala Online".</p>
+        <p>Nenhum dado ainda pra <strong>${base}</strong> em <strong>${typeof adhMonthLabel==='function'?adhMonthLabel(mes):mes}</strong>.<br>
+          Configure os <a href="#" onclick="navigateTo('admin')" style="color:#00a0d2">Parâmetros de Solo</a> e confira se a
+          <a href="#" onclick="navigateTo('admin')" style="color:#00a0d2">Malha aérea</a> desse mês já foi carregada —
+          ou gere um dimensionamento no <a href="#" onclick="navigateTo('gerador')" style="color:#00a0d2">Gerador</a> como alternativa.</p>
       </div>
     ` : `
+      ${!demandaPorDia ? `
+        <div style="font-size:11.5px;color:#f6ad55;background:rgba(201,162,74,.08);border:1px solid rgba(201,162,74,.25);border-radius:8px;padding:10px 14px;margin-bottom:16px">
+          Mostrando o padrão estático do Gerador (mesma coisa todo dia). Pra ver a demanda real dia a dia, configure os
+          <a href="#" onclick="navigateTo('admin')" style="color:#00a0d2">Parâmetros de Solo</a> pra essa base e confirme que a Malha aérea desse mês já está carregada.
+        </div>` : ''}
+
       ${typeof adhKpiCardsHTML === 'function' ? adhKpiCardsHTML([
         { key:'blue', icon:'ti-users', title:'Necessidade de pessoal', rows: [
-          { label:'Posições por dia', sub:'mesmo padrão em todos os dias do mês', value: totalPosicoes.toLocaleString('pt-BR') },
+          { label: demandaPorDia?'Pico do mês':'Posições por dia', sub: demandaPorDia?'maior demanda simultânea num único dia':'mesmo padrão em todos os dias do mês', value: Math.round(picoDoMes*10)/10 },
           { label:'Funções distintas', sub:'variedade de cargos', value: String(funcoesUnicas) },
         ]},
       ]) : ''}
@@ -107,17 +152,99 @@ async function escalaRenderDash(el) {
       <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
         <div class="hc-panel" style="flex:2;min-width:440px">
           <div class="hc-panel-title">${typeof adhMonthLabel==='function'?adhMonthLabel(mes):mes}</div>
-          ${escalaCalendarioHTML(ano, mesNum, diasNoMes, primeiroDiaSemana, totalPosicoes)}
+          ${escalaCalendarioHTML(ano, mesNum, diasNoMes, primeiroDiaSemana)}
         </div>
         <div class="hc-panel" style="flex:1;min-width:320px" id="escala-dia-detalhe">
-          ${escalaDetalheDiaHTML(window._escalaDiaSelecionado, linhas)}
+          ${escalaDetalheDiaHTML(window._escalaDiaSelecionado)}
         </div>
       </div>
     `}
   `;
 }
 
-function escalaCalendarioHTML(ano, mesNum, diasNoMes, primeiroDiaSemana, totalPosicoes) {
+// ── Motor de demanda horária — puxa da malha de voos real + parâmetros de solo ──
+
+// Janela de tempo (em minutos do dia, 0-1439) em que uma função fica ocupada
+// por causa de um voo, de acordo com a referência configurada. Recorta em
+// [0,1439) — não trata virada de dia por enquanto (simplificação da v1).
+function escalaJanela(voo, param) {
+  const chegada = typeof malhaMinutos==='function' ? malhaMinutos(voo.hora_chegada) : null;
+  const saida   = typeof malhaMinutos==='function' ? malhaMinutos(voo.hora_saida)   : null;
+  let inicio, fim;
+  if (param.referencia === 'chegada') {
+    if (chegada == null) return null;
+    inicio = chegada - param.min_antes_chegada;
+    fim    = chegada + param.min_depois_saida;
+  } else if (param.referencia === 'saida') {
+    if (saida == null) return null;
+    inicio = saida - param.min_antes_chegada;
+    fim    = saida + param.min_depois_saida;
+  } else { // 'ambos' — turnaround completo
+    if (chegada == null || saida == null) return null;
+    inicio = chegada - param.min_antes_chegada;
+    fim    = saida + param.min_depois_saida;
+  }
+  return { inicio, fim };
+}
+
+// Junta os parâmetros "padrão" (base='') com os específicos da base ativa —
+// os específicos sobrescrevem o padrão quando existem pra mesma função+categoria.
+function escalaMesclarParametros(rows, baseAtiva) {
+  const porChave = new Map();
+  rows.filter(r => r.base === '').forEach(r => porChave.set(r.funcao+'|'+r.categoria, r));
+  rows.filter(r => r.base === baseAtiva && baseAtiva).forEach(r => porChave.set(r.funcao+'|'+r.categoria, r));
+  return [...porChave.values()];
+}
+
+// Demanda de um dia: pra cada voo, descobre a categoria da aeronave e aplica
+// o parâmetro certo de cada função (o específico da categoria tem prioridade
+// sobre o "Geral"), somando pessoas em cada slot de 30min da janela.
+function escalaDemandaDoDia(voosDoDia, parametrosEfetivos) {
+  const porFuncao = new Map();
+  const paramsPorFuncao = new Map();
+  parametrosEfetivos.forEach(p => {
+    if (!paramsPorFuncao.has(p.funcao)) paramsPorFuncao.set(p.funcao, []);
+    paramsPorFuncao.get(p.funcao).push(p);
+  });
+
+  voosDoDia.forEach(voo => {
+    const categoria = typeof escalaCategoriaDoVoo === 'function' ? escalaCategoriaDoVoo(voo.tipo, voo.cia) : null;
+    for (const [funcao, params] of paramsPorFuncao) {
+      let usar = categoria ? params.find(p => p.categoria === categoria) : null;
+      if (!usar) usar = params.find(p => p.categoria === '');
+      if (!usar) continue;
+
+      const janela = escalaJanela(voo, usar);
+      if (!janela) continue;
+
+      if (!porFuncao.has(funcao)) porFuncao.set(funcao, new Array(48).fill(0));
+      const arr = porFuncao.get(funcao);
+      const iniSlot = Math.max(0, Math.floor(janela.inicio/30));
+      const fimSlot = Math.min(47, Math.ceil(janela.fim/30));
+      for (let s = iniSlot; s <= fimSlot; s++) arr[s] += usar.qtd_por_voo;
+    }
+  });
+
+  return porFuncao;
+}
+
+// Pico de pessoas simultâneas (somando todas as funções) num dia específico.
+function escalaPicoDoDia(dia) {
+  if (window._escalaDemandaPorDia) {
+    const porFuncao = window._escalaDemandaPorDia.get(dia);
+    if (!porFuncao) return 0;
+    let pico = 0;
+    for (let slot = 0; slot < 48; slot++) {
+      let soma = 0;
+      for (const arr of porFuncao.values()) soma += arr[slot];
+      if (soma > pico) pico = soma;
+    }
+    return Math.round(pico*10)/10;
+  }
+  return (window._escalaLinhasEstaticas || []).reduce((s,r)=>s+r.qtd, 0);
+}
+
+function escalaCalendarioHTML(ano, mesNum, diasNoMes, primeiroDiaSemana) {
   const diasLbl = ['dom','seg','ter','qua','qui','sex','sáb'];
   const diaSel = window._escalaDiaSelecionado || 1;
   let cells = '';
@@ -126,21 +253,52 @@ function escalaCalendarioHTML(ano, mesNum, diasNoMes, primeiroDiaSemana, totalPo
     const dow = new Date(ano, mesNum-1, d).getDay();
     const finalDeSemana = dow === 0 || dow === 6;
     const ativo = d === diaSel;
+    const pico = escalaPicoDoDia(d);
     cells += `
       <div class="escala-cel ${ativo?'escala-cel-ativa':''} ${finalDeSemana?'escala-cel-fds':''}" onclick="escalaSelecionarDia(${d}, this)">
         <div class="escala-cel-dia">${d}</div>
-        <div class="escala-cel-qtd">${totalPosicoes}</div>
+        <div class="escala-cel-qtd">${pico}</div>
       </div>`;
   }
   return `
     <div class="escala-grade-semana">${diasLbl.map(d=>`<div>${d}</div>`).join('')}</div>
     <div class="escala-grade">${cells}</div>
-    <div style="font-size:10px;color:var(--text-muted);margin-top:10px">O mesmo padrão de posições se repete em todos os dias por enquanto — a escala ainda não varia por dia da semana nem tem folga individual (próximos passos).</div>
+    <div style="font-size:10px;color:var(--text-muted);margin-top:10px">
+      ${window._escalaModoReal
+        ? 'Pico de pessoas simultâneas necessárias naquele dia, calculado a partir dos voos reais da malha + parâmetros de solo.'
+        : 'O mesmo padrão de posições se repete em todos os dias por enquanto (dado estático do Gerador) — configure os Parâmetros de Solo pra ver a demanda real por dia.'}
+    </div>
   `;
 }
 
-function escalaDetalheDiaHTML(dia, linhas) {
-  linhas = linhas || window._escalaLinhas || [];
+function escalaDetalheDiaHTML(dia) {
+  if (window._escalaModoReal) {
+    const porFuncao = window._escalaDemandaPorDia.get(dia);
+    if (!porFuncao || !porFuncao.size) {
+      return `<div class="hc-panel-title">Dia ${String(dia).padStart(2,'0')}</div><div style="color:var(--text-muted);font-size:12px;padding:16px 0;text-align:center">Sem voos nesse dia.</div>`;
+    }
+    const linhas = [...porFuncao.entries()].map(([funcao, arr]) => {
+      let pico = 0, picoSlot = 0;
+      arr.forEach((v,i) => { if (v>pico) { pico=v; picoSlot=i; } });
+      const totalMin = picoSlot*30, h = Math.floor(totalMin/60), m = totalMin%60;
+      return { funcao, pico: Math.round(pico*10)/10, hora: `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}` };
+    }).sort((a,b)=>b.pico-a.pico);
+
+    return `
+      <div class="hc-panel-title">Dia ${String(dia).padStart(2,'0')} · pico de pessoas por função</div>
+      <table style="width:100%;font-size:12px;border-collapse:collapse">
+        ${linhas.map(l => `
+          <tr>
+            <td style="padding:5px 0;color:var(--text-primary)">${l.funcao}</td>
+            <td style="padding:5px 0;color:var(--text-muted);text-align:right;white-space:nowrap">pico ${l.hora}</td>
+            <td style="padding:5px 0;color:var(--text-secondary);text-align:right;width:34px;font-weight:700">${l.pico}</td>
+          </tr>`).join('')}
+      </table>
+      <div style="font-size:10px;color:var(--text-muted);margin-top:10px">Calculado a partir dos voos reais desse dia + parâmetros de solo cadastrados.</div>
+    `;
+  }
+
+  const linhas = window._escalaLinhasEstaticas || [];
   const grupos = { 'Madrugada':[], 'Manhã':[], 'Tarde':[], 'Noite':[] };
   linhas.forEach(r => {
     const h = parseInt(String(r.entrada).split(':')[0], 10) || 0;
@@ -148,7 +306,7 @@ function escalaDetalheDiaHTML(dia, linhas) {
     grupos[per].push(r);
   });
   return `
-    <div class="hc-panel-title">Dia ${String(dia).padStart(2,'0')} · posições necessárias</div>
+    <div class="hc-panel-title">Dia ${String(dia).padStart(2,'0')} · posições necessárias (padrão)</div>
     ${Object.entries(grupos).filter(([,l])=>l.length).map(([per,l]) => `
       <div style="margin-bottom:14px">
         <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px">${per}</div>
@@ -169,7 +327,7 @@ function escalaSelecionarDia(dia, elCel) {
   document.querySelectorAll('.escala-cel').forEach(c => c.classList.remove('escala-cel-ativa'));
   if (elCel) elCel.classList.add('escala-cel-ativa');
   const det = document.getElementById('escala-dia-detalhe');
-  if (det) det.innerHTML = escalaDetalheDiaHTML(dia, window._escalaLinhas);
+  if (det) det.innerHTML = escalaDetalheDiaHTML(dia);
 }
 
 function escalaSetBase(base) {

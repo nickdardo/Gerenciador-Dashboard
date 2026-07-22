@@ -1884,7 +1884,7 @@ function adminParametrosRenderList(el) {
     <div class="adm-table-wrap">
       <table class="adm-table">
         <thead><tr>
-          <th>Função</th><th>Categoria</th><th class="r">Pessoas/voo</th><th class="r">Antes (min)</th><th class="r">Depois (min)</th><th>Status</th><th></th>
+          <th>Função</th><th>Categoria</th><th class="r">Pessoas/voo</th><th>Referência</th><th class="r">Antes (min)</th><th class="r">Depois (min)</th><th>Status</th><th></th>
         </tr></thead>
         <tbody>
           ${rows.length ? [...rows].sort((a,b)=>a.funcao.localeCompare(b.funcao)||a.categoria.localeCompare(b.categoria)).map(r => `
@@ -1892,6 +1892,7 @@ function adminParametrosRenderList(el) {
               <td style="font-weight:500">${r.funcao}</td>
               <td>${r.categoria ? `<span class="adm-base-tag">${r.categoria}</span>` : `<span style="color:var(--text-muted);font-size:11px">Geral</span>`}</td>
               <td class="r">${r.qtd_por_voo}</td>
+              <td style="font-size:11px;color:var(--text-secondary)">${{ambos:'Turnaround',saida:'Saída',chegada:'Chegada'}[r.referencia]||'Turnaround'}</td>
               <td class="r">${r.min_antes_chegada}</td>
               <td class="r">${r.min_depois_saida}</td>
               <td><span class="adm-status-dot ${r.ativo?'on':'off'}"></span><span style="font-size:11px">${r.ativo?'Ativo':'Inativo'}</span></td>
@@ -1899,7 +1900,7 @@ function adminParametrosRenderList(el) {
                 <button class="adm-btn-edit" onclick="adminParametrosEditar(${r.id})">Editar</button>
                 <button class="adm-btn-edit" style="color:#fc8181" onclick="adminParametrosExcluir(${r.id})">Excluir</button>
               </td>
-            </tr>`).join('') : `<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:24px">Nenhuma função configurada ${baseAtiva===''?'no padrão':'pra '+baseAtiva} ainda.</td></tr>`}
+            </tr>`).join('') : `<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:24px">Nenhuma função configurada ${baseAtiva===''?'no padrão':'pra '+baseAtiva} ainda.</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -1964,9 +1965,16 @@ function adminParametrosAbrirModal(row) {
         </div>
         <div class="adm-field"><label>Pessoas por voo</label>
           <input id="param-qtd" type="number" min="0" step="0.5" class="adm-input" value="${row?.qtd_por_voo ?? 1}"></div>
-        <div class="adm-field"><label>Começa a trabalhar (min antes do pouso)</label>
+        <div class="adm-field"><label>Referência de horário</label>
+          <select id="param-referencia" class="adm-input">
+            <option value="ambos"   ${(row?.referencia||'ambos')==='ambos'?'selected':''}>Turnaround completo (chegada até saída) — ex: Rampa</option>
+            <option value="saida"   ${row?.referencia==='saida'?'selected':''}>Só em relação à saída — ex: Triagem</option>
+            <option value="chegada" ${row?.referencia==='chegada'?'selected':''}>Só em relação à chegada — ex: Desembarque</option>
+          </select>
+        </div>
+        <div class="adm-field"><label>Minutos antes da referência</label>
           <input id="param-antes" type="number" min="0" class="adm-input" value="${row?.min_antes_chegada ?? 15}"></div>
-        <div class="adm-field"><label>Continua trabalhando (min depois da decolagem)</label>
+        <div class="adm-field"><label>Minutos depois da referência</label>
           <input id="param-depois" type="number" min="0" class="adm-input" value="${row?.min_depois_saida ?? 15}"></div>
         <div class="adm-field" style="flex-direction:row;align-items:center;gap:10px">
           <label style="margin:0">Ativo</label>
@@ -1995,17 +2003,19 @@ function adminParametrosToggleFuncaoManual(select) {
 }
 
 async function adminParametrosSalvar(id) {
-  const base     = window._paramBaseAtiva ?? '';
-  const funcao   = document.getElementById('param-funcao').value.trim();
-  const categoria= document.getElementById('param-categoria').value;
-  const qtd      = parseFloat(document.getElementById('param-qtd').value) || 0;
-  const antes    = parseInt(document.getElementById('param-antes').value) || 0;
-  const depois   = parseInt(document.getElementById('param-depois').value) || 0;
-  const ativo    = document.getElementById('param-ativo').checked;
+  const base      = window._paramBaseAtiva ?? '';
+  const funcao    = document.getElementById('param-funcao').value.trim();
+  const categoria = document.getElementById('param-categoria').value;
+  const qtd       = parseFloat(document.getElementById('param-qtd').value) || 0;
+  const referencia= document.getElementById('param-referencia').value;
+  const antes     = parseInt(document.getElementById('param-antes').value) || 0;
+  const depois    = parseInt(document.getElementById('param-depois').value) || 0;
+  const ativo     = document.getElementById('param-ativo').checked;
   if (!funcao) { alert('Preencha a função.'); return; }
 
   const payload = {
-    base, funcao, categoria, qtd_por_voo: qtd, min_antes_chegada: antes, min_depois_saida: depois, ativo,
+    base, funcao, categoria, qtd_por_voo: qtd, referencia,
+    min_antes_chegada: antes, min_depois_saida: depois, ativo,
     updated_at: new Date(), updated_by: currentUserProfile?.id || currentUser?.id || null,
   };
 
