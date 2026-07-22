@@ -18,7 +18,8 @@ async function pageEscala(el) {
   const myBases = (currentUserProfile?.bases || []).filter(b => b !== '*');
   const isAdmin = role === 'admin';
 
-  if (typeof adhEnsureRoster === 'function') await adhEnsureRoster();
+  if (typeof hcEnsureData === 'function') await hcEnsureData();
+  else if (typeof adhEnsureRoster === 'function') await adhEnsureRoster();
   const bases = isAdmin ? (typeof hcAllBases === 'function' ? hcAllBases() : []) : myBases;
 
   if (!bases.length) {
@@ -392,6 +393,7 @@ async function escalaPopularAutomaticamente(base, mes) {
     if (dataPartes.length !== 3) continue;
     const mesDoRegistro = `${dataPartes[2]}-${dataPartes[1]}`;
     if (mesDoRegistro !== mes) continue;
+    if (typeof hcIsDesligado === 'function' && hcIsDesligado(mat)) continue; // não inclui inativos
     if (!matriculas.has(mat)) matriculas.set(mat, h.nome || window.eoColabs?.get(mat)?.nome || '');
   }
   if (!matriculas.size) return [];
@@ -422,7 +424,8 @@ async function escalaRenderGrade(el) {
       <p>Carregando...</p>
     </div>`;
 
-  if (typeof adhEnsureRoster === 'function') await adhEnsureRoster();
+  if (typeof hcEnsureData === 'function') await hcEnsureData();
+  else if (typeof adhEnsureRoster === 'function') await adhEnsureRoster();
   if (typeof adminLoadFileOnDemand === 'function') {
     await adminLoadFileOnDemand('horarios', () => {});
   }
@@ -566,6 +569,8 @@ function escalaHorarioPlanejado(base, matricula, ano, mesNum, dia) {
 // Horário fixo do colaborador nesse mês: o horário mais frequente entre os
 // dias de trabalho dele. Com isso a grade só precisa mostrar o horário nos
 // dias que FOGEM do normal — o resto fica limpo.
+// Horário mais frequente do colaborador no mês (moda) — usado pras colunas
+// fixas de Entrada/Saída/Horário/Setor da tabela.
 function escalaHorarioFixoDoColab(matricula, ano, mesNum, diasNoMes) {
   const base = window._escalaBase;
   const contagem = new Map();
@@ -579,15 +584,14 @@ function escalaHorarioFixoDoColab(matricula, ano, mesNum, diasNoMes) {
   return melhor;
 }
 
-function escalaConteudoDoMes(c, ano, mesNum, diasNoMes, horarioFixo) {
-  const base = window._escalaBase;
+function escalaConteudoDoMes(c, ano, mesNum, diasNoMes) {
   const brutos = [];
   for (let d = 1; d <= diasNoMes; d++) {
     const key = `${c.matricula}|${d}`;
     const manual = window._escalaDias.get(key);
-    if (manual) { brutos.push(manual.status); continue; } // 'F' | 'K' | 'CH'
+    if (manual) { brutos.push(manual.status); continue; } // 'F' | 'K' | 'CH' | 'J'
     if (escalaEstaDeFerias(c.matricula, ano, mesNum, d)) { brutos.push('L'); continue; }
-    brutos.push(null); // dia de trabalho
+    brutos.push(null); // dia de trabalho normal
   }
   return brutos.map((s, i) => {
     if (s === 'F') {
@@ -595,65 +599,72 @@ function escalaConteudoDoMes(c, ano, mesNum, diasNoMes, horarioFixo) {
       const depois = brutos[i+1] === 'F';
       return { status: 'F', exibido: (antes||depois) ? 'FA' : 'F', editavel: true };
     }
-    if (s === 'K') return { status: 'K', exibido: 'K', editavel: true };
+    if (s === 'K')  return { status: 'K',  exibido: 'K',  editavel: true };
     if (s === 'CH') return { status: 'CH', exibido: 'CH', editavel: true };
-    if (s === 'J') return { status: 'J', exibido: 'J', editavel: true };
-    if (s === 'L') return { status: 'L', exibido: 'L', editavel: false };
-    const dia = i+1;
-    const horario = escalaHorarioPlanejado(base, c.matricula, ano, mesNum, dia);
-    if (!horario) return { status: null, exibido: null, editavel: true };
-    if (horarioFixo && horario === horarioFixo) {
-      return { status: null, exibido: null, editavel: true }; // igual ao fixo — não precisa mostrar
-    }
-    return { status: null, exibido: horario, editavel: true, excecao: true }; // difere do fixo — sinaliza
+    if (s === 'J')  return { status: 'J',  exibido: 'J',  editavel: true };
+    if (s === 'L')  return { status: 'L',  exibido: 'L',  editavel: false };
+    return { status: null, exibido: null, editavel: true }; // dia de trabalho — célula vazia
   });
 }
 
 function escalaCelHTML(item) {
   if (!item.exibido) return '';
-  if (item.excecao) {
-    return `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:#f6ad5522;color:#f6ad55;border-radius:4px;font-weight:600;font-size:8.5px" title="Horário diferente do fixo desse colaborador">${item.exibido}</div>`;
-  }
   const cores = { F:'#8896aa', FA:'#a78bfa', L:'#c9a24a', K:'#38bdf8', CH:'#fb923c', J:'#fc8181' };
   const cor = cores[item.exibido] || '#8896aa';
   const titulo = item.status === 'L' ? 'Férias — automático, vem do cadastro' : item.status === 'CH' ? 'Folga compensa (banco de horas)' : item.status === 'J' ? 'Afastado' : '';
   return `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:${cor}22;color:${cor};border-radius:4px;font-weight:700;font-size:10px" title="${titulo}">${item.exibido}</div>`;
 }
 
-const ESCALA_CORES_GRUPO = ['#38bdf8', '#5fa87a', '#a78bfa', '#f6ad55', '#e08a45', '#fc8181'];
+// Setor = turno do dia, calculado a partir do horário de entrada (nomes
+// estilo alfabeto fonético, igual seu arquivo de referência).
+function escalaSetorDoTurno(entradaStr) {
+  if (!entradaStr) return '—';
+  const h = parseInt(String(entradaStr).split(':')[0], 10) || 0;
+  if (h < 6)  return 'Turno Alpha';
+  if (h < 12) return 'Turno Bravo';
+  if (h < 18) return 'Turno Charlie';
+  return 'Turno Delta';
+}
 
 function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
-  const colabs = window._escalaColabs || [];
+  const colabs = [...(window._escalaColabs || [])].sort((a, b) => {
+    const fa = window.eoColabs?.get(a.matricula)?.funcao || '';
+    const fb = window.eoColabs?.get(b.matricula)?.funcao || '';
+    return fa.localeCompare(fb) || String(a.nome||'').localeCompare(String(b.nome||''));
+  });
   const demandaPorDia = window._escalaDemandaPorDia;
   const voosPorDia = window._escalaVoosPorDia || [];
+  const NCOLS_FIXAS = 8; // Matrícula, Nome, Setor, Função, Entrada, Saída, Horário, CH
 
   let html = `<table style="border-collapse:collapse;font-size:11px;width:100%"><thead><tr>`;
-  html += `<th style="text-align:left;padding:6px 8px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;position:sticky;left:0;background:var(--bg-surface);min-width:80px">Matrícula</th>`;
-  html += `<th style="text-align:left;padding:6px 8px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;position:sticky;left:80px;background:var(--bg-surface);min-width:170px">Colaborador</th>`;
-  html += `<th style="text-align:center;padding:6px 4px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;width:44px">Jorn.</th>`;
-  html += `<th style="text-align:center;padding:6px 4px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;width:64px">Hor. fixo</th>`;
+  html += `<th style="text-align:left;padding:6px 8px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;position:sticky;left:0;background:var(--bg-surface);min-width:76px">Matrícula</th>`;
+  html += `<th style="text-align:left;padding:6px 8px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;position:sticky;left:76px;background:var(--bg-surface);min-width:170px">Nome</th>`;
+  html += `<th style="text-align:left;padding:6px 8px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;min-width:96px">Setor</th>`;
+  html += `<th style="text-align:left;padding:6px 8px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;min-width:140px">Função</th>`;
+  html += `<th style="text-align:center;padding:6px 4px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;width:50px">Entrada</th>`;
+  html += `<th style="text-align:center;padding:6px 4px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;width:50px">Saída</th>`;
+  html += `<th style="text-align:center;padding:6px 4px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;width:74px">Horário</th>`;
+  html += `<th style="text-align:center;padding:6px 4px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;width:36px">CH</th>`;
   for (let d = 1; d <= diasNoMes; d++) {
     const dow = new Date(ano, mesNum-1, d).getDay();
     html += `<th style="padding:3px 2px;color:var(--text-muted);font-size:9px;font-weight:600;width:26px;text-align:center">${ESCALA_DIAS_SEMANA[dow]}<br><span style="color:var(--text-secondary);font-size:10px">${d}</span></th>`;
   }
-  html += `<th style="text-align:center;padding:6px 4px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;width:50px">Folgas</th>`;
-  html += `<th style="text-align:center;padding:6px 4px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;width:60px">Horas trab.</th>`;
   html += `</tr></thead><tbody>`;
 
-  const NCOLS = diasNoMes + 6;
+  const NCOLS = NCOLS_FIXAS + diasNoMes;
 
   if (demandaPorDia) {
     ESCALA_TURNOS.forEach(t => {
-      html += `<tr><td colspan="4" style="position:sticky;left:0;background:var(--bg-surface);padding:3px 8px;color:${t.cor};font-size:8.5px;font-weight:700">TURNO ${t.nome} · ${t.label}</td>`;
+      html += `<tr><td colspan="${NCOLS_FIXAS}" style="position:sticky;left:0;background:var(--bg-surface);padding:3px 8px;color:${t.cor};font-size:8.5px;font-weight:700">TURNO ${t.nome} · ${t.label}</td>`;
       for (let d = 1; d <= diasNoMes; d++) {
         const v = escalaDemandaPorTurno(d)[ESCALA_TURNOS.indexOf(t)];
         html += `<td style="text-align:center;font-size:8px;color:${t.cor};font-weight:600">${v}</td>`;
       }
-      html += `<td></td><td></td></tr>`;
+      html += `</tr>`;
     });
   } else {
     const maxNec = Math.max(1, ...voosPorDia);
-    html += `<tr><td colspan="4" style="position:sticky;left:0;background:var(--bg-surface);padding:4px 8px 10px;color:#5fa87a;font-size:9px;font-weight:700;vertical-align:bottom">VOOS/DIA</td>`;
+    html += `<tr><td colspan="${NCOLS_FIXAS}" style="position:sticky;left:0;background:var(--bg-surface);padding:4px 8px 10px;color:#5fa87a;font-size:9px;font-weight:700;vertical-align:bottom">VOOS/DIA</td>`;
     for (let d = 1; d <= diasNoMes; d++) {
       const v = voosPorDia[d-1] || 0;
       const baixa = maxNec > 0 && v <= maxNec*0.4;
@@ -662,77 +673,39 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
         <div style="font-size:7.5px;color:var(--text-muted);text-align:center;margin-top:2px">${v}</div>
       </td>`;
     }
-    html += `<td></td><td></td></tr>`;
+    html += `</tr>`;
   }
 
   if (!colabs.length) {
-    html += `<tr><td colspan="${NCOLS}" style="padding:24px;text-align:center;color:var(--text-muted);font-size:11.5px;border-top:1px solid var(--border)">Nenhum colaborador adicionado ainda — busque por matrícula ou nome acima.</td></tr>`;
+    html += `<tr><td colspan="${NCOLS}" style="padding:24px;text-align:center;color:var(--text-muted);font-size:11.5px;border-top:1px solid var(--border)">Nenhum colaborador ativo encontrado pra essa base+mês — busque por matrícula ou nome acima.</td></tr>`;
   }
 
-  const totF = new Array(diasNoMes).fill(0);
-  const totFA = new Array(diasNoMes).fill(0);
-
-  // Agrupa por cargo, cada grupo com uma cor e contagem — mais fácil de
-  // escanear do que uma lista única de 30+ pessoas misturadas.
-  const grupos = new Map();
   colabs.forEach(c => {
-    const cargo = window.eoColabs?.get(c.matricula)?.funcao || 'Sem cargo cadastrado';
-    if (!grupos.has(cargo)) grupos.set(cargo, []);
-    grupos.get(cargo).push(c);
-  });
+    const info = window.eoColabs?.get(c.matricula);
+    const funcao = info?.funcao || '—';
+    const ch = info?.ch || '—';
+    const horarioFixo = escalaHorarioFixoDoColab(c.matricula, ano, mesNum, diasNoMes);
+    const [entrada, saida] = horarioFixo ? horarioFixo.split('-') : [null, null];
+    const setor = escalaSetorDoTurno(entrada);
 
-  [...grupos.entries()].forEach(([cargo, membros], gi) => {
-    const corGrupo = ESCALA_CORES_GRUPO[gi % ESCALA_CORES_GRUPO.length];
-    html += `<tr><td colspan="${NCOLS}" style="padding:6px 8px;color:${corGrupo};font-size:9.5px;font-weight:700;background:${corGrupo}14;border-top:2px solid ${corGrupo}33">${cargo} · ${membros.length}</td></tr>`;
+    const conteudo = escalaConteudoDoMes(c, ano, mesNum, diasNoMes);
 
-    membros.forEach(c => {
-      const info = window.eoColabs?.get(c.matricula);
-      const chNum = parseInt(String(info?.ch||'').replace(/\D/g,''), 10) || null;
-      const jornada = chNum ? Math.round(chNum/30*10)/10 : '—';
-      const horarioFixo = escalaHorarioFixoDoColab(c.matricula, ano, mesNum, diasNoMes);
-
-      const conteudo = escalaConteudoDoMes(c, ano, mesNum, diasNoMes, horarioFixo);
-      conteudo.forEach((item, i) => {
-        if (item.status === 'F') { if (item.exibido === 'FA') totFA[i]++; else totF[i]++; }
-      });
-      const folgas = conteudo.filter(x => x.status === 'F' || x.status === 'CH' || x.status === 'J').length;
-      const diasTrabalhados = conteudo.filter(x => !x.status).length;
-      const horasTrab = jornada !== '—' ? Math.round(diasTrabalhados * jornada) : '—';
-      const corFolgas = folgas > 10 ? '#fc8181' : folgas > 8 ? '#f6ad55' : 'var(--text-primary)';
-
-      html += `<tr>`;
-      html += `<td style="padding:6px 8px;color:var(--text-muted);font-family:monospace;font-size:10px;border-top:1px solid var(--border);position:sticky;left:0;background:var(--bg-surface)">${c.matricula}</td>`;
-      html += `<td style="padding:6px 8px;color:var(--text-primary);font-weight:500;border-top:1px solid var(--border);position:sticky;left:80px;background:var(--bg-surface);white-space:nowrap">${c.nome||''}
-        <span onclick="escalaRemoverColab('${c.matricula}')" style="cursor:pointer;color:#fc8181;margin-left:4px" title="Remover da escala">✕</span></td>`;
-      html += `<td style="padding:6px 4px;color:var(--text-secondary);text-align:center;border-top:1px solid var(--border)">${jornada}</td>`;
-      html += `<td style="padding:6px 4px;color:var(--text-secondary);text-align:center;border-top:1px solid var(--border);font-size:9.5px;white-space:nowrap">${horarioFixo||'—'}</td>`;
-      conteudo.forEach((item, i) => {
-        const dia = i+1;
-        html += `<td data-mat="${c.matricula}" data-dia="${dia}" onclick="${item.editavel?`escalaSelecionarCelula('${c.matricula}',${dia},this)`:''}" style="padding:2px;border-top:1px solid var(--border);height:28px;width:26px;cursor:${item.editavel?'pointer':'default'}">${escalaCelHTML(item)}</td>`;
-      });
-      html += `<td style="text-align:center;font-weight:700;color:${corFolgas};border-top:1px solid var(--border)">${folgas}</td>`;
-      html += `<td style="text-align:center;color:var(--text-secondary);border-top:1px solid var(--border)">${horasTrab}</td>`;
-      html += `</tr>`;
+    html += `<tr>`;
+    html += `<td style="padding:6px 8px;color:var(--text-muted);font-family:monospace;font-size:10px;border-top:1px solid var(--border);position:sticky;left:0;background:var(--bg-surface)">${c.matricula}</td>`;
+    html += `<td style="padding:6px 8px;color:var(--text-primary);font-weight:500;border-top:1px solid var(--border);position:sticky;left:76px;background:var(--bg-surface);white-space:nowrap">${c.nome||''}
+      <span onclick="escalaRemoverColab('${c.matricula}')" style="cursor:pointer;color:#fc8181;margin-left:4px" title="Remover da escala">✕</span></td>`;
+    html += `<td style="padding:6px 8px;color:var(--text-secondary);border-top:1px solid var(--border);white-space:nowrap;font-size:10px">${setor}</td>`;
+    html += `<td style="padding:6px 8px;color:var(--text-secondary);border-top:1px solid var(--border);white-space:nowrap">${funcao}</td>`;
+    html += `<td style="text-align:center;color:var(--text-secondary);border-top:1px solid var(--border);font-size:10px">${entrada||'—'}</td>`;
+    html += `<td style="text-align:center;color:var(--text-secondary);border-top:1px solid var(--border);font-size:10px">${saida||'—'}</td>`;
+    html += `<td style="text-align:center;color:var(--text-secondary);border-top:1px solid var(--border);font-size:9.5px;white-space:nowrap">${horarioFixo||'—'}</td>`;
+    html += `<td style="text-align:center;color:var(--text-secondary);border-top:1px solid var(--border);font-size:10px">${ch}</td>`;
+    conteudo.forEach((item, i) => {
+      const dia = i+1;
+      html += `<td data-mat="${c.matricula}" data-dia="${dia}" onclick="${item.editavel?`escalaSelecionarCelula('${c.matricula}',${dia},this)`:''}" style="padding:2px;border-top:1px solid var(--border);height:28px;width:26px;cursor:${item.editavel?'pointer':'default'}">${escalaCelHTML(item)}</td>`;
     });
+    html += `</tr>`;
   });
-
-  if (colabs.length) {
-    html += `<tr><td colspan="4" style="padding:5px 8px;color:var(--text-secondary);font-size:8.5px;font-weight:700;border-top:2px solid var(--border-strong)">TOTAL FOLGA NORMAL (F)</td>`;
-    totF.forEach(v => { html += `<td style="text-align:center;font-size:8px;color:var(--text-secondary);border-top:2px solid var(--border-strong)">${v}</td>`; });
-    html += `<td style="border-top:2px solid var(--border-strong)"></td><td style="border-top:2px solid var(--border-strong)"></td></tr>`;
-
-    html += `<tr><td colspan="4" style="padding:4px 8px;color:#a78bfa;font-size:8.5px;font-weight:700">TOTAL FOLGA AGRUPADA (FA)</td>`;
-    totFA.forEach(v => { html += `<td style="text-align:center;font-size:8px;color:#a78bfa">${v}</td>`; });
-    html += `<td></td><td></td></tr>`;
-
-    html += `<tr><td colspan="4" style="padding:4px 8px;color:#fc8181;font-size:8.5px;font-weight:700">TOTAL FA+F (risco de cobertura)</td>`;
-    for (let d = 0; d < diasNoMes; d++) {
-      const soma = totF[d] + totFA[d];
-      const alerta = soma >= 3;
-      html += `<td style="text-align:center;font-size:8px;font-weight:700;color:${alerta?'#fc8181':'var(--text-secondary)'};background:${alerta?'rgba(252,129,129,.12)':'transparent'}">${soma}</td>`;
-    }
-    html += `<td></td><td></td></tr>`;
-  }
 
   html += `</tbody></table>`;
   return html;
