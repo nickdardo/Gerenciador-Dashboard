@@ -1911,13 +1911,27 @@ function adminParametrosSetBase(base) {
   adminParametrosRenderList(document.getElementById('adm-tab-content'));
 }
 
-function adminParametrosNovo() {
+async function adminParametrosNovo() {
+  if (!window.eoColabs?.size && typeof adhEnsureRoster === 'function') await adhEnsureRoster();
   adminParametrosAbrirModal(null);
 }
 
-function adminParametrosEditar(id) {
+async function adminParametrosEditar(id) {
   const row = (window._paramRows || []).find(r => r.id === id);
-  if (row) adminParametrosAbrirModal(row);
+  if (!row) return;
+  if (!window.eoColabs?.size && typeof adhEnsureRoster === 'function') await adhEnsureRoster();
+  adminParametrosAbrirModal(row);
+}
+
+function escalaFuncoesDisponiveis() {
+  const set = new Set();
+  if (window.eoColabs) {
+    for (const [, r] of window.eoColabs) {
+      const f = String(r.funcao || '').trim();
+      if (f) set.add(f);
+    }
+  }
+  return [...set].sort();
 }
 
 function adminParametrosAbrirModal(row) {
@@ -1932,7 +1946,17 @@ function adminParametrosAbrirModal(row) {
       </div>
       <div class="adm-modal-body">
         <div class="adm-field"><label>Função</label>
-          <input id="param-funcao" class="adm-input" value="${row?.funcao||''}" placeholder="Ex: Auxiliar de Rampa I" ${row?'disabled style="opacity:.6"':''}></div>
+          ${row ? `
+            <input id="param-funcao" class="adm-input" value="${row.funcao}" disabled style="opacity:.6">
+          ` : `
+            <select id="param-funcao-select" class="adm-input" onchange="adminParametrosToggleFuncaoManual(this)">
+              <option value="">Selecione...</option>
+              ${escalaFuncoesDisponiveis().map(f => `<option value="${f}">${f}</option>`).join('')}
+              <option value="__outra__">+ Digitar manualmente (função ainda não cadastrada)</option>
+            </select>
+            <input id="param-funcao" class="adm-input" placeholder="Nome da função" style="display:none;margin-top:8px">
+          `}
+        </div>
         <div class="adm-field"><label>Categoria de aeronave</label>
           <select id="param-categoria" class="adm-input" ${row?'disabled style="opacity:.6"':''}>
             ${ESCALA_CATEGORIAS_OPCOES.map(([v,l]) => `<option value="${v}" ${(row?.categoria||'')===v?'selected':''}>${l}</option>`).join('')}
@@ -1955,6 +1979,19 @@ function adminParametrosAbrirModal(row) {
       </div>
     </div>`;
   document.body.appendChild(overlay);
+}
+
+function adminParametrosToggleFuncaoManual(select) {
+  const manual = document.getElementById('param-funcao');
+  if (!manual) return;
+  if (select.value === '__outra__') {
+    manual.style.display = 'block';
+    manual.value = '';
+    manual.focus();
+  } else {
+    manual.style.display = 'none';
+    manual.value = select.value;
+  }
 }
 
 async function adminParametrosSalvar(id) {
