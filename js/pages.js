@@ -527,6 +527,8 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
         </div>
         <button class="adh-refresh-btn" style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600" onclick="escalaGerarFolgasAuto()">⚡ Gerar folgas automáticas</button>
         <button class="adh-refresh-btn" onclick="escalaAdicionarFeriado()">📅 + Feriado dessa base</button>
+        <button class="adh-refresh-btn" style="color:#fc8181" onclick="escalaLimparStatus()">🗑 Limpar folgas/status</button>
+        <button class="adh-refresh-btn" style="color:#fc8181" onclick="escalaLimparColaboradores()">🗑 Limpar colaboradores</button>
       </div>
       <div id="escala-status-msg" style="font-size:11px;color:var(--text-muted);margin-top:8px;min-height:14px"></div>
     </div>
@@ -687,57 +689,62 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   });
   const NCOLS_FIXAS = 8; // Matrícula, Nome, Setor, Função, Entrada, Saída, Horário, CH
   const NCOLS = NCOLS_FIXAS + diasNoMes;
+  const BORDA = '1px solid rgba(255,255,255,.08)';
 
-  const LARG = { mat:70, nome:190, setor:90, funcao:170, entrada:50, saida:50, horario:80, ch:40, dia:24 };
+  const LARG = { mat:80, nome:210, setor:100, funcao:190, entrada:60, saida:60, horario:90, ch:46, dia:30 };
   const leftNome = LARG.mat;
 
-  let html = `<table style="border-collapse:collapse;font-size:11px;width:100%;table-layout:fixed"><colgroup>
+  let html = `<table style="border-collapse:collapse;font-size:13px;width:100%;table-layout:fixed"><colgroup>
     <col style="width:${LARG.mat}px"><col style="width:${LARG.nome}px"><col style="width:${LARG.setor}px"><col style="width:${LARG.funcao}px">
     <col style="width:${LARG.entrada}px"><col style="width:${LARG.saida}px"><col style="width:${LARG.horario}px"><col style="width:${LARG.ch}px">
     ${Array(diasNoMes).fill(`<col style="width:${LARG.dia}px">`).join('')}
   </colgroup><thead><tr>`;
-  html += `<th style="text-align:left;padding:6px 8px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;position:sticky;left:0;background:var(--bg-surface);z-index:2">Matrícula</th>`;
-  html += `<th style="text-align:left;padding:6px 8px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;position:sticky;left:${leftNome}px;background:var(--bg-surface);z-index:2">Nome</th>`;
-  html += `<th style="text-align:left;padding:6px 8px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase">Setor</th>`;
-  html += `<th style="text-align:left;padding:6px 8px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase">Função</th>`;
-  html += `<th style="text-align:center;padding:6px 4px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase">Entrada</th>`;
-  html += `<th style="text-align:center;padding:6px 4px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase">Saída</th>`;
-  html += `<th style="text-align:center;padding:6px 4px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase">Horário</th>`;
-  html += `<th style="text-align:center;padding:6px 4px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase">CH</th>`;
+  html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;left:0;background:var(--bg-surface);z-index:2;border:${BORDA}">Matrícula</th>`;
+  html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;left:${leftNome}px;background:var(--bg-surface);z-index:2;border:${BORDA}">Nome</th>`;
+  html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;border:${BORDA}">Setor</th>`;
+  html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;border:${BORDA}">Função</th>`;
+  html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:11px;text-transform:uppercase;border:${BORDA}">Entrada</th>`;
+  html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:11px;text-transform:uppercase;border:${BORDA}">Saída</th>`;
+  html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:11px;text-transform:uppercase;border:${BORDA}">Horário</th>`;
+  html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:11px;text-transform:uppercase;border:${BORDA}">CH</th>`;
   for (let d = 1; d <= diasNoMes; d++) {
     const dow = new Date(ano, mesNum-1, d).getDay();
     const dataISO = `${ano}-${String(mesNum).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const feriado = window._escalaFeriados?.get(dataISO);
     const fimDeSemana = dow === 0 || dow === 6;
     const bg = feriado ? 'rgba(252,129,129,.14)' : fimDeSemana ? 'rgba(255,255,255,.05)' : 'transparent';
-    html += `<th style="padding:3px 2px;color:${feriado?'#fc8181':'var(--text-muted)'};font-size:9px;font-weight:600;text-align:center;background:${bg}" title="${feriado?feriado.nome:''}">${ESCALA_DIAS_SEMANA[dow]}<br><span style="color:${feriado?'#fc8181':'var(--text-secondary)'};font-size:10px">${d}</span></th>`;
+    html += `<th style="padding:5px 2px;color:${feriado?'#fc8181':'var(--text-muted)'};font-size:10.5px;font-weight:600;text-align:center;background:${bg};border:${BORDA}" title="${feriado?feriado.nome:''}">${ESCALA_DIAS_SEMANA[dow]}<br><span style="color:${feriado?'#fc8181':'var(--text-secondary)'};font-size:11px">${d}</span></th>`;
   }
   html += `</tr></thead><tbody>`;
 
   if (!colabs.length) {
-    html += `<tr><td colspan="${NCOLS}" style="padding:24px;text-align:center;color:var(--text-muted);font-size:11.5px;border-top:1px solid var(--border)">Nenhum colaborador ativo encontrado pra essa base+mês — busque por matrícula ou nome acima.</td></tr>`;
+    html += `<tr><td colspan="${NCOLS}" style="padding:24px;text-align:center;color:var(--text-muted);font-size:12.5px;border:${BORDA}">Nenhum colaborador ativo encontrado pra essa base+mês — busque por matrícula ou nome acima.</td></tr>`;
   }
 
-  colabs.forEach(c => {
+  colabs.forEach((c, ci) => {
     const info = window.eoColabs?.get(c.matricula);
     const funcao = info?.funcao || '—';
     const ch = info?.ch || '—';
     const horarioFixo = escalaHorarioFixoDoColab(c.matricula, ano, mesNum, diasNoMes);
-    const [entrada, saida] = horarioFixo ? horarioFixo.split('-') : [null, null];
+    const [entradaCalc, saidaCalc] = horarioFixo ? horarioFixo.split('-') : [null, null];
+    const entrada = c.entrada_manual || entradaCalc || '';
+    const saida = c.saida_manual || saidaCalc || '';
+    const horarioExibido = (entrada && saida) ? `${entrada}-${saida}` : (horarioFixo || '—');
     const setor = escalaSetorDoTurno(entrada);
+    const zebra = ci % 2 === 0 ? 'rgba(255,255,255,.02)' : 'transparent';
 
     const conteudo = escalaConteudoDoMes(c, ano, mesNum, diasNoMes);
 
-    html += `<tr>`;
-    html += `<td style="padding:6px 8px;color:var(--text-muted);font-family:monospace;font-size:10px;border-top:1px solid var(--border);position:sticky;left:0;background:var(--bg-surface);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.matricula}</td>`;
-    html += `<td style="padding:6px 8px;color:var(--text-primary);font-weight:500;border-top:1px solid var(--border);position:sticky;left:${leftNome}px;background:var(--bg-surface);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${c.nome||''}">${c.nome||''}
+    html += `<tr style="background:${zebra}">`;
+    html += `<td style="padding:8px 10px;color:var(--text-muted);font-family:monospace;font-size:11px;position:sticky;left:0;background:inherit;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:${BORDA}">${c.matricula}</td>`;
+    html += `<td style="padding:8px 10px;color:var(--text-primary);font-weight:500;position:sticky;left:${leftNome}px;background:inherit;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:${BORDA}" title="${c.nome||''}">${c.nome||''}
       <span onclick="escalaRemoverColab('${c.matricula}')" style="cursor:pointer;color:#fc8181;margin-left:4px" title="Remover da escala">✕</span></td>`;
-    html += `<td style="padding:6px 8px;color:var(--text-secondary);border-top:1px solid var(--border);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px">${setor}</td>`;
-    html += `<td style="padding:6px 8px;color:var(--text-secondary);border-top:1px solid var(--border);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${funcao}">${funcao}</td>`;
-    html += `<td style="text-align:center;color:var(--text-secondary);border-top:1px solid var(--border);font-size:10px">${entrada||'—'}</td>`;
-    html += `<td style="text-align:center;color:var(--text-secondary);border-top:1px solid var(--border);font-size:10px">${saida||'—'}</td>`;
-    html += `<td style="text-align:center;color:var(--text-secondary);border-top:1px solid var(--border);font-size:9.5px;white-space:nowrap">${horarioFixo||'—'}</td>`;
-    html += `<td style="text-align:center;color:var(--text-secondary);border-top:1px solid var(--border);font-size:10px">${ch}</td>`;
+    html += `<td style="padding:8px 10px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;border:${BORDA}">${setor}</td>`;
+    html += `<td style="padding:8px 10px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:${BORDA}" title="${funcao}">${funcao}</td>`;
+    html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" value="${entrada}" placeholder="--:--" onchange="escalaEditarHorario('${c.matricula}','entrada',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-secondary);text-align:center;font-size:12px;padding:4px"></td>`;
+    html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" value="${saida}" placeholder="--:--" onchange="escalaEditarHorario('${c.matricula}','saida',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-secondary);text-align:center;font-size:12px;padding:4px"></td>`;
+    html += `<td style="text-align:center;color:var(--text-secondary);font-size:11.5px;white-space:nowrap;border:${BORDA}">${horarioExibido}</td>`;
+    html += `<td style="text-align:center;color:var(--text-secondary);border:${BORDA}">${ch}</td>`;
     conteudo.forEach((item, i) => {
       const dia = i+1;
       const dow = new Date(ano, mesNum-1, dia).getDay();
@@ -745,13 +752,22 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
       const feriado = window._escalaFeriados?.get(dataISO);
       const fimDeSemana = dow === 0 || dow === 6;
       const bgCel = feriado ? 'rgba(252,129,129,.08)' : fimDeSemana ? 'rgba(255,255,255,.03)' : 'transparent';
-      html += `<td data-mat="${c.matricula}" data-dia="${dia}" onclick="${item.editavel?`escalaSelecionarCelula('${c.matricula}',${dia},this)`:''}" style="padding:2px;border-top:1px solid var(--border);height:28px;width:26px;cursor:${item.editavel?'pointer':'default'};background:${bgCel}" title="${feriado?feriado.nome:''}">${escalaCelHTML(item)}</td>`;
+      html += `<td data-mat="${c.matricula}" data-dia="${dia}" onclick="${item.editavel?`escalaSelecionarCelula('${c.matricula}',${dia},this)`:''}" style="padding:2px;height:32px;cursor:${item.editavel?'pointer':'default'};background:${bgCel};border:${BORDA}" title="${feriado?feriado.nome:''}">${escalaCelHTML(item)}</td>`;
     });
     html += `</tr>`;
   });
 
-  html += `</tbody></table>`;
-  return html;
+  // Linha extra pra adicionar por matrícula direto na tabela — digita e
+  // aperta Enter, o nome aparece sozinho (mesma busca do campo de cima).
+  html += `<tr>
+    <td style="border:${BORDA};padding:2px">
+      <input type="text" id="escala-add-inline" placeholder="+ matrícula" onkeydown="if(event.key==='Enter') escalaAdicionarPorMatriculaInline(this.value)"
+        style="width:100%;box-sizing:border-box;background:transparent;border:1px dashed var(--border-strong);border-radius:4px;color:var(--text-secondary);font-family:monospace;font-size:11px;padding:6px 8px">
+    </td>
+    <td colspan="${NCOLS-1}" style="border:${BORDA};padding:8px 10px;color:var(--text-muted);font-size:11px">digite a matrícula e aperte Enter — o nome aparece sozinho</td>
+  </tr>`;
+
+  return html + `</tbody></table>`;
 }
 
 function escalaBuscarColab(termo) {
@@ -797,6 +813,55 @@ async function escalaAdicionarColab(matricula) {
   if (error) { alert('Erro ao adicionar: ' + error.message); return; }
   window._escalaColabs = [...(window._escalaColabs||[]), data];
   escalaGradeAtualiza();
+}
+
+// Digitar a matrícula direto na última linha da tabela e apertar Enter —
+// acha o nome sozinho no cadastro, sem precisar usar a busca de cima.
+async function escalaAdicionarPorMatriculaInline(matricula) {
+  matricula = String(matricula||'').trim();
+  if (!matricula) return;
+  if (!window.eoColabs?.has(matricula)) {
+    escalaMsg(`Matrícula "${matricula}" não encontrada no cadastro.`, true);
+    return;
+  }
+  if ((window._escalaColabs||[]).some(c => c.matricula === matricula)) {
+    escalaMsg('Esse colaborador já está nessa escala.', true);
+    return;
+  }
+  await escalaAdicionarColab(matricula);
+  escalaMsg(`✓ ${window.eoColabs.get(matricula).nome} adicionado.`);
+}
+
+async function escalaEditarHorario(matricula, campo, valor) {
+  const coluna = campo === 'entrada' ? 'entrada_manual' : 'saida_manual';
+  const { error } = await db.from('escala_colaborador').update({ [coluna]: valor || null })
+    .eq('base', window._escalaBase).eq('mes', window._escalaMes).eq('matricula', matricula);
+  if (error) { escalaMsg('Erro ao salvar horário: ' + error.message, true); return; }
+  const c = (window._escalaColabs||[]).find(x => x.matricula === matricula);
+  if (c) c[coluna] = valor || null;
+  escalaMsg('✓ Horário atualizado.');
+}
+
+async function escalaLimparColaboradores() {
+  if (!confirm('Remover TODOS os colaboradores dessa escala (base+mês)? Isso também apaga todas as marcações de F/K/CH/J deles. Não dá pra desfazer.')) return;
+  const base = window._escalaBase, mes = window._escalaMes;
+  await db.from('escala_dia').delete().eq('base', base).eq('mes', mes);
+  const { error } = await db.from('escala_colaborador').delete().eq('base', base).eq('mes', mes);
+  if (error) { escalaMsg('Erro ao limpar: ' + error.message, true); return; }
+  window._escalaColabs = [];
+  window._escalaDias = new Map();
+  escalaGradeAtualiza();
+  escalaMsg('✓ Todos os colaboradores foram removidos dessa escala.');
+}
+
+async function escalaLimparStatus() {
+  if (!confirm('Limpar todas as marcações de Folga/FA/Cursos/Afastado/Compensa dessa escala (base+mês)? Os colaboradores continuam na escala, só o preenchimento some. Não dá pra desfazer.')) return;
+  const base = window._escalaBase, mes = window._escalaMes;
+  const { error } = await db.from('escala_dia').delete().eq('base', base).eq('mes', mes);
+  if (error) { escalaMsg('Erro ao limpar: ' + error.message, true); return; }
+  window._escalaDias = new Map();
+  escalaGradeAtualiza();
+  escalaMsg('✓ Marcações de F/FA/K/CH/J limpas (férias automáticas continuam vindo do cadastro).');
 }
 
 async function escalaRemoverColab(matricula) {
