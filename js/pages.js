@@ -3,22 +3,185 @@
 // ══════════════════════════════════════════════════════
 
 // ── Escala Online ─────────────────────────────────────
-function pageEscala(el) {
+async function pageEscala(el) {
+  el.innerHTML = `
+    <div class="page-header"><div>
+      <h1 class="page-title">Escala Online</h1>
+      <p class="page-sub">Calendário mensal · preenchimento e folgas</p>
+    </div></div>
+    <div class="adm-empty-state">
+      <i class="ti ti-loader-2" style="font-size:32px;opacity:.4;animation:spin 1s linear infinite" aria-hidden="true"></i>
+      <p>Carregando...</p>
+    </div>`;
+
+  const role = currentUserProfile?.role;
+  const myBases = (currentUserProfile?.bases || []).filter(b => b !== '*');
+  const isAdmin = role === 'admin';
+
+  if (typeof adhEnsureRoster === 'function') await adhEnsureRoster();
+  const bases = isAdmin ? (typeof hcAllBases === 'function' ? hcAllBases() : []) : myBases;
+
+  if (!bases.length) {
+    el.innerHTML = `
+      <div class="page-header"><div>
+        <h1 class="page-title">Escala Online</h1>
+        <p class="page-sub">Acesso restrito</p>
+      </div></div>
+      <div class="adh-denied">
+        <i class="ti ti-map-pin-off" style="font-size:36px;opacity:.2" aria-hidden="true"></i>
+        <p>Nenhuma base atribuída ao seu usuário.<br>Fale com o admin pra configurar seu acesso.</p>
+      </div>`;
+    return;
+  }
+
+  if (window._escalaBase === undefined || !bases.includes(window._escalaBase)) {
+    window._escalaBase = (window._genBase && bases.includes(window._genBase)) ? window._genBase : bases[0];
+  }
+  if (!window._escalaMes) {
+    window._escalaMes = window._genMes || (typeof adhCurrentMonth === 'function' ? adhCurrentMonth() : null);
+  }
+  if (!window._escalaDiaSelecionado) window._escalaDiaSelecionado = 1;
+
+  await escalaRenderDash(el);
+}
+
+function escalaMesOptionsHTML(mesAtualSelecionado) {
+  const hoje = new Date();
+  const opts = [];
+  for (let i = -1; i < 4; i++) {
+    const d = new Date(hoje.getFullYear(), hoje.getMonth()+i, 1);
+    opts.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
+  }
+  const atual = `${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}`;
+  if (!opts.includes(mesAtualSelecionado)) opts.unshift(mesAtualSelecionado);
+  return opts.map(m => `<option value="${m}" ${m===mesAtualSelecionado?'selected':''}>${typeof adhMonthLabel==='function'?adhMonthLabel(m):m}${m===atual?' (atual)':''}</option>`).join('');
+}
+
+async function escalaRenderDash(el) {
+  const base = window._escalaBase;
+  const mes  = window._escalaMes;
+  const role = currentUserProfile?.role;
+  const myBases = (currentUserProfile?.bases || []).filter(b => b !== '*');
+  const isAdmin = role === 'admin';
+  const bases = isAdmin ? (typeof hcAllBases === 'function' ? hcAllBases() : []) : myBases;
+
+  const { data, error } = await db.from('escala_dimensionamento').select('*').eq('base', base).eq('mes', mes).order('entrada');
+  if (error) console.warn('[escala] erro ao carregar:', error.message);
+  const linhas = data || [];
+  window._escalaLinhas = linhas;
+
+  const totalPosicoes = linhas.reduce((s,r) => s+r.qtd, 0);
+  const funcoesUnicas = new Set(linhas.map(r=>r.funcao)).size;
+  const [ano, mesNum] = mes.split('-').map(Number);
+  const diasNoMes = new Date(ano, mesNum, 0).getDate();
+  const primeiroDiaSemana = new Date(ano, mesNum-1, 1).getDay();
+
   el.innerHTML = `
     <div class="page-header">
       <div>
         <h1 class="page-title">Escala Online</h1>
-        <p class="page-sub">Calendário mensal · preenchimento e folgas</p>
+        <p class="page-sub">Calendário mensal · ${base} · ${typeof adhMonthLabel==='function'?adhMonthLabel(mes):mes}</p>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        ${bases.length>1
+          ? `<select class="adh-month-select" onchange="escalaSetBase(this.value)">${bases.map(b=>`<option value="${b}" ${b===base?'selected':''}>${b}</option>`).join('')}</select>`
+          : `<span class="adh-base-badge">${base||'—'}</span>`}
+        <select class="adh-month-select" onchange="escalaSetMes(this.value)">${escalaMesOptionsHTML(mes)}</select>
       </div>
     </div>
-    <div class="page-placeholder">
-      <div class="placeholder-icon">
-        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+
+    ${!linhas.length ? `
+      <div class="adh-denied">
+        <i class="ti ti-calendar-off" style="font-size:36px;opacity:.2" aria-hidden="true"></i>
+        <p>Nenhum dimensionamento gerado ainda pra <strong>${base}</strong> em <strong>${typeof adhMonthLabel==='function'?adhMonthLabel(mes):mes}</strong>.<br>
+          <a href="#" onclick="navigateTo('gerador')" style="color:#00a0d2">Ir pro Gerador</a> pra criar um e depois clicar em "Escala Online".</p>
       </div>
-      <p class="placeholder-title">Escala Online</p>
-      <p class="placeholder-sub">Módulo em integração — disponível em breve.</p>
-    </div>
+    ` : `
+      ${typeof adhKpiCardsHTML === 'function' ? adhKpiCardsHTML([
+        { key:'blue', icon:'ti-users', title:'Necessidade de pessoal', rows: [
+          { label:'Posições por dia', sub:'mesmo padrão em todos os dias do mês', value: totalPosicoes.toLocaleString('pt-BR') },
+          { label:'Funções distintas', sub:'variedade de cargos', value: String(funcoesUnicas) },
+        ]},
+      ]) : ''}
+
+      <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+        <div class="hc-panel" style="flex:2;min-width:440px">
+          <div class="hc-panel-title">${typeof adhMonthLabel==='function'?adhMonthLabel(mes):mes}</div>
+          ${escalaCalendarioHTML(ano, mesNum, diasNoMes, primeiroDiaSemana, totalPosicoes)}
+        </div>
+        <div class="hc-panel" style="flex:1;min-width:320px" id="escala-dia-detalhe">
+          ${escalaDetalheDiaHTML(window._escalaDiaSelecionado, linhas)}
+        </div>
+      </div>
+    `}
   `;
+}
+
+function escalaCalendarioHTML(ano, mesNum, diasNoMes, primeiroDiaSemana, totalPosicoes) {
+  const diasLbl = ['dom','seg','ter','qua','qui','sex','sáb'];
+  const diaSel = window._escalaDiaSelecionado || 1;
+  let cells = '';
+  for (let i = 0; i < primeiroDiaSemana; i++) cells += `<div class="escala-cel escala-cel-vazia"></div>`;
+  for (let d = 1; d <= diasNoMes; d++) {
+    const dow = new Date(ano, mesNum-1, d).getDay();
+    const finalDeSemana = dow === 0 || dow === 6;
+    const ativo = d === diaSel;
+    cells += `
+      <div class="escala-cel ${ativo?'escala-cel-ativa':''} ${finalDeSemana?'escala-cel-fds':''}" onclick="escalaSelecionarDia(${d}, this)">
+        <div class="escala-cel-dia">${d}</div>
+        <div class="escala-cel-qtd">${totalPosicoes}</div>
+      </div>`;
+  }
+  return `
+    <div class="escala-grade-semana">${diasLbl.map(d=>`<div>${d}</div>`).join('')}</div>
+    <div class="escala-grade">${cells}</div>
+    <div style="font-size:10px;color:var(--text-muted);margin-top:10px">O mesmo padrão de posições se repete em todos os dias por enquanto — a escala ainda não varia por dia da semana nem tem folga individual (próximos passos).</div>
+  `;
+}
+
+function escalaDetalheDiaHTML(dia, linhas) {
+  linhas = linhas || window._escalaLinhas || [];
+  const grupos = { 'Madrugada':[], 'Manhã':[], 'Tarde':[], 'Noite':[] };
+  linhas.forEach(r => {
+    const h = parseInt(String(r.entrada).split(':')[0], 10) || 0;
+    const per = h<6 ? 'Madrugada' : h<12 ? 'Manhã' : h<18 ? 'Tarde' : 'Noite';
+    grupos[per].push(r);
+  });
+  return `
+    <div class="hc-panel-title">Dia ${String(dia).padStart(2,'0')} · posições necessárias</div>
+    ${Object.entries(grupos).filter(([,l])=>l.length).map(([per,l]) => `
+      <div style="margin-bottom:14px">
+        <div style="font-size:10.5px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px">${per}</div>
+        <table style="width:100%;font-size:12px;border-collapse:collapse">
+          ${l.sort((a,b)=>String(a.entrada).localeCompare(String(b.entrada))).map(r => `
+            <tr>
+              <td style="padding:4px 0;color:var(--text-primary)">${r.funcao}</td>
+              <td style="padding:4px 0;color:var(--text-muted);text-align:right;white-space:nowrap">${r.entrada}–${r.saida}</td>
+              <td style="padding:4px 0;color:var(--text-secondary);text-align:right;width:34px">×${r.qtd}</td>
+            </tr>`).join('')}
+        </table>
+      </div>`).join('') || `<div style="color:var(--text-muted);font-size:12px;padding:16px 0;text-align:center">Sem posições nesse dia.</div>`}
+  `;
+}
+
+function escalaSelecionarDia(dia, elCel) {
+  window._escalaDiaSelecionado = dia;
+  document.querySelectorAll('.escala-cel').forEach(c => c.classList.remove('escala-cel-ativa'));
+  if (elCel) elCel.classList.add('escala-cel-ativa');
+  const det = document.getElementById('escala-dia-detalhe');
+  if (det) det.innerHTML = escalaDetalheDiaHTML(dia, window._escalaLinhas);
+}
+
+function escalaSetBase(base) {
+  window._escalaBase = base;
+  window._escalaDiaSelecionado = 1;
+  escalaRenderDash(document.getElementById('page-content'));
+}
+
+function escalaSetMes(mes) {
+  window._escalaMes = mes;
+  window._escalaDiaSelecionado = 1;
+  escalaRenderDash(document.getElementById('page-content'));
 }
 
 // ── Gerador ───────────────────────────────────────────
@@ -107,6 +270,11 @@ function pageGerador(el) {
           <div class="gen3-rp-section gen3-rp-scroll">
             <div class="gen3-rp-label">Posições por função</div>
             <div class="gen3-func-list" id="gen-func-list"></div>
+          </div>
+
+          <div class="gen3-rp-section">
+            <div class="gen3-rp-label">Mês desse dimensionamento</div>
+            <select id="gen-mes-select" class="adh-month-select" style="width:100%"></select>
           </div>
 
           <div class="gen3-actions">
@@ -358,6 +526,24 @@ function genRenderRight(funcoes) {
        <span>${fc.n}</span>
      </div>`
   ).join('');
+
+  genRenderMesSelect();
+}
+
+// Mês pra esse dimensionamento — geralmente feito com antecedência, então o
+// padrão é o PRÓXIMO mês, mas dá pra escolher o atual ou até 2 à frente.
+function genRenderMesSelect() {
+  const sel = document.getElementById('gen-mes-select');
+  if (!sel) return;
+  const hoje = new Date();
+  const opts = [];
+  for (let i = 0; i < 4; i++) {
+    const d = new Date(hoje.getFullYear(), hoje.getMonth()+i, 1);
+    opts.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
+  }
+  const atual = opts[0];
+  const padrao = window._genMesEscolhido && opts.includes(window._genMesEscolhido) ? window._genMesEscolhido : opts[1];
+  sel.innerHTML = opts.map(m => `<option value="${m}" ${m===padrao?'selected':''}>${typeof adhMonthLabel==='function'?adhMonthLabel(m):m}${m===atual?' (atual)':''}</option>`).join('');
 }
 
 // ── History ───────────────────────────────────────────
@@ -382,9 +568,44 @@ function genRenderHistory() {
 }
 
 // ── Actions ───────────────────────────────────────────
-function genGoEscala() {
+async function genGoEscala() {
+  const mes = document.getElementById('gen-mes-select')?.value;
+  if (!mes) { navigateTo('escala'); return; }
+  window._genMesEscolhido = mes;
+
+  genSetStatus('Salvando dimensionamento no banco...', 'load');
+  try {
+    const grupos = new Map();
+    gRows.forEach(r => {
+      const k = `${r.funcao}|${r.horario}|${r.sheetName}`;
+      if (!grupos.has(k)) {
+        grupos.set(k, {
+          base: gBase, mes, setor: r.sheetName, funcao: r.funcao,
+          entrada: r.entrada, saida: r.saida, carga: r.carga, qtd: 0,
+          gerado_por: currentUserProfile?.id || currentUser?.id || null,
+        });
+      }
+      grupos.get(k).qtd++;
+    });
+    const linhas = [...grupos.values()];
+
+    const { error: eDel } = await db.from('escala_dimensionamento').delete().eq('base', gBase).eq('mes', mes);
+    if (eDel) throw new Error(eDel.message);
+
+    const BATCH = 500;
+    for (let i = 0; i < linhas.length; i += BATCH) {
+      const { error } = await db.from('escala_dimensionamento').insert(linhas.slice(i, i+BATCH));
+      if (error) throw new Error(error.message);
+    }
+    genSetStatus('');
+  } catch(e) {
+    genSetStatus('Erro ao salvar no banco: ' + e.message, 'err');
+    return;
+  }
+
   window._genRows = gRows;
   window._genBase = gBase;
+  window._genMes  = mes;
   navigateTo('escala');
 }
 
@@ -444,21 +665,5 @@ function pageComparador(el) {
   `;
 }
 
-// ── Aderência ─────────────────────────────────────────
-function pageAderencia(el) {
-  el.innerHTML = `
-    <div class="page-header">
-      <div>
-        <h1 class="page-title">Aderência ao Ponto</h1>
-        <p class="page-sub">Horários planejados vs marcação real</p>
-      </div>
-    </div>
-    <div class="page-placeholder">
-      <div class="placeholder-icon">
-        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-      </div>
-      <p class="placeholder-title">Aderência ao Ponto</p>
-      <p class="placeholder-sub">Módulo em integração — disponível em breve.</p>
-    </div>
-  `;
-}
+// ── Aderência — handled by aderencia.js ───────────────
+// Function defined in aderencia.js overwrites this placeholder

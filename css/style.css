@@ -1062,6 +1062,45 @@ a { color: inherit; text-decoration: none; }
 }
 
 /* Files grid */
+.escala-grade-semana {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.escala-grade-semana > div {
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+.escala-grade {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+.escala-cel {
+  aspect-ratio: 1;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  background: rgba(255,255,255,.02);
+  padding: 6px 8px;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.escala-cel:hover { background: rgba(0,160,210,.06); }
+.escala-cel-vazia { visibility: hidden; cursor: default; }
+.escala-cel-fds { background: rgba(255,255,255,.015); }
+.escala-cel-ativa { border-color: var(--blue); background: rgba(0,160,210,.12); }
+.escala-cel-dia { font-size: 11px; color: var(--text-secondary); font-weight: 600; }
+.escala-cel-qtd { font-size: 15px; font-weight: 700; color: var(--text-primary); text-align: right; }
+.escala-cel-ativa .escala-cel-dia,
+.escala-cel-ativa .escala-cel-qtd { color: var(--blue); }
+
 .malha-toggle-group {
   display: inline-flex;
   border: 1px solid var(--border-strong);
