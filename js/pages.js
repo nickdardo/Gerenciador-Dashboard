@@ -41,8 +41,24 @@ async function pageEscala(el) {
     window._escalaMes = window._genMes || (typeof adhCurrentMonth === 'function' ? adhCurrentMonth() : null);
   }
   if (!window._escalaDiaSelecionado) window._escalaDiaSelecionado = 1;
+  if (!window._escalaModo) window._escalaModo = 'geral';
 
-  await escalaRenderDash(el);
+  if (window._escalaModo === 'grade') await escalaRenderGrade(el);
+  else await escalaRenderDash(el);
+}
+
+function escalaModoTogglesHTML() {
+  const modo = window._escalaModo || 'geral';
+  return `
+    <div class="malha-toggle-group">
+      <button class="malha-toggle ${modo==='geral'?'active':''}" onclick="escalaSetModo('geral')">Visão geral</button>
+      <button class="malha-toggle ${modo==='grade'?'active':''}" onclick="escalaSetModo('grade')">Montar escala</button>
+    </div>`;
+}
+
+function escalaSetModo(modo) {
+  window._escalaModo = modo;
+  pageEscala(document.getElementById('page-content'));
 }
 
 function escalaMesOptionsHTML(mesAtualSelecionado) {
@@ -120,6 +136,7 @@ async function escalaRenderDash(el) {
         <p class="page-sub">Calendário mensal · ${base} · ${typeof adhMonthLabel==='function'?adhMonthLabel(mes):mes}${demandaPorDia?' · demanda real (malha de voos)':''}</p>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
+        ${escalaModoTogglesHTML()}
         ${bases.length>1
           ? `<select class="adh-month-select" onchange="escalaSetBase(this.value)">${bases.map(b=>`<option value="${b}" ${b===base?'selected':''}>${b}</option>`).join('')}</select>`
           : `<span class="adh-base-badge">${base||'—'}</span>`}
@@ -342,7 +359,315 @@ function escalaSetMes(mes) {
   escalaRenderDash(document.getElementById('page-content'));
 }
 
-// ── Gerador ───────────────────────────────────────────
+// ══════════════════════════════════════════════════════
+// Montar Escala — grade manual (colaborador × dia)
+//
+// Só guarda o que é manual (F/K). O resto é calculado na hora:
+//   J  → colaboradores_ferias (já existe, sem duplicar dado)
+//   FA → 2+ F seguidos, é só um jeito de mostrar, não é status à parte
+//   horário de trabalho → pontoHorarios (Horarios.xlsx, já existe)
+// ══════════════════════════════════════════════════════
+
+async function escalaRenderGrade(el) {
+  el.innerHTML = `
+    <div class="page-header"><div>
+      <h1 class="page-title">Escala Online</h1>
+      <p class="page-sub">Montar escala</p>
+    </div></div>
+    <div class="adm-empty-state">
+      <i class="ti ti-loader-2" style="font-size:32px;opacity:.4;animation:spin 1s linear infinite" aria-hidden="true"></i>
+      <p>Carregando...</p>
+    </div>`;
+
+  if (typeof adhEnsureRoster === 'function') await adhEnsureRoster();
+  if (typeof adminLoadFileOnDemand === 'function') {
+    await adminLoadFileOnDemand('horarios', () => {});
+  }
+
+  const base = window._escalaBase;
+  const mes  = window._escalaMes;
+
+  const [{ data: colabs }, { data: dias }] = await Promise.all([
+    db.from('escala_colaborador').select('*').eq('base', base).eq('mes', mes).order('created_at'),
+    db.from('escala_dia').select('*').eq('base', base).eq('mes', mes),
+  ]);
+  window._escalaColabs = colabs || [];
+  window._escalaDias = new Map((dias||[]).map(d => [`${d.matricula}|${d.dia}`, d]));
+
+  // Demanda de voos/dia desse mês, pra alinhar em cima da grade e alimentar
+  // a geração automática de folgas (mesma malha real da Parte 2).
+  const [ano, mesNum] = mes.split('-').map(Number);
+  const diasNoMes = new Date(ano, mesNum, 0).getDate();
+  const mesInicioStr = `${mes}-01`;
+  const mesFimStr = `${mes}-${String(diasNoMes).padStart(2,'0')}`;
+  const { data: voos } = await db.from('malha').select('data').eq('base', base).gte('data', mesInicioStr).lte('data', mesFimStr);
+  const voosPorDia = new Array(diasNoMes).fill(0);
+  (voos||[]).forEach(v => { const d = parseInt(v.data.slice(8,10),10); if (d>=1 && d<=diasNoMes) voosPorDia[d-1]++; });
+  window._escalaVoosPorDia = voosPorDia;
+
+  escalaGradeRenderShell(el, ano, mesNum, diasNoMes);
+}
+
+function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
+  const base = window._escalaBase;
+  const mes  = window._escalaMes;
+  el.innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Escala Online</h1>
+        <p class="page-sub">Montar escala · ${base} · ${typeof adhMonthLabel==='function'?adhMonthLabel(mes):mes}</p>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        ${escalaModoTogglesHTML()}
+        <select class="adh-month-select" onchange="escalaSetMes(this.value)">${escalaMesOptionsHTML(mes)}</select>
+      </div>
+    </div>
+
+    <div class="hc-panel" style="margin-bottom:16px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <div style="position:relative;flex:1;min-width:260px">
+          <input id="escala-busca" class="adh-search-input" style="width:100%;box-sizing:border-box;padding:9px 12px;background:rgba(255,255,255,.03);border:1px solid var(--border-strong);border-radius:8px;color:var(--text-primary)"
+            oninput="escalaBuscarColab(this.value)" placeholder="Buscar por matrícula ou nome pra adicionar...">
+          <div id="escala-busca-resultados" style="position:absolute;top:calc(100% + 4px);left:0;right:0;background:#141b2c;border:1px solid var(--border-strong);border-radius:8px;z-index:20;display:none;max-height:220px;overflow-y:auto;box-shadow:var(--adh-shadow-card)"></div>
+        </div>
+        <button class="adh-refresh-btn" style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600" onclick="escalaGerarFolgasAuto()">⚡ Gerar folgas automáticas</button>
+      </div>
+      <div id="escala-status-msg" style="font-size:11px;color:var(--text-muted);margin-top:8px;min-height:14px"></div>
+    </div>
+
+    <div class="hc-panel">
+      <div style="display:flex;gap:14px;margin-bottom:12px;font-size:11px;color:var(--text-secondary)">
+        <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:var(--text-muted);margin-right:5px"></span>F · Folga</span>
+        <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#a78bfa;margin-right:5px"></span>FA · Folga agrupada</span>
+        <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#c9a24a;margin-right:5px"></span>J · Afastado (férias)</span>
+        <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#38bdf8;margin-right:5px"></span>K · Cursos</span>
+        <span style="color:var(--text-muted)">clique numa célula vazia ou de trabalho pra marcar F/K</span>
+      </div>
+      <div id="escala-grade-wrap" style="overflow-x:auto">${escalaGradeTabelaHTML(ano, mesNum, diasNoMes)}</div>
+    </div>
+  `;
+}
+
+function escalaGradeAtualiza() {
+  const [ano, mesNum] = window._escalaMes.split('-').map(Number);
+  const diasNoMes = new Date(ano, mesNum, 0).getDate();
+  const wrap = document.getElementById('escala-grade-wrap');
+  if (wrap) wrap.innerHTML = escalaGradeTabelaHTML(ano, mesNum, diasNoMes);
+}
+
+const ESCALA_DIAS_SEMANA = ['dom','seg','ter','qua','qui','sex','sáb'];
+
+// Descobre se um dia (dd/mm/yyyy) cai dentro de um período de férias do
+// colaborador — não duplica dado, só olha o que já existe.
+function escalaEstaDeFerias(matricula, ano, mesNum, dia) {
+  const fer = window.eoFerias?.get(matricula);
+  if (!fer?.data_inicio || !fer?.data_fim) return false;
+  const alvo = `${ano}-${String(mesNum).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
+  return alvo >= fer.data_inicio && alvo <= fer.data_fim;
+}
+
+function escalaHorarioPlanejado(base, matricula, ano, mesNum, dia) {
+  if (typeof pontoHorarios === 'undefined') return null;
+  const dstr = `${String(dia).padStart(2,'0')}/${String(mesNum).padStart(2,'0')}/${ano}`;
+  const key = `${base}|${matricula}|${dstr}`;
+  const h = pontoHorarios.get(key);
+  if (!h || !h.ent1) return null;
+  return h.sai1 ? `${h.ent1}-${h.sai1}` : h.ent1;
+}
+
+function escalaCelulaConteudo(c, ano, mesNum, dia) {
+  const key = `${c.matricula}|${dia}`;
+  const manual = window._escalaDias.get(key);
+  if (manual) {
+    const cor = manual.status === 'K' ? '#38bdf8' : 'var(--text-muted)';
+    return { html: `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:${cor}22;color:${cor};border-radius:4px;font-weight:700;font-size:10px">${manual.status}</div>`, editavel: true };
+  }
+  if (escalaEstaDeFerias(c.matricula, ano, mesNum, dia)) {
+    return { html: `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:#c9a24a22;color:#c9a24a;border-radius:4px;font-weight:700;font-size:10px" title="Férias — vem do cadastro, automático">J</div>`, editavel: false };
+  }
+  const horario = escalaHorarioPlanejado(window._escalaBase, c.matricula, ano, mesNum, dia);
+  if (horario) {
+    return { html: `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--text-secondary);font-size:9px" title="Horário planejado (automático)">${horario}</div>`, editavel: true };
+  }
+  return { html: '', editavel: true };
+}
+
+function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
+  const colabs = window._escalaColabs || [];
+  const voosPorDia = window._escalaVoosPorDia || [];
+  const maxVoos = Math.max(1, ...voosPorDia);
+
+  let html = `<table style="border-collapse:collapse;font-size:11px;width:100%"><thead><tr>`;
+  html += `<th style="text-align:left;padding:6px 10px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;position:sticky;left:0;background:var(--bg-surface);min-width:190px">Colaborador</th>`;
+  for (let d = 1; d <= diasNoMes; d++) {
+    const dow = new Date(ano, mesNum-1, d).getDay();
+    html += `<th style="padding:3px 2px;color:var(--text-muted);font-size:9px;font-weight:600;width:26px;text-align:center">${ESCALA_DIAS_SEMANA[dow]}<br><span style="color:var(--text-secondary);font-size:10px">${d}</span></th>`;
+  }
+  html += `</tr></thead><tbody>`;
+
+  html += `<tr><td style="position:sticky;left:0;background:var(--bg-surface);padding:4px 10px 10px;color:#5fa87a;font-size:9px;font-weight:700;vertical-align:bottom">VOOS/DIA</td>`;
+  for (let d = 1; d <= diasNoMes; d++) {
+    const v = voosPorDia[d-1] || 0;
+    const baixa = maxVoos > 0 && v <= maxVoos*0.4;
+    html += `<td style="vertical-align:bottom;padding:0 2px 4px"><div style="height:${Math.round(v/maxVoos*36)}px;background:${baixa?'#5fa87a':'#38bdf8'};border-radius:2px 2px 0 0;margin:0 auto;width:14px" title="${v} voos"></div></td>`;
+  }
+  html += `</tr>`;
+
+  if (!colabs.length) {
+    html += `<tr><td colspan="${diasNoMes+1}" style="padding:24px;text-align:center;color:var(--text-muted);font-size:11.5px;border-top:1px solid var(--border)">Nenhum colaborador adicionado ainda — busque por matrícula ou nome acima.</td></tr>`;
+  }
+
+  colabs.forEach(c => {
+    html += `<tr>`;
+    html += `<td style="padding:6px 10px;color:var(--text-primary);font-weight:500;border-top:1px solid var(--border);position:sticky;left:0;background:var(--bg-surface);white-space:nowrap">
+      <span style="color:var(--text-muted);font-family:monospace;font-size:10px;margin-right:6px">${c.matricula}</span>${c.nome||''}
+      <span onclick="escalaRemoverColab('${c.matricula}')" style="cursor:pointer;color:#fc8181;margin-left:4px" title="Remover da escala">✕</span>
+    </td>`;
+    for (let d = 1; d <= diasNoMes; d++) {
+      const cel = escalaCelulaConteudo(c, ano, mesNum, d);
+      html += `<td onclick="${cel.editavel?`escalaClicarCelula('${c.matricula}',${d})`:''}" style="padding:2px;border-top:1px solid var(--border);height:28px;width:26px;cursor:${cel.editavel?'pointer':'default'}">${cel.html}</td>`;
+    }
+    html += `</tr>`;
+  });
+
+  html += `</tbody></table>`;
+  return html;
+}
+
+function escalaBuscarColab(termo) {
+  const div = document.getElementById('escala-busca-resultados');
+  if (!div) return;
+  if (!termo || termo.trim().length < 2) { div.style.display = 'none'; return; }
+  const t = termo.trim().toUpperCase();
+  const base = window._escalaBase;
+  const jaAdicionados = new Set((window._escalaColabs||[]).map(c => c.matricula));
+  const achados = [];
+  if (window.eoColabs) {
+    for (const [mat, r] of window.eoColabs) {
+      if ((r.station||'').toUpperCase() !== base.toUpperCase()) continue;
+      if (jaAdicionados.has(mat)) continue;
+      if (mat.includes(t) || String(r.nome||'').toUpperCase().includes(t)) {
+        achados.push({ mat, nome: r.nome });
+        if (achados.length >= 8) break;
+      }
+    }
+  }
+  if (!achados.length) { div.innerHTML = `<div style="padding:10px 12px;color:var(--text-muted);font-size:11.5px">Nenhum colaborador encontrado nessa base.</div>`; div.style.display = 'block'; return; }
+  div.innerHTML = achados.map(a => `
+    <div onclick="escalaAdicionarColab('${a.mat}')" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border);font-size:11.5px;color:var(--text-primary)"
+      onmouseover="this.style.background='rgba(0,160,210,.08)'" onmouseout="this.style.background='transparent'">
+      <span style="color:var(--text-muted);font-family:monospace;margin-right:8px">${a.mat}</span>${a.nome||''}
+    </div>`).join('');
+  div.style.display = 'block';
+}
+
+async function escalaAdicionarColab(matricula) {
+  const r = window.eoColabs?.get(matricula);
+  const nome = r?.nome || '';
+  const busca = document.getElementById('escala-busca');
+  if (busca) busca.value = '';
+  const resultados = document.getElementById('escala-busca-resultados');
+  if (resultados) resultados.style.display = 'none';
+
+  const payload = {
+    base: window._escalaBase, mes: window._escalaMes, matricula, nome,
+    created_by: currentUserProfile?.id || currentUser?.id || null,
+  };
+  const { data, error } = await db.from('escala_colaborador').upsert(payload, { onConflict: 'base,mes,matricula' }).select().single();
+  if (error) { alert('Erro ao adicionar: ' + error.message); return; }
+  window._escalaColabs = [...(window._escalaColabs||[]), data];
+  escalaGradeAtualiza();
+}
+
+async function escalaRemoverColab(matricula) {
+  if (!confirm('Remover esse colaborador dessa escala? Os F/K marcados pra ele nesse mês também somem.')) return;
+  const base = window._escalaBase, mes = window._escalaMes;
+  await db.from('escala_dia').delete().eq('base', base).eq('mes', mes).eq('matricula', matricula);
+  const { error } = await db.from('escala_colaborador').delete().eq('base', base).eq('mes', mes).eq('matricula', matricula);
+  if (error) { alert('Erro ao remover: ' + error.message); return; }
+  window._escalaColabs = (window._escalaColabs||[]).filter(c => c.matricula !== matricula);
+  for (const k of [...window._escalaDias.keys()]) if (k.startsWith(matricula+'|')) window._escalaDias.delete(k);
+  escalaGradeAtualiza();
+}
+
+const ESCALA_CICLO_MANUAL = ['F', 'K', null];
+
+async function escalaClicarCelula(matricula, dia) {
+  const key = `${matricula}|${dia}`;
+  const atual = window._escalaDias.get(key)?.status || null;
+  const idx = ESCALA_CICLO_MANUAL.indexOf(atual);
+  const proximo = ESCALA_CICLO_MANUAL[(idx+1) % ESCALA_CICLO_MANUAL.length];
+  const base = window._escalaBase, mes = window._escalaMes;
+
+  if (proximo) {
+    const payload = {
+      base, mes, matricula, dia, status: proximo, origem: 'manual',
+      updated_at: new Date(), updated_by: currentUserProfile?.id || currentUser?.id || null,
+    };
+    const { error } = await db.from('escala_dia').upsert(payload, { onConflict: 'base,mes,matricula,dia' });
+    if (error) { alert('Erro ao salvar: ' + error.message); return; }
+    window._escalaDias.set(key, payload);
+  } else {
+    await db.from('escala_dia').delete().eq('base', base).eq('mes', mes).eq('matricula', matricula).eq('dia', dia);
+    window._escalaDias.delete(key);
+  }
+  escalaGradeAtualiza();
+}
+
+// Gera folgas nos dias de menor demanda de voos, pra quem ainda não tem
+// folga suficiente no mês — não mexe em dias já ocupados (F/K manuais ou
+// férias). Simples de propósito na v1: mesma quantidade de folga-alvo pra
+// todo mundo, sem levar em conta função/carga horária ainda.
+const ESCALA_META_FOLGAS_MES = 6;
+
+async function escalaGerarFolgasAuto() {
+  const colabs = window._escalaColabs || [];
+  if (!colabs.length) { escalaMsg('Adicione pelo menos um colaborador antes.', true); return; }
+
+  const [ano, mesNum] = window._escalaMes.split('-').map(Number);
+  const diasNoMes = new Date(ano, mesNum, 0).getDate();
+  const voosPorDia = window._escalaVoosPorDia || new Array(diasNoMes).fill(0);
+  const diasOrdenados = voosPorDia.map((v,i) => ({ dia: i+1, v })).sort((a,b) => a.v-b.v);
+
+  const inserts = [];
+  for (const c of colabs) {
+    let folgasAtuais = 0;
+    for (let d = 1; d <= diasNoMes; d++) {
+      const manual = window._escalaDias.get(`${c.matricula}|${d}`);
+      if (manual?.status === 'F') folgasAtuais++;
+      if (escalaEstaDeFerias(c.matricula, ano, mesNum, d)) folgasAtuais++; // já afastado, conta como "resolvido" no mês
+    }
+    let faltam = ESCALA_META_FOLGAS_MES - folgasAtuais;
+    if (faltam <= 0) continue;
+
+    for (const { dia } of diasOrdenados) {
+      if (faltam <= 0) break;
+      const key = `${c.matricula}|${dia}`;
+      if (window._escalaDias.has(key)) continue;
+      if (escalaEstaDeFerias(c.matricula, ano, mesNum, dia)) continue;
+      inserts.push({
+        base: window._escalaBase, mes: window._escalaMes, matricula: c.matricula, dia, status: 'F', origem: 'auto',
+        updated_at: new Date(), updated_by: currentUserProfile?.id || currentUser?.id || null,
+      });
+      window._escalaDias.set(key, inserts[inserts.length-1]);
+      faltam--;
+    }
+  }
+
+  if (!inserts.length) { escalaMsg('Ninguém precisava de mais folgas — todo mundo já está na meta do mês.'); return; }
+
+  const { error } = await db.from('escala_dia').upsert(inserts, { onConflict: 'base,mes,matricula,dia' });
+  if (error) { escalaMsg('Erro ao gerar: ' + error.message, true); return; }
+  escalaGradeAtualiza();
+  escalaMsg(`✓ ${inserts.length} folga(s) geradas nos dias de menor demanda de voos (meta: ${ESCALA_META_FOLGAS_MES}/mês por pessoa).`);
+}
+
+function escalaMsg(texto, erro) {
+  const el = document.getElementById('escala-status-msg');
+  if (el) el.innerHTML = `<span style="color:${erro?'#fc8181':'#5fa87a'}">${texto}</span>`;
+}
+
+
 // ── Gerador state ─────────────────────────────────────
 let gFile    = null;
 let gRows    = [];
