@@ -244,6 +244,30 @@ function escalaPicoDoDia(dia) {
   return (window._escalaLinhasEstaticas || []).reduce((s,r)=>s+r.qtd, 0);
 }
 
+// Demanda de pessoal quebrada nos 4 turnos padrão de 6h (A 00-06h, B 06-12h,
+// C 12-18h, D 18-00h) — cada slot da grade de 30min (0-47) cai num turno:
+// slots 0-11=A, 12-23=B, 24-35=C, 36-47=D.
+const ESCALA_TURNOS = [
+  { nome:'A', label:'00-06h', slotIni:0,  slotFim:11, cor:'#38bdf8' },
+  { nome:'B', label:'06-12h', slotIni:12, slotFim:23, cor:'#5fa87a' },
+  { nome:'C', label:'12-18h', slotIni:24, slotFim:35, cor:'#f6ad55' },
+  { nome:'D', label:'18-00h', slotIni:36, slotFim:47, cor:'#c9a24a' },
+];
+
+function escalaDemandaPorTurno(dia) {
+  const porFuncao = window._escalaDemandaPorDia?.get(dia);
+  if (!porFuncao) return ESCALA_TURNOS.map(() => 0);
+  return ESCALA_TURNOS.map(t => {
+    let pico = 0;
+    for (let slot = t.slotIni; slot <= t.slotFim; slot++) {
+      let soma = 0;
+      for (const arr of porFuncao.values()) soma += arr[slot];
+      if (soma > pico) pico = soma;
+    }
+    return Math.round(pico*10)/10;
+  });
+}
+
 function escalaCalendarioHTML(ano, mesNum, diasNoMes, primeiroDiaSemana) {
   const diasLbl = ['dom','seg','ter','qua','qui','sex','sáb'];
   const diaSel = window._escalaDiaSelecionado || 1;
@@ -454,6 +478,7 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#a78bfa;margin-right:5px"></span>FA · Folga agrupada</span>
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#c9a24a;margin-right:5px"></span>L · Férias (automático)</span>
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#38bdf8;margin-right:5px"></span>K · Cursos</span>
+        <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#fb923c;margin-right:5px"></span>CH · Folga compensa</span>
         <span style="color:var(--text-muted)">clique numa célula vazia ou de trabalho pra marcar F/K</span>
       </div>
       <div id="escala-grade-wrap" style="overflow-x:auto">${escalaGradeTabelaHTML(ano, mesNum, diasNoMes)}</div>
@@ -505,6 +530,7 @@ function escalaConteudoDoMes(c, ano, mesNum, diasNoMes) {
       return { status: 'F', exibido: (antes||depois) ? 'FA' : 'F', editavel: true };
     }
     if (s === 'K') return { status: 'K', exibido: 'K', editavel: true };
+    if (s === 'CH') return { status: 'CH', exibido: 'CH', editavel: true };
     if (s === 'L') return { status: 'L', exibido: 'L', editavel: false };
     const dia = i+1;
     const horario = escalaHorarioPlanejado(base, c.matricula, ano, mesNum, dia);
@@ -517,9 +543,9 @@ function escalaCelHTML(item) {
   if (item.horario) {
     return `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--text-secondary);font-size:9px" title="Horário planejado (automático, vem do arquivo Horários)">${item.exibido}</div>`;
   }
-  const cores = { F:'#8896aa', FA:'#a78bfa', J:'#c9a24a', L:'#fc8181', K:'#38bdf8' };
+  const cores = { F:'#8896aa', FA:'#a78bfa', L:'#c9a24a', K:'#38bdf8', CH:'#fb923c' };
   const cor = cores[item.exibido] || '#8896aa';
-  const titulo = item.status === 'L' ? 'Férias — automático, vem do cadastro' : '';
+  const titulo = item.status === 'L' ? 'Férias — automático, vem do cadastro' : item.status === 'CH' ? 'Folga compensa (banco de horas)' : '';
   return `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:${cor}22;color:${cor};border-radius:4px;font-weight:700;font-size:10px" title="${titulo}">${item.exibido}</div>`;
 }
 
@@ -527,13 +553,6 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   const colabs = window._escalaColabs || [];
   const demandaPorDia = window._escalaDemandaPorDia;
   const voosPorDia = window._escalaVoosPorDia || [];
-
-  const necessidade = new Array(diasNoMes).fill(0);
-  for (let d = 1; d <= diasNoMes; d++) {
-    necessidade[d-1] = demandaPorDia ? escalaPicoDoDia(d) : (voosPorDia[d-1] || 0);
-  }
-  const maxNec = Math.max(1, ...necessidade);
-  const labelTopo = demandaPorDia ? 'NECESSÁRIO' : 'VOOS/DIA';
 
   let html = `<table style="border-collapse:collapse;font-size:11px;width:100%"><thead><tr>`;
   html += `<th style="text-align:left;padding:6px 8px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;position:sticky;left:0;background:var(--bg-surface);min-width:80px">Matrícula</th>`;
@@ -548,20 +567,37 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   html += `<th style="text-align:center;padding:6px 4px;color:var(--text-muted);font-size:9.5px;text-transform:uppercase;width:60px">Horas trab.</th>`;
   html += `</tr></thead><tbody>`;
 
-  html += `<tr><td colspan="4" style="position:sticky;left:0;background:var(--bg-surface);padding:4px 8px 10px;color:#5fa87a;font-size:9px;font-weight:700;vertical-align:bottom">${labelTopo}</td>`;
-  for (let d = 1; d <= diasNoMes; d++) {
-    const v = necessidade[d-1];
-    const baixa = maxNec > 0 && v <= maxNec*0.4;
-    html += `<td style="vertical-align:bottom;padding:0 2px 4px">
-      <div style="height:${Math.round(v/maxNec*30)}px;background:${baixa?'#5fa87a':'#38bdf8'};border-radius:2px 2px 0 0;margin:0 auto;width:14px" title="${v}"></div>
-      <div style="font-size:7.5px;color:var(--text-muted);text-align:center;margin-top:2px">${v}</div>
-    </td>`;
+  if (demandaPorDia) {
+    // Demanda quebrada por turno (A/B/C/D) — vem do motor real (parâmetros
+    // de solo × malha), uma linha por turno em vez de um número só do dia.
+    ESCALA_TURNOS.forEach(t => {
+      html += `<tr><td colspan="4" style="position:sticky;left:0;background:var(--bg-surface);padding:3px 8px;color:${t.cor};font-size:8.5px;font-weight:700">TURNO ${t.nome} · ${t.label}</td>`;
+      for (let d = 1; d <= diasNoMes; d++) {
+        const v = escalaDemandaPorTurno(d)[ESCALA_TURNOS.indexOf(t)];
+        html += `<td style="text-align:center;font-size:8px;color:${t.cor};font-weight:600">${v}</td>`;
+      }
+      html += `<td></td><td></td></tr>`;
+    });
+  } else {
+    const maxNec = Math.max(1, ...voosPorDia);
+    html += `<tr><td colspan="4" style="position:sticky;left:0;background:var(--bg-surface);padding:4px 8px 10px;color:#5fa87a;font-size:9px;font-weight:700;vertical-align:bottom">VOOS/DIA</td>`;
+    for (let d = 1; d <= diasNoMes; d++) {
+      const v = voosPorDia[d-1] || 0;
+      const baixa = maxNec > 0 && v <= maxNec*0.4;
+      html += `<td style="vertical-align:bottom;padding:0 2px 4px">
+        <div style="height:${Math.round(v/maxNec*30)}px;background:${baixa?'#5fa87a':'#38bdf8'};border-radius:2px 2px 0 0;margin:0 auto;width:14px" title="${v}"></div>
+        <div style="font-size:7.5px;color:var(--text-muted);text-align:center;margin-top:2px">${v}</div>
+      </td>`;
+    }
+    html += `<td></td><td></td></tr>`;
   }
-  html += `<td></td><td></td></tr>`;
 
   if (!colabs.length) {
     html += `<tr><td colspan="${diasNoMes+6}" style="padding:24px;text-align:center;color:var(--text-muted);font-size:11.5px;border-top:1px solid var(--border)">Nenhum colaborador adicionado ainda — busque por matrícula ou nome acima.</td></tr>`;
   }
+
+  const totF = new Array(diasNoMes).fill(0);
+  const totFA = new Array(diasNoMes).fill(0);
 
   colabs.forEach(c => {
     const info = window.eoColabs?.get(c.matricula);
@@ -570,8 +606,11 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     const jornada = chNum ? Math.round(chNum/30*10)/10 : '—';
 
     const conteudo = escalaConteudoDoMes(c, ano, mesNum, diasNoMes);
-    const folgas = conteudo.filter(x => x.status === 'F').length;
-    const diasTrabalhados = conteudo.filter(x => !x.status).length; // sem F/FA/J/L/K = trabalhando
+    conteudo.forEach((item, i) => {
+      if (item.status === 'F') { if (item.exibido === 'FA') totFA[i]++; else totF[i]++; }
+    });
+    const folgas = conteudo.filter(x => x.status === 'F' || x.status === 'CH').length;
+    const diasTrabalhados = conteudo.filter(x => !x.status).length; // sem F/FA/L/K/CH = trabalhando
     const horasTrab = jornada !== '—' ? Math.round(diasTrabalhados * jornada) : '—';
     const corFolgas = folgas > 10 ? '#fc8181' : folgas > 8 ? '#f6ad55' : 'var(--text-primary)';
 
@@ -589,6 +628,24 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     html += `<td style="text-align:center;color:var(--text-secondary);border-top:1px solid var(--border)">${horasTrab}</td>`;
     html += `</tr>`;
   });
+
+  if (colabs.length) {
+    html += `<tr><td colspan="4" style="padding:5px 8px;color:var(--text-secondary);font-size:8.5px;font-weight:700;border-top:2px solid var(--border-strong)">TOTAL FOLGA NORMAL (F)</td>`;
+    totF.forEach(v => { html += `<td style="text-align:center;font-size:8px;color:var(--text-secondary);border-top:2px solid var(--border-strong)">${v}</td>`; });
+    html += `<td style="border-top:2px solid var(--border-strong)"></td><td style="border-top:2px solid var(--border-strong)"></td></tr>`;
+
+    html += `<tr><td colspan="4" style="padding:4px 8px;color:#a78bfa;font-size:8.5px;font-weight:700">TOTAL FOLGA AGRUPADA (FA)</td>`;
+    totFA.forEach(v => { html += `<td style="text-align:center;font-size:8px;color:#a78bfa">${v}</td>`; });
+    html += `<td></td><td></td></tr>`;
+
+    html += `<tr><td colspan="4" style="padding:4px 8px;color:#fc8181;font-size:8.5px;font-weight:700">TOTAL FA+F (risco de cobertura)</td>`;
+    for (let d = 0; d < diasNoMes; d++) {
+      const soma = totF[d] + totFA[d];
+      const alerta = soma >= 3;
+      html += `<td style="text-align:center;font-size:8px;font-weight:700;color:${alerta?'#fc8181':'var(--text-secondary)'};background:${alerta?'rgba(252,129,129,.12)':'transparent'}">${soma}</td>`;
+    }
+    html += `<td></td><td></td></tr>`;
+  }
 
   html += `</tbody></table>`;
   return html;
@@ -650,7 +707,7 @@ async function escalaRemoverColab(matricula) {
   escalaGradeAtualiza();
 }
 
-const ESCALA_CICLO_MANUAL = ['F', 'K', null];
+const ESCALA_CICLO_MANUAL = ['F', 'K', 'CH', null];
 
 async function escalaClicarCelula(matricula, dia) {
   const key = `${matricula}|${dia}`;
