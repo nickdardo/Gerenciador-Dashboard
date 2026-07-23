@@ -1132,6 +1132,42 @@ function hcMovChartHTML() {
     </div>`;
 }
 
+// Ranking de bases por movimentação total — só faz sentido mostrar quando
+// está vendo TODAS as bases juntas (se já tiver uma base específica
+// selecionada, isso ficaria redundante, é tudo a mesma base).
+function hcMovPorBaseHTML() {
+  if (window._hcBase) return '';
+  const rows = hcMovFilteredRows();
+  const porBase = new Map();
+  rows.forEach(r => {
+    const base = r.filial || 'Sem filial';
+    if (!porBase.has(base)) porBase.set(base, { admissoes:0, desligados:0 });
+    const info = porBase.get(base);
+    if (r.tipo === 'Admissão') info.admissoes++; else info.desligados++;
+  });
+  const bases = [...porBase.entries()]
+    .map(([base,info]) => ({ base, ...info, total: info.admissoes+info.desligados }))
+    .sort((a,b) => b.total - a.total);
+  if (!bases.length) return '';
+  const max = Math.max(1, ...bases.map(b=>b.total));
+
+  return `
+    <div class="hc-panel" style="margin-bottom:16px">
+      <div class="hc-panel-title" style="margin-bottom:12px">Bases com mais movimentação</div>
+      ${bases.map(b => `
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <div style="width:48px;font-size:12.5px;color:var(--text-primary);font-weight:600">${b.base}</div>
+          <div style="flex:1;display:flex;height:16px;border-radius:3px;overflow:hidden;background:rgba(255,255,255,.05)">
+            <div style="width:${Math.round(b.admissoes/max*100)}%;background:#5fa87a" title="${b.admissoes} admissões"></div>
+            <div style="width:${Math.round(b.desligados/max*100)}%;background:#b56666" title="${b.desligados} desligados"></div>
+          </div>
+          <div style="width:110px;text-align:right;font-size:11px;color:var(--text-muted);white-space:nowrap">${b.admissoes}▲ ${b.desligados}▼</div>
+          <div style="width:40px;text-align:right;font-size:13px;font-weight:700;color:var(--text-primary)">${b.total}</div>
+        </div>
+      `).join('')}
+    </div>`;
+}
+
 function hcRenderMovimentacao(el) {
   const base = window._hcBase;
   if (window._hcMovPeriod == null) window._hcMovPeriod = '12m';
@@ -1160,6 +1196,7 @@ function hcRenderMovimentacao(el) {
       </div>
 
       ${hcMovChartHTML()}
+      ${hcMovPorBaseHTML()}
 
       <div class="hc-panel">
         <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
