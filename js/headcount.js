@@ -1309,6 +1309,88 @@ function hcMovTempoCasaHTML() {
     </div>`;
 }
 
+// Copia um resumo mês a mês (admissões/desligados/saldo) formatado como
+// tabela pra colar direto no corpo de um e-mail — usa a Clipboard API com
+// text/html (a maioria dos clientes de e-mail cola como tabela de verdade)
+// e um fallback em texto simples, pra não depender de print de tela.
+async function hcCopiarResumoEmail() {
+  const rows = hcMovFilteredRows();
+  const base = window._hcBase || 'Todas as bases';
+  const porMes = new Map();
+  rows.forEach(r => {
+    const mes = String(r.data).slice(0,7);
+    if (!porMes.has(mes)) porMes.set(mes, { admissoes: 0, desligados: 0 });
+    const info = porMes.get(mes);
+    if (r.tipo === 'Admissão') info.admissoes++; else info.desligados++;
+  });
+  const meses = [...porMes.keys()].sort();
+  const totalAdm = meses.reduce((s,m)=>s+porMes.get(m).admissoes, 0);
+  const totalDesl = meses.reduce((s,m)=>s+porMes.get(m).desligados, 0);
+  const saldoTotal = totalAdm - totalDesl;
+
+  const html = `
+    <div style="font-family:Arial,sans-serif;color:#1a1a1a">
+      <h2 style="margin:0 0 4px;font-size:18px">Relatório de Movimentação — ${base}</h2>
+      <p style="color:#555;margin:0 0 16px;font-size:13px">${hcMovPeriodLabel()} · ${rows.length.toLocaleString('pt-BR')} registros</p>
+      <table style="border-collapse:collapse;width:100%;font-size:14px">
+        <thead><tr style="background:#0e766e;color:#ffffff">
+          <th style="padding:8px;text-align:left;border:1px solid #0a5a54">Mês</th>
+          <th style="padding:8px;text-align:right;border:1px solid #0a5a54">Admissões</th>
+          <th style="padding:8px;text-align:right;border:1px solid #0a5a54">Desligados</th>
+          <th style="padding:8px;text-align:right;border:1px solid #0a5a54">Saldo</th>
+        </tr></thead>
+        <tbody>
+          ${meses.map(m => {
+            const info = porMes.get(m);
+            const saldo = info.admissoes - info.desligados;
+            return `<tr>
+              <td style="padding:8px;border:1px solid #ddd">${adhMonthLabel(m)}</td>
+              <td style="padding:8px;text-align:right;border:1px solid #ddd;color:#2d7a4f">${info.admissoes}</td>
+              <td style="padding:8px;text-align:right;border:1px solid #ddd;color:#a83a3a">${info.desligados}</td>
+              <td style="padding:8px;text-align:right;border:1px solid #ddd;font-weight:bold">${saldo>=0?'+':''}${saldo}</td>
+            </tr>`;
+          }).join('')}
+          <tr style="background:#f2f2f2;font-weight:bold">
+            <td style="padding:8px;border:1px solid #ddd">Total</td>
+            <td style="padding:8px;text-align:right;border:1px solid #ddd;color:#2d7a4f">${totalAdm}</td>
+            <td style="padding:8px;text-align:right;border:1px solid #ddd;color:#a83a3a">${totalDesl}</td>
+            <td style="padding:8px;text-align:right;border:1px solid #ddd">${saldoTotal>=0?'+':''}${saldoTotal}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>`;
+
+  let texto = `Relatório de Movimentação — ${base}\n${hcMovPeriodLabel()} · ${rows.length.toLocaleString('pt-BR')} registros\n\n`;
+  texto += `Mês\tAdmissões\tDesligados\tSaldo\n`;
+  meses.forEach(m => {
+    const info = porMes.get(m);
+    const saldo = info.admissoes - info.desligados;
+    texto += `${adhMonthLabel(m)}\t${info.admissoes}\t${info.desligados}\t${saldo>=0?'+':''}${saldo}\n`;
+  });
+  texto += `Total\t${totalAdm}\t${totalDesl}\t${saldoTotal>=0?'+':''}${saldoTotal}\n`;
+
+  const btn = document.getElementById('hc-mov-copy-btn');
+  try {
+    if (navigator.clipboard && window.ClipboardItem) {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/html': new Blob([html], { type: 'text/html' }),
+          'text/plain': new Blob([texto], { type: 'text/plain' }),
+        }),
+      ]);
+    } else {
+      await navigator.clipboard.writeText(texto);
+    }
+    if (btn) {
+      const original = btn.innerHTML;
+      btn.innerHTML = '<i class="ti ti-check" aria-hidden="true"></i> Copiado!';
+      setTimeout(() => { btn.innerHTML = original; }, 2000);
+    }
+  } catch(e) {
+    alert('Não consegui copiar automaticamente (o navegador pode ter bloqueado). Erro: ' + e.message);
+  }
+}
+
 function hcRenderMovimentacao(el) {
   const base = window._hcBase;
   if (window._hcMovPeriod == null) window._hcMovPeriod = '12m';
@@ -1348,7 +1430,8 @@ function hcRenderMovimentacao(el) {
             <i class="ti ti-search" aria-hidden="true"></i>
             <input type="text" class="adh-search-input" placeholder="Buscar por nome, matrícula ou cargo..." oninput="hcSetMovSearch(this.value)" value="${window._hcMovSearch||''}">
           </div>
-          <button class="adh-refresh-btn" style="margin-left:auto" onclick="hcExportarExcel(hcMovFilteredRows(), [
+          <button class="adh-refresh-btn" style="margin-left:auto" id="hc-mov-copy-btn" onclick="hcCopiarResumoEmail()"><i class="ti ti-clipboard" aria-hidden="true"></i> Copiar p/ e-mail</button>
+          <button class="adh-refresh-btn" onclick="hcExportarExcel(hcMovFilteredRows(), [
             {header:'Tipo',field:'tipo'},{header:'Matrícula',field:'matricula'},{header:'Filial',field:'filial'},
             {header:'Nome',field:'nome'},{header:'Cargo',field:'cargo'},{header:'Data',field:'data',fmt:hcFmtISODate}
           ], 'movimentacao.xlsx')"><i class="ti ti-download" aria-hidden="true"></i> Exportar Excel</button>
