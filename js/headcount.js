@@ -521,29 +521,48 @@ function hcMesAbrev(mesStr) {
 // Gráfico de barras por mês, com o mês/período do filtro atual destacado —
 // mostra todos os meses que existirem de dado (não fixo em 12).
 function hcExemploChartHTML(allRows, dataField, periodoAtual, cor) {
+  const hoje = new Date();
+  let de = null, ate = null;
+
+  if (periodoAtual === '12m') {
+    de = new Date(hoje.getFullYear(), hoje.getMonth()-11, 1);
+    ate = hoje;
+  } else if (periodoAtual !== 'todos' && periodoAtual !== 'custom') {
+    // mês específico selecionado — mostra uns meses de contexto ao redor
+    const [ano, mesN] = periodoAtual.split('-').map(Number);
+    de = new Date(ano, mesN-1-4, 1);
+    ate = new Date(ano, mesN-1+4, 1);
+  }
+  // 'todos' e 'custom' ficam sem limite — é exatamente o que o usuário pediu
+
   const porMes = new Map();
   allRows.forEach(r => {
     const mes = String(r[dataField]||'').slice(0,7);
     if (!mes || mes.length !== 7) return;
+    if (de || ate) {
+      const d = new Date(mes+'-01');
+      if (de && d < de) return;
+      if (ate && d > ate) return;
+    }
     porMes.set(mes, (porMes.get(mes)||0)+1);
   });
   const meses = [...porMes.keys()].sort();
   if (!meses.length) return '';
   const max = Math.max(1, ...meses.map(m=>porMes.get(m)));
-  const hoje = new Date();
   const ha12m = new Date(hoje.getFullYear(), hoje.getMonth()-12, hoje.getDate());
 
   return `
     <div class="hc-panel" style="margin-bottom:16px">
-      <div style="display:flex;align-items:flex-end;gap:6px;height:70px">
+      <div style="display:flex;align-items:flex-end;gap:6px;height:80px">
         ${meses.map(m => {
           const v = porMes.get(m);
           let destacado;
           if (periodoAtual === '12m') { destacado = new Date(m+'-01') >= ha12m; }
           else if (periodoAtual === 'todos' || periodoAtual === 'custom') { destacado = true; }
           else { destacado = m === periodoAtual; }
-          return `<div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%" title="${hcMesAbrev(m)}: ${v}">
-            <div style="height:${Math.round(v/max*60)}px;background:${destacado?cor:'rgba(255,255,255,.1)'};border-radius:3px 3px 0 0"></div>
+          return `<div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;align-items:center" title="${hcMesAbrev(m)}: ${v}">
+            <div style="font-size:9px;color:${destacado?'var(--text-primary)':'var(--text-muted)'};font-weight:600;margin-bottom:2px">${v}</div>
+            <div style="width:100%;height:${Math.round(v/max*54)}px;background:${destacado?cor:'rgba(255,255,255,.1)'};border-radius:3px 3px 0 0"></div>
           </div>`;
         }).join('')}
       </div>
@@ -1117,12 +1136,17 @@ function hcMovChartHTML() {
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#b56666;margin-right:5px"></span>Desligados</span>
         <span style="margin-left:auto;color:${saldo>=0?'#5fa87a':'#b56666'};font-weight:700">Saldo: ${saldo>=0?'+':''}${saldo}</span>
       </div>
-      <div style="display:flex;align-items:flex-end;gap:10px;height:90px">
+      <div style="display:flex;align-items:flex-end;gap:10px;height:100px">
         ${meses.map(m => {
           const info = porMes.get(m);
-          return `<div style="flex:1;display:flex;gap:3px;align-items:flex-end;height:100%">
-            <div style="flex:1;height:${Math.round(info.admissoes/max*80)}px;background:#5fa87a;border-radius:2px 2px 0 0" title="${info.admissoes} admissões"></div>
-            <div style="flex:1;height:${Math.round(info.desligados/max*80)}px;background:#b56666;border-radius:2px 2px 0 0" title="${info.desligados} desligados"></div>
+          return `<div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;align-items:center">
+            <div style="display:flex;gap:2px;font-size:8.5px;font-weight:600;margin-bottom:2px">
+              <span style="color:#5fa87a">${info.admissoes}</span><span style="color:var(--text-muted)">/</span><span style="color:#b56666">${info.desligados}</span>
+            </div>
+            <div style="display:flex;gap:3px;align-items:flex-end;width:100%;height:80px">
+              <div style="flex:1;height:${Math.round(info.admissoes/max*80)}px;background:#5fa87a;border-radius:2px 2px 0 0" title="${info.admissoes} admissões"></div>
+              <div style="flex:1;height:${Math.round(info.desligados/max*80)}px;background:#b56666;border-radius:2px 2px 0 0" title="${info.desligados} desligados"></div>
+            </div>
           </div>`;
         }).join('')}
       </div>
