@@ -1783,7 +1783,11 @@ function adhBuildPanelContent(mat, filial, nome, cargo, compact = false) {
   const totF  = days.reduce((s,d)=>s+d.falta,0);
   const totPct = totP>0 ? Math.max(0,Math.round((1-(totHE+totF)/totP)*100)) : null;
   const pctClr = p => p==null ? 'var(--text-muted)' : (p>=88?'#48bb78':p>=70?'#f6ad55':'#fc8181');
-  const fmtH = m => m>0 ? adhHuman(m/60) : '—';
+  const fmtH = m => {
+    if (!m || m <= 0) return '—';
+    const h = Math.floor(m/60), min = Math.round(m%60);
+    return h === 0 ? `${min}m` : `${h}:${String(min).padStart(2,'0')}h`;
+  };
 
   // Hour chart — smooth area lines for planned vs real vs hora extra.
   // Calculado minuto a minuto (não só por hora "cheia") pra saber com

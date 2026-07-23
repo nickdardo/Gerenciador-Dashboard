@@ -557,6 +557,30 @@ a { color: inherit; text-decoration: none; }
   width: 100%;
 }
 
+#btn-topo {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0,0,0,.35);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(8px);
+  transition: opacity .18s ease, transform .18s ease, background .15s, color .15s, border-color .15s;
+  z-index: 50;
+}
+#btn-topo.visivel { opacity: 1; pointer-events: auto; transform: translateY(0); }
+#btn-topo:hover { background: var(--blue); color: #0b0f1a; border-color: var(--blue); }
+
 .page-header {
   display: flex;
   align-items: flex-start;

@@ -56,7 +56,10 @@ async function appInit(user) {
 
   if (!_appInitialized) {
     _appInitialized = true;
-    navigateTo('escala');
+    const paginasValidas = ['escala','gerador','comparador','aderencia','headcount','admin'];
+    let ultimaPagina = null;
+    try { ultimaPagina = localStorage.getItem('gde_ultima_pagina'); } catch(_) {}
+    navigateTo(paginasValidas.includes(ultimaPagina) ? ultimaPagina : 'escala');
   }
 }
 
@@ -147,6 +150,7 @@ function renderTopbar() {
 // ── Navigation ────────────────────────────────────────
 function navigateTo(pageId) {
   currentPage = pageId;
+  try { localStorage.setItem('gde_ultima_pagina', pageId); } catch(_) {}
 
   // Update nav active state
   document.querySelectorAll('.sb-item').forEach(el => el.classList.remove('active'));
@@ -192,3 +196,23 @@ function sbIcon(name) {
   };
   return `<span class="sb-icon">${icons[name] || ''}</span>`;
 }
+
+// Botão flutuante "voltar ao topo" — aparece quando rola bastante em
+// qualquer tela (o scroll de verdade é dentro de #page-content, não na
+// janela toda), some quando volta pro início.
+(function () {
+  const LIMIAR = 400; // px rolados antes do botão aparecer
+  function setup() {
+    const wrap = document.getElementById('page-content');
+    const btn = document.getElementById('btn-topo');
+    if (!wrap || !btn) return;
+    wrap.addEventListener('scroll', () => {
+      btn.classList.toggle('visivel', wrap.scrollTop > LIMIAR);
+    });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setup);
+  } else {
+    setup();
+  }
+})();
