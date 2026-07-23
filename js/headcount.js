@@ -86,7 +86,7 @@ async function hcEnsureData() {
   }
   if (!window.eoDesligadosAll) {
     try {
-      const data = await dbFetchAll('colaboradores_desligados', 'matricula,filial,nome,cargo,ch,data_demissao,causa_texto');
+      const data = await dbFetchAll('colaboradores_desligados', 'matricula,filial,nome,cargo,ch,data_admissao,data_demissao,causa_texto');
       const byMat = new Map();
       for (const r of (data||[])) {
         const prev = byMat.get(r.matricula);
@@ -1135,9 +1135,23 @@ function hcMovChartHTML() {
 // Ranking de bases por movimentação total — só faz sentido mostrar quando
 // está vendo TODAS as bases juntas (se já tiver uma base específica
 // selecionada, isso ficaria redundante, é tudo a mesma base).
+function hcHeadcountPorBase() {
+  const porBase = new Map();
+  if (window.eoColabs) {
+    for (const [, r] of window.eoColabs) {
+      const base = (r.station||'').toUpperCase();
+      if (!base) continue;
+      if (hcIsDesligado(r.matricula)) continue;
+      porBase.set(base, (porBase.get(base)||0)+1);
+    }
+  }
+  return porBase;
+}
+
 function hcMovPorBaseHTML() {
   if (window._hcBase) return '';
   const rows = hcMovFilteredRows();
+  const headcountPorBase = hcHeadcountPorBase();
   const porBase = new Map();
   rows.forEach(r => {
     const base = r.filial || 'Sem filial';
@@ -1146,14 +1160,20 @@ function hcMovPorBaseHTML() {
     if (r.tipo === 'Admissão') info.admissoes++; else info.desligados++;
   });
   const bases = [...porBase.entries()]
-    .map(([base,info]) => ({ base, ...info, total: info.admissoes+info.desligados }))
+    .map(([base,info]) => {
+      const headcount = headcountPorBase.get(base) || 0;
+      const total = info.admissoes+info.desligados;
+      const taxa = headcount > 0 ? Math.round(total/headcount*1000)/10 : null;
+      return { base, ...info, total, headcount, taxa };
+    })
     .sort((a,b) => b.total - a.total);
   if (!bases.length) return '';
   const max = Math.max(1, ...bases.map(b=>b.total));
 
   return `
     <div class="hc-panel" style="margin-bottom:16px">
-      <div class="hc-panel-title" style="margin-bottom:12px">Bases com mais movimentação</div>
+      <div class="hc-panel-title" style="margin-bottom:2px">Bases com mais movimentação</div>
+      <div style="font-size:10.5px;color:var(--text-muted);margin-bottom:12px">Taxa = movimentação ÷ headcount ativo da base — dá contexto de tamanho, não só o número bruto</div>
       ${bases.map(b => `
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
           <div style="width:48px;font-size:12.5px;color:var(--text-primary);font-weight:600">${b.base}</div>
@@ -1163,8 +1183,105 @@ function hcMovPorBaseHTML() {
           </div>
           <div style="width:110px;text-align:right;font-size:11px;color:var(--text-muted);white-space:nowrap">${b.admissoes}▲ ${b.desligados}▼</div>
           <div style="width:40px;text-align:right;font-size:13px;font-weight:700;color:var(--text-primary)">${b.total}</div>
+          <div style="width:64px;text-align:right;font-size:11px;color:var(--text-muted);white-space:nowrap">${b.taxa!=null?b.taxa+'% do HC':'—'}</div>
         </div>
       `).join('')}
+    </div>`;
+}
+
+// Turnover por cargo — sempre mostra (faz sentido mesmo com uma base só
+// selecionada, já que dentro de uma base ainda pode ter vários cargos).
+function hcMovPorCargoHTML() {
+  const rows = hcMovFilteredRows();
+  const porCargo = new Map();
+  rows.forEach(r => {
+    const cargo = r.cargo || 'Sem cargo';
+    if (!porCargo.has(cargo)) porCargo.set(cargo, { admissoes:0, desligados:0 });
+    const info = porCargo.get(cargo);
+    if (r.tipo === 'Admissão') info.admissoes++; else info.desligados++;
+  });
+  const cargos = [...porCargo.entries()]
+    .map(([cargo,info]) => ({ cargo, ...info, total: info.admissoes+info.desligados }))
+    .sort((a,b) => b.total - a.total)
+    .slice(0, 12); // top 12 — pode ter muitos cargos distintos
+  if (!cargos.length) return '';
+  const max = Math.max(1, ...cargos.map(c=>c.total));
+
+  return `
+    <div class="hc-panel" style="margin-bottom:16px">
+      <div class="hc-panel-title" style="margin-bottom:12px">Cargos com mais movimentação</div>
+      ${cargos.map(c => `
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <div style="width:220px;font-size:12px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${c.cargo}">${c.cargo}</div>
+          <div style="flex:1;display:flex;height:16px;border-radius:3px;overflow:hidden;background:rgba(255,255,255,.05)">
+            <div style="width:${Math.round(c.admissoes/max*100)}%;background:#5fa87a" title="${c.admissoes} admissões"></div>
+            <div style="width:${Math.round(c.desligados/max*100)}%;background:#b56666" title="${c.desligados} desligados"></div>
+          </div>
+          <div style="width:110px;text-align:right;font-size:11px;color:var(--text-muted);white-space:nowrap">${c.admissoes}▲ ${c.desligados}▼</div>
+          <div style="width:40px;text-align:right;font-size:13px;font-weight:700;color:var(--text-primary)">${c.total}</div>
+        </div>
+      `).join('')}
+    </div>`;
+}
+
+// Motivo de desligamento mais comum — só entre os registros de
+// Desligamento do recorte filtrado (admissão não tem causa)
+function hcMovCausaHTML() {
+  const rows = hcMovFilteredRows().filter(r => r.tipo === 'Desligamento');
+  const porCausa = new Map();
+  rows.forEach(r => {
+    const causa = r.causa_texto || 'Não informado';
+    porCausa.set(causa, (porCausa.get(causa)||0)+1);
+  });
+  const causas = [...porCausa.entries()].sort((a,b) => b[1]-a[1]);
+  if (!causas.length) return '';
+  const total = rows.length;
+  const max = Math.max(1, ...causas.map(c=>c[1]));
+
+  return `
+    <div class="hc-panel" style="margin-bottom:16px">
+      <div class="hc-panel-title" style="margin-bottom:12px">Motivos de desligamento mais comuns</div>
+      ${causas.slice(0,8).map(([causa,n]) => `
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <div style="width:220px;font-size:12px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${causa}">${causa}</div>
+          <div style="flex:1;height:16px;border-radius:3px;overflow:hidden;background:rgba(255,255,255,.05)">
+            <div style="width:${Math.round(n/max*100)}%;height:100%;background:#b56666"></div>
+          </div>
+          <div style="width:50px;text-align:right;font-size:11px;color:var(--text-muted)">${Math.round(n/total*1000)/10}%</div>
+          <div style="width:34px;text-align:right;font-size:13px;font-weight:700;color:var(--text-primary)">${n}</div>
+        </div>
+      `).join('')}
+    </div>`;
+}
+
+// Tempo médio de casa de quem foi desligado — usa data_admissao ×
+// data_demissao do próprio registro de desligamento (já vem junto, não
+// precisa cruzar com outra tabela).
+function hcMovTempoCasaHTML() {
+  const rows = hcMovFilteredRows().filter(r => r.tipo === 'Desligamento' && r.data_admissao && r.data);
+  if (!rows.length) return '';
+  const dias = rows.map(r => {
+    const ini = new Date(r.data_admissao), fim = new Date(r.data);
+    return Math.max(0, Math.round((fim-ini)/(1000*60*60*24)));
+  });
+  const mediaDias = Math.round(dias.reduce((s,d)=>s+d,0) / dias.length);
+  const mediaMeses = Math.round(mediaDias/30*10)/10;
+  const menosDe90 = dias.filter(d => d < 90).length;
+  const pctMenosDe90 = Math.round(menosDe90/dias.length*1000)/10;
+
+  return `
+    <div class="hc-panel" style="margin-bottom:16px">
+      <div class="hc-panel-title" style="margin-bottom:12px">Tempo médio de casa até o desligamento</div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap">
+        <div style="flex:1;min-width:160px">
+          <div style="font-size:24px;font-weight:700;color:var(--text-primary)">${mediaMeses} meses</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">média (${dias.length} desligamento${dias.length===1?'':'s'} com data de admissão)</div>
+        </div>
+        <div style="flex:1;min-width:160px">
+          <div style="font-size:24px;font-weight:700;color:${pctMenosDe90>30?'#fc8181':'var(--text-primary)'}">${pctMenosDe90}%</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">saíram com menos de 90 dias de casa</div>
+        </div>
+      </div>
     </div>`;
 }
 
@@ -1197,6 +1314,9 @@ function hcRenderMovimentacao(el) {
 
       ${hcMovChartHTML()}
       ${hcMovPorBaseHTML()}
+      ${hcMovPorCargoHTML()}
+      ${hcMovCausaHTML()}
+      ${hcMovTempoCasaHTML()}
 
       <div class="hc-panel">
         <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
