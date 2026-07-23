@@ -1750,21 +1750,21 @@ a { color: inherit; text-decoration: none; }
   align-items: center;
   gap: 7px;
   margin-bottom: 14px;
-  font-size: 11.5px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: .05em;
   text-transform: uppercase;
   color: var(--text-primary);
 }
-.adh-kpi-card-head i { font-size: 14px; }
+.adh-kpi-card-head i { font-size: 16px; }
 .adh-kpi-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; gap: 10px; }
 .adh-kpi-row:last-child { margin-bottom: 0; }
-.adh-kpi-row-l { font-size: 12px; color: var(--text-primary); }
-.adh-kpi-row-s { font-size: 10.5px; color: var(--text-muted); margin-top: 1px; }
+.adh-kpi-row-l { font-size: 13.5px; color: var(--text-primary); }
+.adh-kpi-row-s { font-size: 11.5px; color: var(--text-muted); margin-top: 1px; }
 .adh-kpi-row-v { color: var(--text-primary); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.adh-kpi-row-v.lg { font-size: 22px; font-weight: 700; }
-.adh-kpi-row-v.sm { font-size: 15px; font-weight: 700; }
-.adh-kpi-row-v i { font-size: 12px; opacity: .6; margin-left: 2px; }
+.adh-kpi-row-v.lg { font-size: 26px; font-weight: 700; }
+.adh-kpi-row-v.sm { font-size: 17px; font-weight: 700; }
+.adh-kpi-row-v i { font-size: 13px; opacity: .6; margin-left: 2px; }
 
 .adh-kpi-row-clickable {
   cursor: pointer;
@@ -1824,13 +1824,13 @@ a { color: inherit; text-decoration: none; }
 
 .adh-kpi-cards.compact { margin-bottom: 20px; }
 .adh-kpi-cards.compact .adh-kpi-card { padding: 10px 14px; }
-.adh-kpi-cards.compact .adh-kpi-card-head { margin-bottom: 6px; font-size: 10px; }
-.adh-kpi-cards.compact .adh-kpi-card-head i { font-size: 11px; }
+.adh-kpi-cards.compact .adh-kpi-card-head { margin-bottom: 6px; font-size: 11px; }
+.adh-kpi-cards.compact .adh-kpi-card-head i { font-size: 12.5px; }
 .adh-kpi-cards.compact .adh-kpi-row { margin-bottom: 4px; }
-.adh-kpi-cards.compact .adh-kpi-row-l { font-size: 11.5px; }
+.adh-kpi-cards.compact .adh-kpi-row-l { font-size: 12.5px; }
 .adh-kpi-cards.compact .adh-kpi-row-s { display: none; }
-.adh-kpi-cards.compact .adh-kpi-row-v.lg { font-size: 15px; }
-.adh-kpi-cards.compact .adh-kpi-row-v.sm { font-size: 13px; }
+.adh-kpi-cards.compact .adh-kpi-row-v.lg { font-size: 17px; }
+.adh-kpi-cards.compact .adh-kpi-row-v.sm { font-size: 14px; }
 
 /* ── Corpo: coluna principal (ranking) + sidebar (comparativo/insights/plano) ── */
 .adh-exec-body {
