@@ -870,6 +870,7 @@ async function adhRenderMultiBase(el) {
         { key:'amber', icon:'ti-clock-hour-4', title:'Horas', rows: [
           { label:'Horas extras', sub:'total no mês', value: adhFmtH(totHE) },
           { label:'Horas a menos', sub:'déficit no mês', value:`−${adhFmtH(totFalta)}`, color:'#b56666' },
+          { label:'Ofensores de HE', sub:'1+ dia acima de 2h · clique pra ver o ranking', value: [...adhColabKPI.values()].filter(c=>(c.diasHEAlta||0)>=1).length.toLocaleString('pt-BR'), color:'#fc8181', onclick:'adhOpenRankingHE(null)' },
         ]},
         { key:'purple', icon:'ti-users', title:'Colaboradores', rows: [
           { label:'Ativos', sub:'cadastro atual', value: (window.eoColabs?.size || totColabs).toLocaleString('pt-BR') },
@@ -1333,6 +1334,7 @@ function adhRenderDetalhe(el, base, showBack) {
         { key:'amber', icon:'ti-clock-hour-4', title:'Horas', rows: [
           { label:'Horas extras', sub:'no mês', value: adhFmtH(he_h) },
           { label:'Horas a menos', sub:'déficit no mês', value:`−${adhFmtH(fat_h)}`, color:'#b56666' },
+          { label:'Ofensores de HE', sub:'1+ dia acima de 2h · clique pra ver o ranking', value: colabListFull.filter(c=>(c.diasHEAlta||0)>=1).length.toLocaleString('pt-BR'), color:'#fc8181', onclick:`adhOpenRankingHE(${base?`'${base}'`:'null'})` },
         ]},
         { key:'purple', icon:'ti-users', title:'Colaboradores', rows: [
           { label:'Total', sub: base ? 'nesta base' : 'todas as bases', value: colabs.toLocaleString('pt-BR') },
@@ -1372,9 +1374,6 @@ function adhRenderDetalhe(el, base, showBack) {
             <button class="adh-sort-btn adh-situ-filter-btn" onclick="adhFilterSituacao('afastado',this)">Afastados</button>
             <button class="adh-sort-btn" onclick="adhTogglePcdFilter(this)" title="Mostrar só colaboradores PCD">
               <i class="ti ti-wheelchair" style="font-size:12px;vertical-align:middle"></i> PCD
-            </button>
-            <button class="adh-sort-btn" onclick="adhToggleHEFilter(this)" title="Mostrar só quem teve 3+ dias esse mês com mais de 2h de hora extra num único dia">
-              <i class="ti ti-alert-triangle" style="font-size:12px;vertical-align:middle;color:#fc8181"></i> HE frequente
             </button>
             <span class="adh-filter-divider"></span>
             <button class="adh-sort-btn active" data-quick onclick="adhSort('desvio',this)">Maior desvio</button>
@@ -1423,6 +1422,62 @@ function adhRenderDetalhe(el, base, showBack) {
 // Merge the full colaborador roster (window.eoColabs, from HRCL204.xlsx) with
 // the computed aderência KPI — so people without ponto data this period still
 // show up in the list (with dashes), instead of silently disappearing.
+// Ranking de "maiores ofensores" de hora extra — quem passou de 2h de HE
+// num único dia, ordenado por quantos dias isso aconteceu no mês.
+function adhOpenRankingHE(base) {
+  adhRenderRankingHE(document.getElementById('page-content'), base);
+}
+
+function adhRenderRankingHE(el, base) {
+  const mes = window._adhMes || adhCurrentMonth();
+  const lista = base ? adhBuildFullColabList(base) : [...adhColabKPI.values()];
+  const ofensores = lista
+    .filter(c => (c.diasHEAlta||0) >= 1)
+    .sort((a,b) => (b.diasHEAlta||0) - (a.diasHEAlta||0) || (b.he_h||0) - (a.he_h||0));
+
+  el.innerHTML = `
+    <div class="adh-det-wrap">
+      <div class="adh-det-header">
+        <div style="display:flex;align-items:center;gap:12px">
+          <button class="adh-back-btn" onclick="pageAderencia(document.getElementById('page-content'))">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
+            </svg>
+          </button>
+          <div>
+            <h1 class="adh-full-title">Maiores ofensores de hora extra ${base ? `<span class="adh-base-badge">${base}</span>` : ''}</h1>
+            <p class="adh-full-sub">Dias no mês com mais de 2h de HE num único dia · ${adhMonthLabel(mes)} · ${ofensores.length.toLocaleString('pt-BR')} colaborador${ofensores.length===1?'':'es'}</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="hc-panel">
+        <div class="adh-colab-table-wrap">
+          <table class="adh-colab-table">
+            <thead><tr>
+              <th>Matrícula</th><th>Colaborador</th><th>Cargo</th>
+              <th class="r">Dias &gt;2h</th><th class="r">Total HE mês</th>
+            </tr></thead>
+            <tbody>
+              ${ofensores.length ? ofensores.map(c => {
+                const mat = c.mat || c.matricula;
+                const cargo = c.funcao || window.eoColabs?.get(mat)?.funcao || '—';
+                const cor = c.diasHEAlta>=7 ? '#fc8181' : c.diasHEAlta>=4 ? '#f6ad55' : 'var(--text-primary)';
+                return `<tr class="adh-colab-row">
+                  <td style="font-family:monospace">${mat}</td>
+                  <td style="font-weight:500">${c.nome||''}</td>
+                  <td>${cargo}</td>
+                  <td class="r" style="font-weight:700;color:${cor}">${c.diasHEAlta}</td>
+                  <td class="r" style="color:#f6ad55">${adhHuman(c.he_h)}</td>
+                </tr>`;
+              }).join('') : `<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text-muted);font-size:12px">Ninguém passou de 2h de hora extra num único dia esse mês.</td></tr>`}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+}
+
 function adhBuildFullColabList(base) {
   const kpiByMat = new Map();
   for (const [k, d] of adhColabKPI) {
@@ -1591,9 +1646,6 @@ function adhRerenderColabTable() {
   if (window._adhPcdFilter) {
     list = list.filter(c => window.eoPcd?.has(c.mat || c.matricula));
   }
-  if (window._adhHEFilter) {
-    list = list.filter(c => (c.diasHEAlta||0) >= 3);
-  }
 
   if (window._adhCargoFilter?.size) {
     list = list.filter(c => {
@@ -1675,14 +1727,6 @@ function adhFilterSituacao(mode, btn) {
 function adhTogglePcdFilter(btn) {
   window._adhPcdFilter = !window._adhPcdFilter;
   if (btn) btn.classList.toggle('active', window._adhPcdFilter);
-  adhRerenderColabTable();
-}
-
-// HE frequente — quem teve 3+ dias no mês com mais de 2h de hora extra
-// num único dia (combinável com os outros filtros)
-function adhToggleHEFilter(btn) {
-  window._adhHEFilter = !window._adhHEFilter;
-  if (btn) btn.classList.toggle('active', window._adhHEFilter);
   adhRerenderColabTable();
 }
 
