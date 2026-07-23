@@ -160,7 +160,7 @@ function adminTabSwitch(tab, btn) {
   const el = document.getElementById('adm-tab-content');
   if (!el) return;
   switch(tab) {
-    case 'users':    el.innerHTML = adminUsersTab(users||[], preconfig||[]); break;
+    case 'users':    el.innerHTML = adminUsersTab(users||[], preconfig||[]); adminCarregarContasOrfas(); break;
     case 'files':    el.innerHTML = adminFilesTab();            break;
     case 'aderencia':adminAderenciaTab(el);                    break;
     case 'malha':    adminMalhaTab(el);                        break;
@@ -253,7 +253,17 @@ function adminUsersTab(users, preconfig = []) {
     </div>` : `
     <div style="padding:24px;text-align:center;color:var(--text-muted);font-size:12px;border:1px dashed var(--border);border-radius:10px">
       Nenhum e-mail pré-configurado. Clique em "+ Pré-configurar acesso" pra deixar o perfil e as bases já prontos antes da pessoa criar a conta.
-    </div>`}`;
+    </div>`}
+
+    <div class="adm-section-header" style="margin-top:24px">
+      <span>Contas travadas</span>
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">
+      Gente que já criou login mas ficou sem perfil (às vezes acontece se algo falhar no cadastro) — não aparece na lista de cima, mas também não consegue usar o sistema direito. Aqui dá pra excluir e liberar o e-mail pra criar de novo.
+    </div>
+    <div id="adm-contas-orfas">
+      <div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px">Carregando...</div>
+    </div>`;
 }
 
 // ══════════════════════════════════════════════════════
@@ -2340,6 +2350,44 @@ async function adminDeletePreconfig(id) {
   const { error } = await db.from('usuarios_preconfigurados').delete().eq('id', id);
   if (error) { alert('Erro: '+error.message); return; }
   adminRender();
+}
+
+// Contas que existem em auth (conseguem logar) mas ficaram sem perfil —
+// não aparecem na lista normal de usuários, então precisam de uma seção
+// própria pra dar pra ver e excluir.
+async function adminCarregarContasOrfas() {
+  const el = document.getElementById('adm-contas-orfas');
+  if (!el) return;
+  const { data, error } = await db.rpc('admin_listar_contas_orfas');
+  if (error) {
+    el.innerHTML = `<div style="padding:16px;color:var(--text-muted);font-size:12px">Não consegui carregar (${error.message}). Se a função ainda não existir no banco, roda o setup-contas-orfas.sql.</div>`;
+    return;
+  }
+  if (!data || !data.length) {
+    el.innerHTML = `<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px;border:1px dashed var(--border);border-radius:10px">Nenhuma conta travada agora — tudo certo.</div>`;
+    return;
+  }
+  el.innerHTML = `
+    <div class="adm-table-wrap">
+      <table class="adm-table">
+        <thead><tr><th>Email</th><th>Criado em</th><th></th></tr></thead>
+        <tbody>
+          ${data.map(c => `
+            <tr>
+              <td style="color:var(--text-muted)">${c.email}</td>
+              <td style="color:var(--text-muted);font-size:11px">${new Date(c.criado_em).toLocaleDateString('pt-BR')}</td>
+              <td><button class="adm-btn-edit" style="color:#fc8181" onclick="adminExcluirContaOrfa('${c.id}','${(c.email||'').replace(/'/g,"\\'")}')">Excluir</button></td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+async function adminExcluirContaOrfa(userId, email) {
+  if (!confirm(`Excluir por completo a conta travada de ${email}?\n\nO e-mail fica livre pra criar uma conta nova depois. Não dá pra desfazer.`)) return;
+  const { error } = await db.rpc('admin_excluir_conta_orfa', { p_user_id: userId });
+  if (error) { alert('Erro ao excluir: ' + error.message); return; }
+  adminCarregarContasOrfas();
 }
 
 async function adminDeleteUser(userId, nome) {
