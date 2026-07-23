@@ -559,7 +559,7 @@ a { color: inherit; text-decoration: none; }
 
 #btn-topo {
   position: fixed;
-  right: 24px;
+  left: 50%;
   bottom: 24px;
   width: 42px;
   height: 42px;
@@ -574,11 +574,11 @@ a { color: inherit; text-decoration: none; }
   box-shadow: 0 6px 18px rgba(0,0,0,.35);
   opacity: 0;
   pointer-events: none;
-  transform: translateY(8px);
+  transform: translateX(-50%) translateY(8px);
   transition: opacity .18s ease, transform .18s ease, background .15s, color .15s, border-color .15s;
   z-index: 50;
 }
-#btn-topo.visivel { opacity: 1; pointer-events: auto; transform: translateY(0); }
+#btn-topo.visivel { opacity: 1; pointer-events: auto; transform: translateX(-50%) translateY(0); }
 #btn-topo:hover { background: var(--blue); color: #0b0f1a; border-color: var(--blue); }
 
 .page-header {
