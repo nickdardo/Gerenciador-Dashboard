@@ -1184,14 +1184,19 @@ function escalaVoosHover(evt, svg) {
   if (!meta || !porDia) return;
   const [, mesNum] = (window._escalaMes || '').split('-').map(Number);
   const rect = svg.getBoundingClientRect();
-  const xSvg = (evt.clientX - rect.left) * (meta.W / rect.width);
-  const stepX = (meta.W-meta.padL-meta.padR)/(meta.diasNoMes-1 || 1);
-  let idx = Math.round((xSvg - meta.padL) / stepX);
+
+  // Usa a fração real do mouse dentro da caixa (0 a 1) — não depende de a
+  // largura guardada bater exatamente com o que está na tela agora.
+  const fracX = (evt.clientX - rect.left) / rect.width;
+  const padLFrac = meta.padL / meta.W, padRFrac = meta.padR / meta.W;
+  const xNorm = (fracX - padLFrac) / (1 - padLFrac - padRFrac);
+  let idx = Math.round(xNorm * (meta.diasNoMes-1));
   idx = Math.max(0, Math.min(meta.diasNoMes-1, idx));
   const dia = idx+1;
   const info = porDia.get(dia);
   if (!info) return;
 
+  const stepX = (meta.W-meta.padL-meta.padR)/(meta.diasNoMes-1 || 1);
   const scaleY = v => meta.H-meta.padB-(v/meta.max*(meta.H-meta.padB-meta.padT));
   const xPos = meta.padL + idx*stepX, yPos = scaleY(info.total);
 
