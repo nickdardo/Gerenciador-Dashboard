@@ -347,7 +347,7 @@ function adhBuildKPI(mes) {
 
     const ck = `${filial}|${mat}`;
     if (!colabAcc.has(ck)) {
-      colabAcc.set(ck, { filial, mat, nome: h?.nome || m.nome || '', min_prog:0, min_trab:0, desvio:0, he:0, falta:0 });
+      colabAcc.set(ck, { filial, mat, nome: h?.nome || m.nome || '', min_prog:0, min_trab:0, desvio:0, he:0, falta:0, diasHEAlta:0 });
     }
     const acc = colabAcc.get(ck);
     acc.min_prog += min_prog;
@@ -355,6 +355,7 @@ function adhBuildKPI(mes) {
     acc.desvio   += Math.abs(min_trab - min_prog);
     acc.he       += Math.max(0, min_trab - min_prog);
     acc.falta    += Math.max(0, min_prog - min_trab);
+    if ((min_trab - min_prog) > 120) acc.diasHEAlta++; // dia com mais de 2h de hora extra
   }
 
   // Desligados (HRCL106) saem do cálculo por completo.
@@ -443,7 +444,10 @@ function adhGlobalPct() {
 function adhPctColor(p) { return p >= 88 ? '#72c02c' : p >= 80 ? '#f59e0b' : '#ef4444'; }
 
 function adhFmtH(h) {
-  return Math.round(h).toLocaleString('pt-BR') + 'h';
+  if (h == null || isNaN(h)) return '—';
+  const totalMin = Math.round(Math.abs(h) * 60);
+  const horas = Math.floor(totalMin/60), min = totalMin%60;
+  return `${horas.toLocaleString('pt-BR')}:${String(min).padStart(2,'0')}h`;
 }
 
 // Formato mais legível pra valores por colaborador (diferente do adhFmtH,
@@ -1369,6 +1373,9 @@ function adhRenderDetalhe(el, base, showBack) {
             <button class="adh-sort-btn" onclick="adhTogglePcdFilter(this)" title="Mostrar só colaboradores PCD">
               <i class="ti ti-wheelchair" style="font-size:12px;vertical-align:middle"></i> PCD
             </button>
+            <button class="adh-sort-btn" onclick="adhToggleHEFilter(this)" title="Mostrar só quem teve 3+ dias esse mês com mais de 2h de hora extra num único dia">
+              <i class="ti ti-alert-triangle" style="font-size:12px;vertical-align:middle;color:#fc8181"></i> HE frequente
+            </button>
             <span class="adh-filter-divider"></span>
             <button class="adh-sort-btn active" data-quick onclick="adhSort('desvio',this)">Maior desvio</button>
             <button class="adh-sort-btn" data-quick onclick="adhSort('he',this)">Mais HE</button>
@@ -1441,7 +1448,7 @@ function adhBuildFullColabList(base) {
       out.push({
         filial: base, mat: matPad, matricula: matPad, nome: r.nome,
         funcao: r.funcao, situacao: r.situacao, ch: r.ch,
-        min_prog: 0, min_trab: 0, desvio: 0, he: 0, falta: 0,
+        min_prog: 0, min_trab: 0, desvio: 0, he: 0, falta: 0, diasHEAlta: 0,
         he_h: 0, falta_h: 0, pct: null, semDados: true
       });
     }
@@ -1537,7 +1544,7 @@ function adhRenderColabRows(list, base) {
       <td style="text-align:center">${situBadge}</td>
       <td class="r">${ch ? ch+'h' : '—'}</td>
       <td class="r">${c.semDados ? '—' : adhHuman(c.min_prog/60)}</td>
-      <td class="r" style="color:#f6ad55">${c.semDados ? '—' : adhHuman(c.he_h)}</td>
+      <td class="r" style="color:#f6ad55">${c.semDados ? '—' : adhHuman(c.he_h)}${(c.diasHEAlta||0)>=3 ? ` <span style="background:#fc818122;color:#fc8181;border-radius:3px;padding:1px 5px;font-size:9.5px;font-weight:700" title="${c.diasHEAlta} dias esse mês com mais de 2h de hora extra num único dia">⚠ ${c.diasHEAlta}x</span>` : ''}</td>
       <td class="r" style="color:#fc8181">${c.semDados ? '—' : adhHuman(c.falta_h)}</td>
       ${pctCell}
     </tr>`;
@@ -1583,6 +1590,9 @@ function adhRerenderColabTable() {
 
   if (window._adhPcdFilter) {
     list = list.filter(c => window.eoPcd?.has(c.mat || c.matricula));
+  }
+  if (window._adhHEFilter) {
+    list = list.filter(c => (c.diasHEAlta||0) >= 3);
   }
 
   if (window._adhCargoFilter?.size) {
@@ -1665,6 +1675,14 @@ function adhFilterSituacao(mode, btn) {
 function adhTogglePcdFilter(btn) {
   window._adhPcdFilter = !window._adhPcdFilter;
   if (btn) btn.classList.toggle('active', window._adhPcdFilter);
+  adhRerenderColabTable();
+}
+
+// HE frequente — quem teve 3+ dias no mês com mais de 2h de hora extra
+// num único dia (combinável com os outros filtros)
+function adhToggleHEFilter(btn) {
+  window._adhHEFilter = !window._adhHEFilter;
+  if (btn) btn.classList.toggle('active', window._adhHEFilter);
   adhRerenderColabTable();
 }
 
@@ -1910,7 +1928,7 @@ function adhBuildPanelContent(mat, filial, nome, cargo, compact = false) {
         <td style="color:#48bb78">${d.bat3||'—'}</td>
         <td style="color:#48bb78">${d.bat4||'—'}</td>
         ${bat58Cells}
-        <td style="text-align:right;color:#f6ad55">${fmtH(d.he)}</td>
+        <td style="text-align:right;color:${d.he>120?"#fc8181":"#f6ad55"};font-weight:${d.he>120?700:400}">${fmtH(d.he)}${d.he>120?" ⚠":""}</td>
         <td style="text-align:right;color:var(--text-muted)">—</td>
         <td style="text-align:right;color:var(--text-muted)">—</td>
       </tr>`;
@@ -1941,7 +1959,7 @@ function adhBuildPanelContent(mat, filial, nome, cargo, compact = false) {
       <td style="color:#48bb78">${d.bat3||'—'}</td>
       <td style="color:#48bb78">${d.bat4||'—'}</td>
       ${bat58Cells}
-      <td style="text-align:right;color:#f6ad55">${fmtH(d.he)}</td>
+      <td style="text-align:right;color:${d.he>120?"#fc8181":"#f6ad55"};font-weight:${d.he>120?700:400}">${fmtH(d.he)}${d.he>120?" ⚠":""}</td>
       <td style="text-align:right;color:#fc8181">${fmtH(d.falta)}</td>
       <td style="text-align:right;font-weight:700;color:${c2}">${d.pct==null?'—':d.pct+'%'}</td>
     </tr>`;
