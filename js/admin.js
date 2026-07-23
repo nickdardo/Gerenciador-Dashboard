@@ -2818,7 +2818,7 @@ async function adminPrecomputeAderencia(mes) {
 
     const ck = `${filial}|${mat}`;
     if (!colabAcc.has(ck)) {
-      colabAcc.set(ck, { filial, mat, nome: h?.nome || m.nome || '', mp:0, mt:0, desvio:0, he:0, falta:0 });
+      colabAcc.set(ck, { filial, mat, nome: h?.nome || m.nome || '', mp:0, mt:0, desvio:0, he:0, falta:0, diasHEAlta:0 });
     }
     const acc = colabAcc.get(ck);
     acc.mp     += minP;
@@ -2826,6 +2826,7 @@ async function adminPrecomputeAderencia(mes) {
     acc.desvio += Math.abs(minT - minP);
     acc.he     += Math.max(0, minT - minP);
     acc.falta  += Math.max(0, minP - minT);
+    if ((minT - minP) > 120) acc.diasHEAlta++; // dia com mais de 2h de hora extra
   }
 
   // Desligados (HRCL106) saem do cálculo por completo — continuam aparecendo
@@ -2898,6 +2899,7 @@ async function adminPrecomputeAderencia(mes) {
       pct,
       he_h:     Math.round(acc.he    / 60 * 10) / 10,
       falta_h:  Math.round(acc.falta / 60 * 10) / 10,
+      dias_he_alta: acc.diasHEAlta,
       updated_at: new Date(),
     });
 

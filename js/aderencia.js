@@ -567,8 +567,8 @@ async function pageAderencia(el) {
   const rosterPromise = adhEnsureRoster();
 
   // ── LAYER 1: localStorage cache (instantâneo) — uma cache por mês ──
-  const CACHE_KEY = 'adh_kpi_cache_v2_' + mes;
-  const CACHE_TS  = 'adh_kpi_ts_v2_' + mes;
+  const CACHE_KEY = 'adh_kpi_cache_v3_' + mes;
+  const CACHE_TS  = 'adh_kpi_ts_v3_' + mes;
   const CACHE_MAX = 8 * 60 * 60 * 1000; // 8 hours
 
   try {
@@ -579,7 +579,7 @@ async function pageAderencia(el) {
       if (raw) {
         const cached = JSON.parse(raw);
         adhBaseKPI  = new Map(cached.baseKPI.map(r => [r.filial, r]));
-        adhColabKPI = new Map(cached.colabKPI.map(r => [r.filial+'|'+r.matricula, {...r, mat: r.matricula}]));
+        adhColabKPI = new Map(cached.colabKPI.map(r => [r.filial+'|'+r.matricula, {...r, mat: r.matricula, diasHEAlta: r.dias_he_alta || 0}]));
         console.log(`[aderencia] Loaded from localStorage cache (${mes})`);
         // Skip loading, go straight to render
         await rosterPromise;
@@ -627,7 +627,7 @@ async function pageAderencia(el) {
         filial: r.filial, mat: r.matricula, matricula: r.matricula, nome: r.nome,
         pct: r.pct == null ? null : parseFloat(r.pct), he_h: parseFloat(r.he_h),
         falta_h: parseFloat(r.falta_h), min_prog: r.min_prog,
-        he: r.he, falta: r.falta
+        he: r.he, falta: r.falta, diasHEAlta: r.dias_he_alta || 0
       }]));
       console.log(`[aderencia] Loaded ${kpiRows.length} bases, ${colabRows.length} colaboradores from DB KPI (${mes})`);
 
@@ -870,7 +870,6 @@ async function adhRenderMultiBase(el) {
         { key:'amber', icon:'ti-clock-hour-4', title:'Horas', rows: [
           { label:'Horas extras', sub:'total no mês', value: adhFmtH(totHE) },
           { label:'Horas a menos', sub:'déficit no mês', value:`−${adhFmtH(totFalta)}`, color:'#b56666' },
-          { label:'Ofensores de HE', sub:'1+ dia acima de 2h · clique pra ver o ranking', value: [...adhColabKPI.values()].filter(c=>(c.diasHEAlta||0)>=1).length.toLocaleString('pt-BR'), color:'#fc8181', onclick:'adhOpenRankingHE(null)' },
         ]},
         { key:'purple', icon:'ti-users', title:'Colaboradores', rows: [
           { label:'Ativos', sub:'cadastro atual', value: (window.eoColabs?.size || totColabs).toLocaleString('pt-BR') },
@@ -1334,7 +1333,6 @@ function adhRenderDetalhe(el, base, showBack) {
         { key:'amber', icon:'ti-clock-hour-4', title:'Horas', rows: [
           { label:'Horas extras', sub:'no mês', value: adhFmtH(he_h) },
           { label:'Horas a menos', sub:'déficit no mês', value:`−${adhFmtH(fat_h)}`, color:'#b56666' },
-          { label:'Ofensores de HE', sub:'1+ dia acima de 2h · clique pra ver o ranking', value: colabListFull.filter(c=>(c.diasHEAlta||0)>=1).length.toLocaleString('pt-BR'), color:'#fc8181', onclick:`adhOpenRankingHE(${base?`'${base}'`:'null'})` },
         ]},
         { key:'purple', icon:'ti-users', title:'Colaboradores', rows: [
           { label:'Total', sub: base ? 'nesta base' : 'todas as bases', value: colabs.toLocaleString('pt-BR') },
@@ -1380,6 +1378,10 @@ function adhRenderDetalhe(el, base, showBack) {
             <button class="adh-sort-btn" data-quick onclick="adhSort('he',this)">Mais HE</button>
             <button class="adh-sort-btn" data-quick onclick="adhSort('falta',this)">Mais falta</button>
             <button class="adh-sort-btn" data-quick onclick="adhSort('pct',this)">Menor %</button>
+            <span class="adh-filter-divider"></span>
+            <button class="adh-sort-btn" onclick="adhOpenRankingHE(${base?`'${base}'`:'null'})" style="color:#fc8181" title="Quem passou de 2h de hora extra num único dia, ordenado por frequência">
+              <i class="ti ti-alert-triangle" style="font-size:12px;vertical-align:middle"></i> Ofensores HE
+            </button>
           </div>
         </div>
 
