@@ -388,8 +388,9 @@ function hcRenderMain(el) {
           { label:'Programadas', sub:'últimos 12 meses · clique para ver a lista', value: (stats.feriasProgramadas12m||0).toLocaleString('pt-BR'), color:'#b56666', onclick:'hcOpenFerias()' },
         ]},
         { key:'purple', icon:'ti-transfer', title:'Movimentação', rows: [
-          { label:'Admissões', sub:'últimos 12 meses · clique para ver a lista', value: stats.admissoes12m.toLocaleString('pt-BR'), color:'#5fa87a', onclick:'hcOpenMovimentacao()' },
-          { label:'Desligados', sub:'últimos 12 meses · clique para ver a lista', value: stats.desligados12m.toLocaleString('pt-BR'), color:'#b56666', onclick:'hcOpenMovimentacao()' },
+          { label:'Admissões', sub:'últimos 12 meses · clique para ver a lista', value: stats.admissoes12m.toLocaleString('pt-BR'), color:'#5fa87a', onclick:'hcOpenAdmissoes()' },
+          { label:'Desligados', sub:'últimos 12 meses · clique para ver a lista', value: stats.desligados12m.toLocaleString('pt-BR'), color:'#b56666', onclick:'hcOpenDesligados()' },
+          { label:'Relatório completo', sub:'admissões + desligados juntos, com gráfico e exportar Excel', value: '', onclick:'hcOpenMovimentacao()' },
         ]},
       ], true)}
 
@@ -509,6 +510,62 @@ function hcFmtISODate(iso) {
   const [y,m,d] = s.split('-');
   if (!y || !m || !d) return iso;
   return `${d}/${m}/${y}`;
+}
+
+function hcMesAbrev(mesStr) {
+  const [ano, mes] = String(mesStr).split('-');
+  const nomes = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  return `${nomes[parseInt(mes,10)-1]||'?'}/${(ano||'').slice(2)}`;
+}
+
+// Gráfico de barras por mês, com o mês/período do filtro atual destacado —
+// mostra todos os meses que existirem de dado (não fixo em 12).
+function hcExemploChartHTML(allRows, dataField, periodoAtual, cor) {
+  const porMes = new Map();
+  allRows.forEach(r => {
+    const mes = String(r[dataField]||'').slice(0,7);
+    if (!mes || mes.length !== 7) return;
+    porMes.set(mes, (porMes.get(mes)||0)+1);
+  });
+  const meses = [...porMes.keys()].sort();
+  if (!meses.length) return '';
+  const max = Math.max(1, ...meses.map(m=>porMes.get(m)));
+  const hoje = new Date();
+  const ha12m = new Date(hoje.getFullYear(), hoje.getMonth()-12, hoje.getDate());
+
+  return `
+    <div class="hc-panel" style="margin-bottom:16px">
+      <div style="display:flex;align-items:flex-end;gap:6px;height:70px">
+        ${meses.map(m => {
+          const v = porMes.get(m);
+          let destacado;
+          if (periodoAtual === '12m') { destacado = new Date(m+'-01') >= ha12m; }
+          else if (periodoAtual === 'todos' || periodoAtual === 'custom') { destacado = true; }
+          else { destacado = m === periodoAtual; }
+          return `<div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%" title="${hcMesAbrev(m)}: ${v}">
+            <div style="height:${Math.round(v/max*60)}px;background:${destacado?cor:'rgba(255,255,255,.1)'};border-radius:3px 3px 0 0"></div>
+          </div>`;
+        }).join('')}
+      </div>
+      <div style="display:flex;gap:6px;margin-top:4px">
+        ${meses.map(m => `<div style="flex:1;text-align:center;font-size:8px;color:var(--text-muted)">${hcMesAbrev(m)}</div>`).join('')}
+      </div>
+    </div>`;
+}
+
+// Exporta uma lista de linhas pra Excel — usa o SheetJS (já carregado no
+// projeto pra ler os arquivos de upload, reaproveitado aqui pra escrever).
+function hcExportarExcel(rows, colunas, nomeArquivo) {
+  if (typeof XLSX === 'undefined') { alert('Biblioteca de Excel não carregada.'); return; }
+  const dados = rows.map(r => {
+    const obj = {};
+    colunas.forEach(c => { obj[c.header] = c.fmt ? c.fmt(r[c.field]) : (r[c.field] ?? ''); });
+    return obj;
+  });
+  const ws = XLSX.utils.json_to_sheet(dados);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Dados');
+  XLSX.writeFile(wb, nomeArquivo);
 }
 
 function hcRenderColabRows(list) {
@@ -694,10 +751,18 @@ function hcRenderDesligados(el) {
         </div>
       </div>
 
+      ${hcExemploChartHTML(hcDeslAllForBase(), 'data_demissao', window._hcDeslPeriod, '#b56666')}
+
       <div class="hc-panel">
-        <div class="adh-search-wrap" style="margin-bottom:12px;max-width:340px">
-          <i class="ti ti-search" aria-hidden="true"></i>
-          <input type="text" class="adh-search-input" placeholder="Buscar por nome, matrícula ou causa..." oninput="hcSetDeslSearch(this.value)" value="${window._hcDeslSearch||''}">
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+          <div class="adh-search-wrap" style="max-width:340px;margin-bottom:0">
+            <i class="ti ti-search" aria-hidden="true"></i>
+            <input type="text" class="adh-search-input" placeholder="Buscar por nome, matrícula ou causa..." oninput="hcSetDeslSearch(this.value)" value="${window._hcDeslSearch||''}">
+          </div>
+          <button class="adh-refresh-btn" style="margin-left:auto" onclick="hcExportarExcel(hcDeslFilteredRows(), [
+            {header:'Matrícula',field:'matricula'},{header:'Filial',field:'filial'},{header:'Nome',field:'nome'},
+            {header:'Cargo',field:'cargo'},{header:'CH',field:'ch'},{header:'Demissão',field:'data_demissao',fmt:hcFmtISODate},{header:'Causa',field:'causa_texto'}
+          ], 'desligamentos.xlsx')"><i class="ti ti-download" aria-hidden="true"></i> Exportar Excel</button>
         </div>
         <div class="adh-colab-table-wrap">
           <table class="adh-colab-table">
@@ -866,10 +931,18 @@ function hcRenderFerias(el) {
         </div>
       </div>
 
+      ${hcExemploChartHTML(hcFeriasAllForBase(), 'data_inicio', window._hcFeriasPeriod, '#c9a24a')}
+
       <div class="hc-panel">
-        <div class="adh-search-wrap" style="margin-bottom:12px;max-width:340px">
-          <i class="ti ti-search" aria-hidden="true"></i>
-          <input type="text" class="adh-search-input" placeholder="Buscar por nome, matrícula ou cargo..." oninput="hcSetFeriasSearch(this.value)" value="${window._hcFeriasSearch||''}">
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+          <div class="adh-search-wrap" style="max-width:340px;margin-bottom:0">
+            <i class="ti ti-search" aria-hidden="true"></i>
+            <input type="text" class="adh-search-input" placeholder="Buscar por nome, matrícula ou cargo..." oninput="hcSetFeriasSearch(this.value)" value="${window._hcFeriasSearch||''}">
+          </div>
+          <button class="adh-refresh-btn" style="margin-left:auto" onclick="hcExportarExcel(hcFeriasFilteredRows(), [
+            {header:'Matrícula',field:'matricula'},{header:'Filial',field:'filial'},{header:'Nome',field:'nome'},
+            {header:'Cargo',field:'cargo'},{header:'Dias',field:'dias'},{header:'Início',field:'data_inicio',fmt:hcFmtISODate},{header:'Fim',field:'data_fim',fmt:hcFmtISODate}
+          ], 'ferias.xlsx')"><i class="ti ti-download" aria-hidden="true"></i> Exportar Excel</button>
         </div>
         <div class="adh-colab-table-wrap">
           <table class="adh-colab-table">
@@ -1089,9 +1162,15 @@ function hcRenderMovimentacao(el) {
       ${hcMovChartHTML()}
 
       <div class="hc-panel">
-        <div class="adh-search-wrap" style="margin-bottom:12px;max-width:340px">
-          <i class="ti ti-search" aria-hidden="true"></i>
-          <input type="text" class="adh-search-input" placeholder="Buscar por nome, matrícula ou cargo..." oninput="hcSetMovSearch(this.value)" value="${window._hcMovSearch||''}">
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+          <div class="adh-search-wrap" style="max-width:340px;margin-bottom:0">
+            <i class="ti ti-search" aria-hidden="true"></i>
+            <input type="text" class="adh-search-input" placeholder="Buscar por nome, matrícula ou cargo..." oninput="hcSetMovSearch(this.value)" value="${window._hcMovSearch||''}">
+          </div>
+          <button class="adh-refresh-btn" style="margin-left:auto" onclick="hcExportarExcel(hcMovFilteredRows(), [
+            {header:'Tipo',field:'tipo'},{header:'Matrícula',field:'matricula'},{header:'Filial',field:'filial'},
+            {header:'Nome',field:'nome'},{header:'Cargo',field:'cargo'},{header:'Data',field:'data',fmt:hcFmtISODate}
+          ], 'movimentacao.xlsx')"><i class="ti ti-download" aria-hidden="true"></i> Exportar Excel</button>
         </div>
         <div class="adh-colab-table-wrap">
           <table class="adh-colab-table">
@@ -1260,10 +1339,18 @@ function hcRenderAdmissoes(el) {
         </div>
       </div>
 
+      ${hcExemploChartHTML(hcAdmissoesAllForBase(), 'admissao', window._hcAdmPeriod, '#5fa87a')}
+
       <div class="hc-panel">
-        <div class="adh-search-wrap" style="margin-bottom:12px;max-width:340px">
-          <i class="ti ti-search" aria-hidden="true"></i>
-          <input type="text" class="adh-search-input" placeholder="Buscar por nome, matrícula ou cargo..." oninput="hcSetAdmSearch(this.value)" value="${window._hcAdmSearch||''}">
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+          <div class="adh-search-wrap" style="max-width:340px;margin-bottom:0">
+            <i class="ti ti-search" aria-hidden="true"></i>
+            <input type="text" class="adh-search-input" placeholder="Buscar por nome, matrícula ou cargo..." oninput="hcSetAdmSearch(this.value)" value="${window._hcAdmSearch||''}">
+          </div>
+          <button class="adh-refresh-btn" style="margin-left:auto" onclick="hcExportarExcel(hcAdmissoesFilteredRows(), [
+            {header:'Matrícula',field:'matricula'},{header:'Filial',field:'filial'},{header:'Nome',field:'nome'},
+            {header:'Cargo',field:'cargo'},{header:'CH',field:'ch'},{header:'Admissão',field:'admissao',fmt:hcFmtISODate}
+          ], 'admissoes.xlsx')"><i class="ti ti-download" aria-hidden="true"></i> Exportar Excel</button>
         </div>
         <div class="adh-colab-table-wrap">
           <table class="adh-colab-table">
