@@ -1001,6 +1001,51 @@ function hcMovAllForBase() {
   return [...admissoes, ...desligados];
 }
 
+// Filtro extra só pra tabela (clique num pedaço de gráfico) — não mexe
+// nos gráficos em si, só afeta a lista de colaboradores embaixo.
+function hcMovTabelaFiltrada() {
+  let rows = hcMovFilteredRows();
+  const extra = window._hcMovFiltroExtra;
+  if (extra) {
+    if (extra.tipo === 'mes')   rows = rows.filter(r => String(r.data).slice(0,7) === extra.valor);
+    else if (extra.tipo === 'cargo') rows = rows.filter(r => (r.cargo||'Sem cargo') === extra.valor);
+    else if (extra.tipo === 'causa') rows = rows.filter(r => r.tipo === 'Desligamento' && (r.causa_texto||'Não informado') === extra.valor);
+    else if (extra.tipo === 'base')  rows = rows.filter(r => (r.filial||'Sem filial') === extra.valor);
+  }
+  return rows;
+}
+
+function hcMovFiltrarPor(tipo, valor) {
+  const atual = window._hcMovFiltroExtra;
+  if (atual && atual.tipo === tipo && atual.valor === valor) {
+    window._hcMovFiltroExtra = null;
+  } else {
+    window._hcMovFiltroExtra = { tipo, valor };
+  }
+  hcRenderMovimentacao(window._hcCurrentEl);
+}
+
+function hcMovLimparFiltroExtra() {
+  window._hcMovFiltroExtra = null;
+  hcRenderMovimentacao(window._hcCurrentEl);
+}
+
+function hcMovAtualizarTabela() {
+  const body = document.getElementById('hc-mov-tbody');
+  if (body) body.innerHTML = hcMovRowsHTML();
+  const countEl = document.getElementById('hc-mov-count');
+  if (countEl) { const n = hcMovTabelaFiltrada().length; countEl.textContent = `${n.toLocaleString('pt-BR')} registro${n===1?'':'s'}`; }
+  const chipEl = document.getElementById('hc-mov-filtro-chip');
+  if (chipEl) chipEl.outerHTML = hcMovFiltroChipHTML();
+}
+
+function hcMovFiltroChipHTML() {
+  const extra = window._hcMovFiltroExtra;
+  if (!extra) return `<span id="hc-mov-filtro-chip"></span>`;
+  const label = extra.tipo === 'mes' ? adhMonthLabel(extra.valor) : extra.valor;
+  return `<span id="hc-mov-filtro-chip" class="hc-grupo-clear" onclick="hcMovLimparFiltroExtra()" style="cursor:pointer"><i class="ti ti-x" aria-hidden="true"></i> Filtrado: ${label}</span>`;
+}
+
 function hcMovFilteredRows() {
   const period = window._hcMovPeriod || '12m';
   const term = (window._hcMovSearch || '').trim().toUpperCase();
@@ -1087,13 +1132,13 @@ function hcSetMovSearch(value) {
   const body = document.getElementById('hc-mov-tbody');
   if (body) body.innerHTML = hcMovRowsHTML();
   const countEl = document.getElementById('hc-mov-count');
-  if (countEl) { const n = hcMovFilteredRows().length; countEl.textContent = `${n.toLocaleString('pt-BR')} registro${n===1?'':'s'}`; }
+  if (countEl) { const n = hcMovTabelaFiltrada().length; countEl.textContent = `${n.toLocaleString('pt-BR')} registro${n===1?'':'s'}`; }
 }
 
 function hcMovRowsHTML() {
-  const rows = hcMovFilteredRows();
+  const rows = hcMovTabelaFiltrada();
   if (!rows.length) {
-    return `<tr><td colspan="7" style="padding:24px 10px;text-align:center;color:var(--text-muted);font-size:12px">Nenhuma movimentação encontrada nesse período.</td></tr>`;
+    return `<tr><td colspan="7" style="padding:24px 10px;text-align:center;color:var(--text-muted);font-size:12px">Nenhuma movimentação encontrada nesse filtro.</td></tr>`;
   }
   return rows.map(r => {
     const cor = r.tipo === 'Admissão' ? '#5fa87a' : '#b56666';
@@ -1139,7 +1184,8 @@ function hcMovChartHTML() {
       <div style="display:flex;align-items:flex-end;gap:10px;height:100px">
         ${meses.map(m => {
           const info = porMes.get(m);
-          return `<div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;align-items:center">
+          const ativo = window._hcMovFiltroExtra?.tipo === 'mes' && window._hcMovFiltroExtra?.valor === m;
+          return `<div onclick="hcMovFiltrarPor('mes','${m}')" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;align-items:center;cursor:pointer;border-radius:4px;background:${ativo?'rgba(0,160,210,.12)':'transparent'};padding:2px" title="Clique pra ver quem está nesse mês">
             <div style="display:flex;gap:2px;font-size:8.5px;font-weight:600;margin-bottom:2px">
               <span style="color:#5fa87a">${info.admissoes}</span><span style="color:var(--text-secondary)">/</span><span style="color:#b56666">${info.desligados}</span>
             </div>
@@ -1234,8 +1280,8 @@ function hcMovPorCargoHTML() {
   return `
     <div class="hc-panel" style="margin-bottom:16px">
       <div class="hc-panel-title" style="margin-bottom:12px">Cargos com mais movimentação</div>
-      ${cargos.map(c => `
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+      ${cargos.map(c => { const ativo = window._hcMovFiltroExtra?.tipo === 'cargo' && window._hcMovFiltroExtra?.valor === c.cargo; return `
+        <div onclick="hcMovFiltrarPor('cargo','${c.cargo.replace(/'/g,"\\'")}')" style="display:flex;align-items:center;gap:10px;margin-bottom:8px;cursor:pointer;border-radius:6px;background:${ativo?'rgba(0,160,210,.1)':'transparent'};padding:3px 6px;margin-left:-6px" title="Clique pra ver quem é desse cargo">
           <div style="width:220px;font-size:12px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${c.cargo}">${c.cargo}</div>
           <div style="flex:1;display:flex;height:16px;border-radius:3px;overflow:hidden;background:rgba(255,255,255,.05)">
             <div style="width:${Math.round(c.admissoes/max*100)}%;background:#5fa87a" title="${c.admissoes} admissões"></div>
@@ -1244,7 +1290,7 @@ function hcMovPorCargoHTML() {
           <div style="width:110px;text-align:right;font-size:11px;color:var(--text-secondary);white-space:nowrap">${c.admissoes}▲ ${c.desligados}▼</div>
           <div style="width:40px;text-align:right;font-size:13px;font-weight:700;color:var(--text-primary)">${c.total}</div>
         </div>
-      `).join('')}
+      `; }).join('')}
     </div>`;
 }
 
@@ -1265,8 +1311,8 @@ function hcMovCausaHTML() {
   return `
     <div class="hc-panel" style="margin-bottom:16px">
       <div class="hc-panel-title" style="margin-bottom:12px">Motivos de desligamento mais comuns</div>
-      ${causas.slice(0,8).map(([causa,n]) => `
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+      ${causas.slice(0,8).map(([causa,n]) => { const ativo = window._hcMovFiltroExtra?.tipo === 'causa' && window._hcMovFiltroExtra?.valor === causa; return `
+        <div onclick="hcMovFiltrarPor('causa','${causa.replace(/'/g,"\\'")}')" style="display:flex;align-items:center;gap:10px;margin-bottom:8px;cursor:pointer;border-radius:6px;background:${ativo?'rgba(0,160,210,.1)':'transparent'};padding:3px 6px;margin-left:-6px" title="Clique pra ver quem saiu por esse motivo">
           <div style="width:220px;font-size:12px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${causa}">${causa}</div>
           <div style="flex:1;height:16px;border-radius:3px;overflow:hidden;background:rgba(255,255,255,.05)">
             <div style="width:${Math.round(n/max*100)}%;height:100%;background:#b56666"></div>
@@ -1274,7 +1320,7 @@ function hcMovCausaHTML() {
           <div style="width:50px;text-align:right;font-size:11px;color:var(--text-secondary)">${Math.round(n/total*1000)/10}%</div>
           <div style="width:34px;text-align:right;font-size:13px;font-weight:700;color:var(--text-primary)">${n}</div>
         </div>
-      `).join('')}
+      `; }).join('')}
     </div>`;
 }
 
@@ -1394,7 +1440,7 @@ async function hcCopiarResumoEmail() {
 function hcRenderMovimentacao(el) {
   const base = window._hcBase;
   if (window._hcMovPeriod == null) window._hcMovPeriod = '12m';
-  const rows = hcMovFilteredRows();
+  const rows = hcMovTabelaFiltrada();
 
   el.innerHTML = `
     <div class="hc-wrap">
@@ -1430,8 +1476,9 @@ function hcRenderMovimentacao(el) {
             <i class="ti ti-search" aria-hidden="true"></i>
             <input type="text" class="adh-search-input" placeholder="Buscar por nome, matrícula ou cargo..." oninput="hcSetMovSearch(this.value)" value="${window._hcMovSearch||''}">
           </div>
+          ${hcMovFiltroChipHTML()}
           <button class="adh-refresh-btn" style="margin-left:auto" id="hc-mov-copy-btn" onclick="hcCopiarResumoEmail()"><i class="ti ti-clipboard" aria-hidden="true"></i> Copiar p/ e-mail</button>
-          <button class="adh-refresh-btn" onclick="hcExportarExcel(hcMovFilteredRows(), [
+          <button class="adh-refresh-btn" onclick="hcExportarExcel(hcMovTabelaFiltrada(), [
             {header:'Tipo',field:'tipo'},{header:'Matrícula',field:'matricula'},{header:'Filial',field:'filial'},
             {header:'Nome',field:'nome'},{header:'Cargo',field:'cargo'},{header:'Data',field:'data',fmt:hcFmtISODate}
           ], 'movimentacao.xlsx')"><i class="ti ti-download" aria-hidden="true"></i> Exportar Excel</button>
