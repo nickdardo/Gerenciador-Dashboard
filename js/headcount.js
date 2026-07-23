@@ -74,14 +74,15 @@ async function hcEnsureData() {
   if (typeof adhEnsureRoster === 'function') await adhEnsureRoster();
   if (!window.eoFerias) {
     try {
-      const data = await dbFetchAll('colaboradores_ferias', 'matricula,data_inicio,data_fim,dias');
+      const data = await dbFetchAll('colaboradores_ferias', 'matricula,nome,cargo,filial,data_inicio,data_fim,dias');
       const byMat = new Map();
       for (const r of (data||[])) {
         const prev = byMat.get(r.matricula);
         if (!prev || (r.data_fim||'') > (prev.data_fim||'')) byMat.set(r.matricula, r);
       }
       window.eoFerias = byMat;
-    } catch(e) { console.warn('[headcount] ferias:', e.message); window.eoFerias = new Map(); }
+      window.eoFeriasAll = data || []; // histórico completo, pra filtro por período (igual desligados)
+    } catch(e) { console.warn('[headcount] ferias:', e.message); window.eoFerias = new Map(); window.eoFeriasAll = []; }
   }
   if (!window.eoDesligadosAll) {
     try {
@@ -176,6 +177,27 @@ function hcComputeStats(base) {
     if (d >= ha12m && d <= hoje) desligados12m++;
   }
 
+  // Admissões nos últimos 12 meses — vem do próprio cadastro (campo admissao)
+  let admissoes12m = 0;
+  if (window.eoColabs) {
+    for (const [, r] of window.eoColabs) {
+      if (base && (r.station||'').toUpperCase() !== base.toUpperCase()) continue;
+      if (!r.admissao) continue;
+      const d = new Date(r.admissao);
+      if (d >= ha12m && d <= hoje) admissoes12m++;
+    }
+  }
+
+  // Férias programadas (início) nos últimos 12 meses — histórico completo,
+  // igual desligados (não só a última férias por matrícula)
+  let feriasProgramadas12m = 0;
+  for (const r of (window.eoFeriasAll || [])) {
+    if (base && (r.filial||'').toUpperCase() !== base.toUpperCase()) continue;
+    if (!r.data_inicio) continue;
+    const d = new Date(r.data_inicio);
+    if (d >= ha12m && d <= hoje) feriasProgramadas12m++;
+  }
+
   const fte = somaCh > 0 ? Math.round(somaCh / 180 * 10) / 10 : 0; // 1 FTE = 180h (confirmado com o cliente)
   const ftPct = (fullTime+partTime) > 0 ? Math.round(fullTime/(fullTime+partTime)*1000)/10 : 0;
 
@@ -190,7 +212,7 @@ function hcComputeStats(base) {
   }
 
   return {
-    headcount, ativos, inativos, afastados, totalCadastro, pcd, atestados, feriasAtivas, desligados12m,
+    headcount, ativos, inativos, afastados, totalCadastro, pcd, atestados, feriasAtivas, desligados12m, admissoes12m, feriasProgramadas12m,
     fullTime, partTime, ftPct, fte, grupos, funcoes, chList: [...chSet].sort((a,b)=>a-b),
     situacoes, altaTemporada,
   };
@@ -235,7 +257,7 @@ async function pageHeadcount(el) {
 }
 
 async function hcForceRefresh() {
-  window.eoColabs = null; window.eoFerias = null; window.eoDesligados = null; window.eoDesligadosAll = null; window.eoPcd = null;
+  window.eoColabs = null; window.eoFerias = null; window.eoFeriasAll = null; window.eoDesligados = null; window.eoDesligadosAll = null; window.eoPcd = null;
   const el = window._hcCurrentEl;
   if (el) await pageHeadcount(el);
 }
@@ -361,8 +383,12 @@ function hcRenderMain(el) {
           { label:'Inativos', sub:'no cadastro, já desligados', value: stats.inativos.toLocaleString('pt-BR') },
           { label:'PCD', sub:'pessoas com deficiência', value: stats.pcd.toLocaleString('pt-BR') },
         ]},
-        { key:'red', icon:'ti-calendar-off', title:'Ausências', rows: [
-          { label:'Férias', sub:'ativas agora', value: stats.feriasAtivas.toLocaleString('pt-BR') },
+        { key:'red', icon:'ti-beach', title:'Férias', rows: [
+          { label:'Ativas agora', sub:'colaboradores de férias hoje', value: stats.feriasAtivas.toLocaleString('pt-BR') },
+          { label:'Programadas', sub:'últimos 12 meses · clique para ver a lista', value: (stats.feriasProgramadas12m||0).toLocaleString('pt-BR'), color:'#b56666', onclick:'hcOpenFerias()' },
+        ]},
+        { key:'purple', icon:'ti-transfer', title:'Movimentação', rows: [
+          { label:'Admissões', sub:'últimos 12 meses · clique para ver a lista', value: stats.admissoes12m.toLocaleString('pt-BR'), color:'#5fa87a', onclick:'hcOpenAdmissoes()' },
           { label:'Desligados', sub:'últimos 12 meses · clique para ver a lista', value: stats.desligados12m.toLocaleString('pt-BR'), color:'#b56666', onclick:'hcOpenDesligados()' },
         ]},
       ], true)}
@@ -689,6 +715,354 @@ function hcRenderDesligados(el) {
 document.addEventListener('click', (e) => {
   if (!e.target.closest('.hc-desl-filter-panel') && !e.target.closest('.hc-desl-filter-trigger')) {
     const panel = document.getElementById('hc-desl-filter-panel');
+    if (panel) panel.style.display = 'none';
+  }
+});
+
+// ══════════════════════════════════════════════════════
+// FÉRIAS — mesmo padrão de Desligados (filtro por período, busca, range)
+// ══════════════════════════════════════════════════════
+function hcOpenFerias() {
+  hcRenderFerias(window._hcCurrentEl);
+}
+
+function hcFeriasAllForBase() {
+  const base = window._hcBase;
+  return (window.eoFeriasAll || []).filter(r => {
+    if (base && (r.filial||'').toUpperCase() !== base.toUpperCase()) return false;
+    return !!r.data_inicio;
+  });
+}
+
+function hcFeriasFilteredRows() {
+  const period = window._hcFeriasPeriod || '12m';
+  const term = (window._hcFeriasSearch || '').trim().toUpperCase();
+  const hoje = new Date();
+  const ha12m = new Date(hoje.getFullYear(), hoje.getMonth()-12, hoje.getDate());
+
+  let rows = hcFeriasAllForBase();
+  if (period === '12m') {
+    rows = rows.filter(r => { const d = new Date(r.data_inicio); return d >= ha12m && d <= hoje; });
+  } else if (period === 'custom') {
+    const from = window._hcFeriasFrom ? new Date(window._hcFeriasFrom) : null;
+    const to   = window._hcFeriasTo   ? new Date(window._hcFeriasTo)   : null;
+    rows = rows.filter(r => {
+      const d = new Date(r.data_inicio);
+      if (from && d < from) return false;
+      if (to && d > to) return false;
+      return true;
+    });
+  } else if (period !== 'todos') {
+    rows = rows.filter(r => String(r.data_inicio).slice(0,7) === period);
+  }
+  if (term) {
+    rows = rows.filter(r =>
+      (r.nome||'').toUpperCase().includes(term) ||
+      String(r.matricula||'').includes(term) ||
+      (r.cargo||'').toUpperCase().includes(term));
+  }
+  return rows.sort((a,b) => (b.data_inicio||'').localeCompare(a.data_inicio||''));
+}
+
+function hcFeriasPeriodLabel() {
+  const period = window._hcFeriasPeriod || '12m';
+  if (period === '12m')   return 'Últimos 12 meses';
+  if (period === 'todos') return 'Todo o período';
+  if (period === 'custom') {
+    const de  = window._hcFeriasFrom ? hcFmtISODate(window._hcFeriasFrom) : 'início';
+    const ate = window._hcFeriasTo   ? hcFmtISODate(window._hcFeriasTo)   : 'hoje';
+    return `De ${de} até ${ate}`;
+  }
+  return adhMonthLabel(period);
+}
+
+function hcFeriasFilterPanelHTML() {
+  const meses = [...new Set(hcFeriasAllForBase().map(r => String(r.data_inicio).slice(0,7)))].sort().reverse();
+  const period = window._hcFeriasPeriod || '12m';
+  const quick = [['12m','Últimos 12 meses'], ['todos','Tudo'], ...meses.map(m => [m, adhMonthLabel(m)])];
+  return `
+    <div class="hc-desl-filter-panel" id="hc-ferias-filter-panel" style="display:none">
+      <div class="hc-desl-filter-quick">
+        ${quick.map(([v,label]) => `<button class="${period===v?'active':''}" onclick="hcSetFeriasPeriod('${v}')">${label}</button>`).join('')}
+      </div>
+      <div class="hc-desl-filter-custom">
+        <div class="hc-desl-filter-custom-label">Ou escolha um período personalizado</div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <input type="date" id="hc-ferias-from" class="adm-input" style="width:auto" value="${window._hcFeriasFrom||''}">
+          <span style="color:var(--text-muted);font-size:12px">até</span>
+          <input type="date" id="hc-ferias-to" class="adm-input" style="width:auto" value="${window._hcFeriasTo||''}">
+          <button class="adh-refresh-btn" onclick="hcApplyFeriasCustomRange()">Aplicar</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function hcToggleFeriasFilter() {
+  const panel = document.getElementById('hc-ferias-filter-panel');
+  if (!panel) return;
+  panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+}
+
+function hcSetFeriasPeriod(value) {
+  window._hcFeriasPeriod = value;
+  hcRenderFerias(window._hcCurrentEl);
+}
+
+function hcApplyFeriasCustomRange() {
+  window._hcFeriasFrom = document.getElementById('hc-ferias-from').value || null;
+  window._hcFeriasTo   = document.getElementById('hc-ferias-to').value || null;
+  window._hcFeriasPeriod = 'custom';
+  hcRenderFerias(window._hcCurrentEl);
+}
+
+function hcSetFeriasSearch(value) {
+  window._hcFeriasSearch = value;
+  const body = document.getElementById('hc-ferias-tbody');
+  if (body) body.innerHTML = hcFeriasRowsHTML();
+  const countEl = document.getElementById('hc-ferias-count');
+  if (countEl) { const n = hcFeriasFilteredRows().length; countEl.textContent = `${n.toLocaleString('pt-BR')} registro${n===1?'':'s'}`; }
+}
+
+function hcFeriasRowsHTML() {
+  const rows = hcFeriasFilteredRows();
+  if (!rows.length) {
+    return `<tr><td colspan="7" style="padding:24px 10px;text-align:center;color:var(--text-muted);font-size:12px">Nenhuma férias encontrada nesse período.</td></tr>`;
+  }
+  return rows.map(r => `<tr class="adh-colab-row">
+    <td style="font-family:monospace">${r.matricula}</td>
+    <td>${r.filial}</td>
+    <td style="font-weight:500">${r.nome||''}</td>
+    <td>${r.cargo||''}</td>
+    <td class="r">${r.dias?r.dias+' dias':'—'}</td>
+    <td>${hcFmtISODate(r.data_inicio)||'—'}</td>
+    <td>${hcFmtISODate(r.data_fim)||'—'}</td>
+  </tr>`).join('');
+}
+
+function hcRenderFerias(el) {
+  const base = window._hcBase;
+  if (window._hcFeriasPeriod == null) window._hcFeriasPeriod = '12m';
+  const rows = hcFeriasFilteredRows();
+
+  el.innerHTML = `
+    <div class="hc-wrap">
+      <div class="hc-header">
+        <div style="display:flex;align-items:center;gap:12px">
+          <button class="adh-back-btn" onclick="hcRenderMain(window._hcCurrentEl)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
+            </svg>
+          </button>
+          <div style="position:relative">
+            <h1 class="page-title">Férias ${base?`<span class="adh-base-badge">${base}</span>`:''}</h1>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+              <button class="hc-desl-filter-trigger" onclick="hcToggleFeriasFilter()">
+                <i class="ti ti-filter" aria-hidden="true"></i> ${hcFeriasPeriodLabel()} <i class="ti ti-chevron-down" aria-hidden="true"></i>
+              </button>
+              <span class="page-sub" style="margin:0"><span id="hc-ferias-count">${rows.length.toLocaleString('pt-BR')} registro${rows.length===1?'':'s'}</span></span>
+            </div>
+            ${hcFeriasFilterPanelHTML()}
+          </div>
+        </div>
+      </div>
+
+      <div class="hc-panel">
+        <div class="adh-search-wrap" style="margin-bottom:12px;max-width:340px">
+          <i class="ti ti-search" aria-hidden="true"></i>
+          <input type="text" class="adh-search-input" placeholder="Buscar por nome, matrícula ou cargo..." oninput="hcSetFeriasSearch(this.value)" value="${window._hcFeriasSearch||''}">
+        </div>
+        <div class="adh-colab-table-wrap">
+          <table class="adh-colab-table">
+            <thead><tr>
+              <th>Matrícula</th><th>Filial</th><th>Nome</th><th>Cargo</th>
+              <th class="r">Dias</th><th>Início</th><th>Fim</th>
+            </tr></thead>
+            <tbody id="hc-ferias-tbody">${hcFeriasRowsHTML()}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+}
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.hc-desl-filter-panel') && !e.target.closest('.hc-desl-filter-trigger')) {
+    const panel = document.getElementById('hc-ferias-filter-panel');
+    if (panel) panel.style.display = 'none';
+  }
+});
+
+// ══════════════════════════════════════════════════════
+// ADMISSÕES — mesmo padrão, direto do cadastro (campo admissao)
+// ══════════════════════════════════════════════════════
+function hcOpenAdmissoes() {
+  hcRenderAdmissoes(window._hcCurrentEl);
+}
+
+function hcAdmissoesAllForBase() {
+  const base = window._hcBase;
+  const out = [];
+  if (window.eoColabs) {
+    for (const [mat, r] of window.eoColabs) {
+      if (base && (r.station||'').toUpperCase() !== base.toUpperCase()) continue;
+      if (!r.admissao) continue;
+      out.push({ matricula: mat, filial: r.station, nome: r.nome, cargo: r.funcao, ch: r.ch, admissao: r.admissao });
+    }
+  }
+  return out;
+}
+
+function hcAdmissoesFilteredRows() {
+  const period = window._hcAdmPeriod || '12m';
+  const term = (window._hcAdmSearch || '').trim().toUpperCase();
+  const hoje = new Date();
+  const ha12m = new Date(hoje.getFullYear(), hoje.getMonth()-12, hoje.getDate());
+
+  let rows = hcAdmissoesAllForBase();
+  if (period === '12m') {
+    rows = rows.filter(r => { const d = new Date(r.admissao); return d >= ha12m && d <= hoje; });
+  } else if (period === 'custom') {
+    const from = window._hcAdmFrom ? new Date(window._hcAdmFrom) : null;
+    const to   = window._hcAdmTo   ? new Date(window._hcAdmTo)   : null;
+    rows = rows.filter(r => {
+      const d = new Date(r.admissao);
+      if (from && d < from) return false;
+      if (to && d > to) return false;
+      return true;
+    });
+  } else if (period !== 'todos') {
+    rows = rows.filter(r => String(r.admissao).slice(0,7) === period);
+  }
+  if (term) {
+    rows = rows.filter(r =>
+      (r.nome||'').toUpperCase().includes(term) ||
+      String(r.matricula||'').includes(term) ||
+      (r.cargo||'').toUpperCase().includes(term));
+  }
+  return rows.sort((a,b) => (b.admissao||'').localeCompare(a.admissao||''));
+}
+
+function hcAdmPeriodLabel() {
+  const period = window._hcAdmPeriod || '12m';
+  if (period === '12m')   return 'Últimos 12 meses';
+  if (period === 'todos') return 'Todo o período';
+  if (period === 'custom') {
+    const de  = window._hcAdmFrom ? hcFmtISODate(window._hcAdmFrom) : 'início';
+    const ate = window._hcAdmTo   ? hcFmtISODate(window._hcAdmTo)   : 'hoje';
+    return `De ${de} até ${ate}`;
+  }
+  return adhMonthLabel(period);
+}
+
+function hcAdmFilterPanelHTML() {
+  const meses = [...new Set(hcAdmissoesAllForBase().map(r => String(r.admissao).slice(0,7)))].sort().reverse();
+  const period = window._hcAdmPeriod || '12m';
+  const quick = [['12m','Últimos 12 meses'], ['todos','Tudo'], ...meses.map(m => [m, adhMonthLabel(m)])];
+  return `
+    <div class="hc-desl-filter-panel" id="hc-adm-filter-panel" style="display:none">
+      <div class="hc-desl-filter-quick">
+        ${quick.map(([v,label]) => `<button class="${period===v?'active':''}" onclick="hcSetAdmPeriod('${v}')">${label}</button>`).join('')}
+      </div>
+      <div class="hc-desl-filter-custom">
+        <div class="hc-desl-filter-custom-label">Ou escolha um período personalizado</div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <input type="date" id="hc-adm-from" class="adm-input" style="width:auto" value="${window._hcAdmFrom||''}">
+          <span style="color:var(--text-muted);font-size:12px">até</span>
+          <input type="date" id="hc-adm-to" class="adm-input" style="width:auto" value="${window._hcAdmTo||''}">
+          <button class="adh-refresh-btn" onclick="hcApplyAdmCustomRange()">Aplicar</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function hcToggleAdmFilter() {
+  const panel = document.getElementById('hc-adm-filter-panel');
+  if (!panel) return;
+  panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+}
+
+function hcSetAdmPeriod(value) {
+  window._hcAdmPeriod = value;
+  hcRenderAdmissoes(window._hcCurrentEl);
+}
+
+function hcApplyAdmCustomRange() {
+  window._hcAdmFrom = document.getElementById('hc-adm-from').value || null;
+  window._hcAdmTo   = document.getElementById('hc-adm-to').value || null;
+  window._hcAdmPeriod = 'custom';
+  hcRenderAdmissoes(window._hcCurrentEl);
+}
+
+function hcSetAdmSearch(value) {
+  window._hcAdmSearch = value;
+  const body = document.getElementById('hc-adm-tbody');
+  if (body) body.innerHTML = hcAdmRowsHTML();
+  const countEl = document.getElementById('hc-adm-count');
+  if (countEl) { const n = hcAdmissoesFilteredRows().length; countEl.textContent = `${n.toLocaleString('pt-BR')} registro${n===1?'':'s'}`; }
+}
+
+function hcAdmRowsHTML() {
+  const rows = hcAdmissoesFilteredRows();
+  if (!rows.length) {
+    return `<tr><td colspan="6" style="padding:24px 10px;text-align:center;color:var(--text-muted);font-size:12px">Nenhuma admissão encontrada nesse período.</td></tr>`;
+  }
+  return rows.map(r => `<tr class="adh-colab-row">
+    <td style="font-family:monospace">${r.matricula}</td>
+    <td>${r.filial}</td>
+    <td style="font-weight:500">${r.nome||''}</td>
+    <td>${r.cargo||''}</td>
+    <td class="r">${r.ch?r.ch+'h':'—'}</td>
+    <td>${hcFmtISODate(r.admissao)||'—'}</td>
+  </tr>`).join('');
+}
+
+function hcRenderAdmissoes(el) {
+  const base = window._hcBase;
+  if (window._hcAdmPeriod == null) window._hcAdmPeriod = '12m';
+  const rows = hcAdmissoesFilteredRows();
+
+  el.innerHTML = `
+    <div class="hc-wrap">
+      <div class="hc-header">
+        <div style="display:flex;align-items:center;gap:12px">
+          <button class="adh-back-btn" onclick="hcRenderMain(window._hcCurrentEl)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
+            </svg>
+          </button>
+          <div style="position:relative">
+            <h1 class="page-title">Admissões ${base?`<span class="adh-base-badge">${base}</span>`:''}</h1>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+              <button class="hc-desl-filter-trigger" onclick="hcToggleAdmFilter()">
+                <i class="ti ti-filter" aria-hidden="true"></i> ${hcAdmPeriodLabel()} <i class="ti ti-chevron-down" aria-hidden="true"></i>
+              </button>
+              <span class="page-sub" style="margin:0"><span id="hc-adm-count">${rows.length.toLocaleString('pt-BR')} registro${rows.length===1?'':'s'}</span></span>
+            </div>
+            ${hcAdmFilterPanelHTML()}
+          </div>
+        </div>
+      </div>
+
+      <div class="hc-panel">
+        <div class="adh-search-wrap" style="margin-bottom:12px;max-width:340px">
+          <i class="ti ti-search" aria-hidden="true"></i>
+          <input type="text" class="adh-search-input" placeholder="Buscar por nome, matrícula ou cargo..." oninput="hcSetAdmSearch(this.value)" value="${window._hcAdmSearch||''}">
+        </div>
+        <div class="adh-colab-table-wrap">
+          <table class="adh-colab-table">
+            <thead><tr>
+              <th>Matrícula</th><th>Filial</th><th>Nome</th><th>Cargo</th>
+              <th class="r">CH</th><th>Admissão</th>
+            </tr></thead>
+            <tbody id="hc-adm-tbody">${hcAdmRowsHTML()}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+}
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.hc-desl-filter-panel') && !e.target.closest('.hc-desl-filter-trigger')) {
+    const panel = document.getElementById('hc-adm-filter-panel');
     if (panel) panel.style.display = 'none';
   }
 });
