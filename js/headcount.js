@@ -561,13 +561,13 @@ function hcExemploChartHTML(allRows, dataField, periodoAtual, cor) {
           else if (periodoAtual === 'todos' || periodoAtual === 'custom') { destacado = true; }
           else { destacado = m === periodoAtual; }
           return `<div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;align-items:center" title="${hcMesAbrev(m)}: ${v}">
-            <div style="font-size:9px;color:${destacado?'var(--text-primary)':'var(--text-muted)'};font-weight:600;margin-bottom:2px">${v}</div>
+            <div style="font-size:10px;color:${destacado?'var(--text-primary)':'var(--text-secondary)'};font-weight:600;margin-bottom:2px">${v}</div>
             <div style="width:100%;height:${Math.round(v/max*54)}px;background:${destacado?cor:'rgba(255,255,255,.1)'};border-radius:3px 3px 0 0"></div>
           </div>`;
         }).join('')}
       </div>
       <div style="display:flex;gap:6px;margin-top:4px">
-        ${meses.map(m => `<div style="flex:1;text-align:center;font-size:8px;color:var(--text-muted)">${hcMesAbrev(m)}</div>`).join('')}
+        ${meses.map(m => `<div style="flex:1;text-align:center;font-size:10px;color:var(--text-secondary)">${hcMesAbrev(m)}</div>`).join('')}
       </div>
     </div>`;
 }
@@ -1141,7 +1141,7 @@ function hcMovChartHTML() {
           const info = porMes.get(m);
           return `<div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;align-items:center">
             <div style="display:flex;gap:2px;font-size:8.5px;font-weight:600;margin-bottom:2px">
-              <span style="color:#5fa87a">${info.admissoes}</span><span style="color:var(--text-muted)">/</span><span style="color:#b56666">${info.desligados}</span>
+              <span style="color:#5fa87a">${info.admissoes}</span><span style="color:var(--text-secondary)">/</span><span style="color:#b56666">${info.desligados}</span>
             </div>
             <div style="display:flex;gap:3px;align-items:flex-end;width:100%;height:80px">
               <div style="flex:1;height:${Math.round(info.admissoes/max*80)}px;background:#5fa87a;border-radius:2px 2px 0 0" title="${info.admissoes} admissões"></div>
@@ -1151,7 +1151,7 @@ function hcMovChartHTML() {
         }).join('')}
       </div>
       <div style="display:flex;gap:10px;margin-top:4px">
-        ${meses.map(m => `<div style="flex:1;text-align:center;font-size:9px;color:var(--text-muted)">${adhMonthLabel(m)}</div>`).join('')}
+        ${meses.map(m => `<div style="flex:1;text-align:center;font-size:10px;color:var(--text-secondary)">${adhMonthLabel(m)}</div>`).join('')}
       </div>
     </div>`;
 }
@@ -1205,9 +1205,9 @@ function hcMovPorBaseHTML() {
             <div style="width:${Math.round(b.admissoes/max*100)}%;background:#5fa87a" title="${b.admissoes} admissões"></div>
             <div style="width:${Math.round(b.desligados/max*100)}%;background:#b56666" title="${b.desligados} desligados"></div>
           </div>
-          <div style="width:110px;text-align:right;font-size:11px;color:var(--text-muted);white-space:nowrap">${b.admissoes}▲ ${b.desligados}▼</div>
+          <div style="width:110px;text-align:right;font-size:11px;color:var(--text-secondary);white-space:nowrap">${b.admissoes}▲ ${b.desligados}▼</div>
           <div style="width:40px;text-align:right;font-size:13px;font-weight:700;color:var(--text-primary)">${b.total}</div>
-          <div style="width:64px;text-align:right;font-size:11px;color:var(--text-muted);white-space:nowrap">${b.taxa!=null?b.taxa+'% do HC':'—'}</div>
+          <div style="width:64px;text-align:right;font-size:11px;color:var(--text-secondary);white-space:nowrap">${b.taxa!=null?b.taxa+'% do HC':'—'}</div>
         </div>
       `).join('')}
     </div>`;
@@ -1241,7 +1241,7 @@ function hcMovPorCargoHTML() {
             <div style="width:${Math.round(c.admissoes/max*100)}%;background:#5fa87a" title="${c.admissoes} admissões"></div>
             <div style="width:${Math.round(c.desligados/max*100)}%;background:#b56666" title="${c.desligados} desligados"></div>
           </div>
-          <div style="width:110px;text-align:right;font-size:11px;color:var(--text-muted);white-space:nowrap">${c.admissoes}▲ ${c.desligados}▼</div>
+          <div style="width:110px;text-align:right;font-size:11px;color:var(--text-secondary);white-space:nowrap">${c.admissoes}▲ ${c.desligados}▼</div>
           <div style="width:40px;text-align:right;font-size:13px;font-weight:700;color:var(--text-primary)">${c.total}</div>
         </div>
       `).join('')}
@@ -1271,7 +1271,7 @@ function hcMovCausaHTML() {
           <div style="flex:1;height:16px;border-radius:3px;overflow:hidden;background:rgba(255,255,255,.05)">
             <div style="width:${Math.round(n/max*100)}%;height:100%;background:#b56666"></div>
           </div>
-          <div style="width:50px;text-align:right;font-size:11px;color:var(--text-muted)">${Math.round(n/total*1000)/10}%</div>
+          <div style="width:50px;text-align:right;font-size:11px;color:var(--text-secondary)">${Math.round(n/total*1000)/10}%</div>
           <div style="width:34px;text-align:right;font-size:13px;font-weight:700;color:var(--text-primary)">${n}</div>
         </div>
       `).join('')}
@@ -1299,11 +1299,11 @@ function hcMovTempoCasaHTML() {
       <div style="display:flex;gap:16px;flex-wrap:wrap">
         <div style="flex:1;min-width:160px">
           <div style="font-size:24px;font-weight:700;color:var(--text-primary)">${mediaMeses} meses</div>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">média (${dias.length} desligamento${dias.length===1?'':'s'} com data de admissão)</div>
+          <div style="font-size:11px;color:var(--text-secondary);margin-top:2px">média (${dias.length} desligamento${dias.length===1?'':'s'} com data de admissão)</div>
         </div>
         <div style="flex:1;min-width:160px">
           <div style="font-size:24px;font-weight:700;color:${pctMenosDe90>30?'#fc8181':'var(--text-primary)'}">${pctMenosDe90}%</div>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">saíram com menos de 90 dias de casa</div>
+          <div style="font-size:11px;color:var(--text-secondary);margin-top:2px">saíram com menos de 90 dias de casa</div>
         </div>
       </div>
     </div>`;
