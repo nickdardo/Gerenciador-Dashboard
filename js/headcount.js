@@ -388,8 +388,8 @@ function hcRenderMain(el) {
           { label:'Programadas', sub:'últimos 12 meses · clique para ver a lista', value: (stats.feriasProgramadas12m||0).toLocaleString('pt-BR'), color:'#b56666', onclick:'hcOpenFerias()' },
         ]},
         { key:'purple', icon:'ti-transfer', title:'Movimentação', rows: [
-          { label:'Admissões', sub:'últimos 12 meses · clique para ver a lista', value: stats.admissoes12m.toLocaleString('pt-BR'), color:'#5fa87a', onclick:'hcOpenAdmissoes()' },
-          { label:'Desligados', sub:'últimos 12 meses · clique para ver a lista', value: stats.desligados12m.toLocaleString('pt-BR'), color:'#b56666', onclick:'hcOpenDesligados()' },
+          { label:'Admissões', sub:'últimos 12 meses · clique para ver a lista', value: stats.admissoes12m.toLocaleString('pt-BR'), color:'#5fa87a', onclick:'hcOpenMovimentacao()' },
+          { label:'Desligados', sub:'últimos 12 meses · clique para ver a lista', value: stats.desligados12m.toLocaleString('pt-BR'), color:'#b56666', onclick:'hcOpenMovimentacao()' },
         ]},
       ], true)}
 
@@ -894,6 +894,224 @@ document.addEventListener('click', (e) => {
 // ══════════════════════════════════════════════════════
 // ADMISSÕES — mesmo padrão, direto do cadastro (campo admissao)
 // ══════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════
+// MOVIMENTAÇÃO — visão unificada de Admissões + Desligados, com gráfico
+// de barras paralelas por mês (cores batendo com o card: verde admissão,
+// vermelho-acobreado desligamento — mesmas cores já usadas ali).
+// ══════════════════════════════════════════════════════
+function hcOpenMovimentacao() {
+  hcRenderMovimentacao(window._hcCurrentEl);
+}
+
+function hcMovAllForBase() {
+  const admissoes = hcAdmissoesAllForBase().map(r => ({ ...r, tipo: 'Admissão', data: r.admissao }));
+  const desligados = hcDeslAllForBase().map(r => ({ ...r, tipo: 'Desligamento', data: r.data_demissao }));
+  return [...admissoes, ...desligados];
+}
+
+function hcMovFilteredRows() {
+  const period = window._hcMovPeriod || '12m';
+  const term = (window._hcMovSearch || '').trim().toUpperCase();
+  const hoje = new Date();
+  const ha12m = new Date(hoje.getFullYear(), hoje.getMonth()-12, hoje.getDate());
+
+  let rows = hcMovAllForBase();
+  if (period === '12m') {
+    rows = rows.filter(r => { const d = new Date(r.data); return d >= ha12m && d <= hoje; });
+  } else if (period === 'custom') {
+    const from = window._hcMovFrom ? new Date(window._hcMovFrom) : null;
+    const to   = window._hcMovTo   ? new Date(window._hcMovTo)   : null;
+    rows = rows.filter(r => {
+      const d = new Date(r.data);
+      if (from && d < from) return false;
+      if (to && d > to) return false;
+      return true;
+    });
+  } else if (period !== 'todos') {
+    rows = rows.filter(r => String(r.data).slice(0,7) === period);
+  }
+  if (term) {
+    rows = rows.filter(r =>
+      (r.nome||'').toUpperCase().includes(term) ||
+      String(r.matricula||'').includes(term) ||
+      (r.cargo||'').toUpperCase().includes(term));
+  }
+  return rows.sort((a,b) => (b.data||'').localeCompare(a.data||''));
+}
+
+function hcMovPeriodLabel() {
+  const period = window._hcMovPeriod || '12m';
+  if (period === '12m')   return 'Últimos 12 meses';
+  if (period === 'todos') return 'Todo o período';
+  if (period === 'custom') {
+    const de  = window._hcMovFrom ? hcFmtISODate(window._hcMovFrom) : 'início';
+    const ate = window._hcMovTo   ? hcFmtISODate(window._hcMovTo)   : 'hoje';
+    return `De ${de} até ${ate}`;
+  }
+  return adhMonthLabel(period);
+}
+
+function hcMovFilterPanelHTML() {
+  const meses = [...new Set(hcMovAllForBase().map(r => String(r.data).slice(0,7)))].sort().reverse();
+  const period = window._hcMovPeriod || '12m';
+  const quick = [['12m','Últimos 12 meses'], ['todos','Tudo'], ...meses.map(m => [m, adhMonthLabel(m)])];
+  return `
+    <div class="hc-desl-filter-panel" id="hc-mov-filter-panel" style="display:none">
+      <div class="hc-desl-filter-quick">
+        ${quick.map(([v,label]) => `<button class="${period===v?'active':''}" onclick="hcSetMovPeriod('${v}')">${label}</button>`).join('')}
+      </div>
+      <div class="hc-desl-filter-custom">
+        <div class="hc-desl-filter-custom-label">Ou escolha um período personalizado</div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <input type="date" id="hc-mov-from" class="adm-input" style="width:auto" value="${window._hcMovFrom||''}">
+          <span style="color:var(--text-muted);font-size:12px">até</span>
+          <input type="date" id="hc-mov-to" class="adm-input" style="width:auto" value="${window._hcMovTo||''}">
+          <button class="adh-refresh-btn" onclick="hcApplyMovCustomRange()">Aplicar</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function hcToggleMovFilter() {
+  const panel = document.getElementById('hc-mov-filter-panel');
+  if (!panel) return;
+  panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+}
+
+function hcSetMovPeriod(value) {
+  window._hcMovPeriod = value;
+  hcRenderMovimentacao(window._hcCurrentEl);
+}
+
+function hcApplyMovCustomRange() {
+  window._hcMovFrom = document.getElementById('hc-mov-from').value || null;
+  window._hcMovTo   = document.getElementById('hc-mov-to').value || null;
+  window._hcMovPeriod = 'custom';
+  hcRenderMovimentacao(window._hcCurrentEl);
+}
+
+function hcSetMovSearch(value) {
+  window._hcMovSearch = value;
+  const body = document.getElementById('hc-mov-tbody');
+  if (body) body.innerHTML = hcMovRowsHTML();
+  const countEl = document.getElementById('hc-mov-count');
+  if (countEl) { const n = hcMovFilteredRows().length; countEl.textContent = `${n.toLocaleString('pt-BR')} registro${n===1?'':'s'}`; }
+}
+
+function hcMovRowsHTML() {
+  const rows = hcMovFilteredRows();
+  if (!rows.length) {
+    return `<tr><td colspan="7" style="padding:24px 10px;text-align:center;color:var(--text-muted);font-size:12px">Nenhuma movimentação encontrada nesse período.</td></tr>`;
+  }
+  return rows.map(r => {
+    const cor = r.tipo === 'Admissão' ? '#5fa87a' : '#b56666';
+    return `<tr class="adh-colab-row">
+      <td><span style="background:${cor}22;color:${cor};border-radius:4px;padding:2px 8px;font-size:11px;font-weight:600">${r.tipo}</span></td>
+      <td style="font-family:monospace">${r.matricula}</td>
+      <td>${r.filial}</td>
+      <td style="font-weight:500">${r.nome||''}</td>
+      <td>${r.cargo||''}</td>
+      <td>${hcFmtISODate(r.data)||'—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+// Gráfico de barras paralelas (admissões x desligados) por mês, cobrindo
+// os meses presentes no recorte filtrado no momento — se o filtro for
+// "todos", mostra todos os meses que existirem de dado; se for um mês
+// específico, mostra só aquele.
+function hcMovChartHTML() {
+  const rows = hcMovFilteredRows();
+  const porMes = new Map();
+  rows.forEach(r => {
+    const mes = String(r.data).slice(0,7);
+    if (!porMes.has(mes)) porMes.set(mes, { admissoes: 0, desligados: 0 });
+    const info = porMes.get(mes);
+    if (r.tipo === 'Admissão') info.admissoes++; else info.desligados++;
+  });
+  const meses = [...porMes.keys()].sort();
+  if (!meses.length) return `<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:12px">Sem dados no período pra mostrar no gráfico.</div>`;
+
+  const max = Math.max(1, ...meses.map(m => Math.max(porMes.get(m).admissoes, porMes.get(m).desligados)));
+  const totalAdm = meses.reduce((s,m) => s+porMes.get(m).admissoes, 0);
+  const totalDesl = meses.reduce((s,m) => s+porMes.get(m).desligados, 0);
+  const saldo = totalAdm - totalDesl;
+
+  return `
+    <div class="hc-panel" style="margin-bottom:16px">
+      <div style="display:flex;gap:14px;font-size:11px;color:var(--text-secondary);margin-bottom:12px;align-items:center">
+        <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#5fa87a;margin-right:5px"></span>Admissões</span>
+        <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#b56666;margin-right:5px"></span>Desligados</span>
+        <span style="margin-left:auto;color:${saldo>=0?'#5fa87a':'#b56666'};font-weight:700">Saldo: ${saldo>=0?'+':''}${saldo}</span>
+      </div>
+      <div style="display:flex;align-items:flex-end;gap:10px;height:90px">
+        ${meses.map(m => {
+          const info = porMes.get(m);
+          return `<div style="flex:1;display:flex;gap:3px;align-items:flex-end;height:100%">
+            <div style="flex:1;height:${Math.round(info.admissoes/max*80)}px;background:#5fa87a;border-radius:2px 2px 0 0" title="${info.admissoes} admissões"></div>
+            <div style="flex:1;height:${Math.round(info.desligados/max*80)}px;background:#b56666;border-radius:2px 2px 0 0" title="${info.desligados} desligados"></div>
+          </div>`;
+        }).join('')}
+      </div>
+      <div style="display:flex;gap:10px;margin-top:4px">
+        ${meses.map(m => `<div style="flex:1;text-align:center;font-size:9px;color:var(--text-muted)">${adhMonthLabel(m)}</div>`).join('')}
+      </div>
+    </div>`;
+}
+
+function hcRenderMovimentacao(el) {
+  const base = window._hcBase;
+  if (window._hcMovPeriod == null) window._hcMovPeriod = '12m';
+  const rows = hcMovFilteredRows();
+
+  el.innerHTML = `
+    <div class="hc-wrap">
+      <div class="hc-header">
+        <div style="display:flex;align-items:center;gap:12px">
+          <button class="adh-back-btn" onclick="hcRenderMain(window._hcCurrentEl)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
+            </svg>
+          </button>
+          <div style="position:relative">
+            <h1 class="page-title">Movimentação ${base?`<span class="adh-base-badge">${base}</span>`:''}</h1>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+              <button class="hc-desl-filter-trigger" onclick="hcToggleMovFilter()">
+                <i class="ti ti-filter" aria-hidden="true"></i> ${hcMovPeriodLabel()} <i class="ti ti-chevron-down" aria-hidden="true"></i>
+              </button>
+              <span class="page-sub" style="margin:0"><span id="hc-mov-count">${rows.length.toLocaleString('pt-BR')} registro${rows.length===1?'':'s'}</span></span>
+            </div>
+            ${hcMovFilterPanelHTML()}
+          </div>
+        </div>
+      </div>
+
+      ${hcMovChartHTML()}
+
+      <div class="hc-panel">
+        <div class="adh-search-wrap" style="margin-bottom:12px;max-width:340px">
+          <i class="ti ti-search" aria-hidden="true"></i>
+          <input type="text" class="adh-search-input" placeholder="Buscar por nome, matrícula ou cargo..." oninput="hcSetMovSearch(this.value)" value="${window._hcMovSearch||''}">
+        </div>
+        <div class="adh-colab-table-wrap">
+          <table class="adh-colab-table">
+            <thead><tr>
+              <th>Tipo</th><th>Matrícula</th><th>Filial</th><th>Nome</th><th>Cargo</th><th>Data</th>
+            </tr></thead>
+            <tbody id="hc-mov-tbody">${hcMovRowsHTML()}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+}
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.hc-desl-filter-panel') && !e.target.closest('.hc-desl-filter-trigger')) {
+    const panel = document.getElementById('hc-mov-filter-panel');
+    if (panel) panel.style.display = 'none';
+  }
+});
+
 function hcOpenAdmissoes() {
   hcRenderAdmissoes(window._hcCurrentEl);
 }
