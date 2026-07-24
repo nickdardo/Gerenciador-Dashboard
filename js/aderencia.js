@@ -870,6 +870,7 @@ async function adhRenderMultiBase(el) {
         { key:'amber', icon:'ti-clock-hour-4', title:'Horas', rows: [
           { label:'Horas extras', sub:'total no mês', value: adhFmtH(totHE) },
           { label:'Horas a menos', sub:'déficit no mês', value:`−${adhFmtH(totFalta)}`, color:'#b56666' },
+          { label:'Horas líquidas', sub:'extras − compensadas', value:`${totHE-totFalta>=0?'+':'−'}${adhFmtH(totHE-totFalta)}`, color: totHE-totFalta>=0 ? '#5fa87a' : '#b56666' },
         ]},
         { key:'purple', icon:'ti-users', title:'Colaboradores', rows: [
           { label:'Ativos', sub:'cadastro atual', value: (window.eoColabs?.size || totColabs).toLocaleString('pt-BR') },
@@ -1333,6 +1334,7 @@ function adhRenderDetalhe(el, base, showBack) {
         { key:'amber', icon:'ti-clock-hour-4', title:'Horas', rows: [
           { label:'Horas extras', sub:'no mês', value: adhFmtH(he_h) },
           { label:'Horas a menos', sub:'déficit no mês', value:`−${adhFmtH(fat_h)}`, color:'#b56666' },
+          { label:'Horas líquidas', sub:'extras − compensadas', value:`${he_h-fat_h>=0?'+':'−'}${adhFmtH(he_h-fat_h)}`, color: he_h-fat_h>=0 ? '#5fa87a' : '#b56666' },
         ]},
         { key:'purple', icon:'ti-users', title:'Colaboradores', rows: [
           { label:'Total', sub: base ? 'nesta base' : 'todas as bases', value: colabs.toLocaleString('pt-BR') },
