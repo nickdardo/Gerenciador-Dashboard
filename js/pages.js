@@ -543,8 +543,8 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#c9a24a;margin-right:5px"></span>L · Férias (automático)</span>
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#fc8181;margin-right:5px"></span>J · Afastado</span>
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#38bdf8;margin-right:5px"></span>K · Cursos</span>
-        <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#fb923c;margin-right:5px"></span>CH · Folga compensa</span>
-        <span style="color:var(--text-muted)">clique numa célula vazia ou de trabalho pra marcar F/K · fim de semana e feriado ficam destacados nas colunas</span>
+        <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#fb923c;margin-right:5px"></span>CH · Folga compensa (tecla C)</span>
+        <span style="color:var(--text-muted)">clique numa célula vazia ou de trabalho pra marcar F/J/K/C · fim de semana e feriado ficam destacados nas colunas</span>
       </div>
       <div id="escala-grade-wrap" style="overflow-x:auto">${escalaGradeTabelaHTML(ano, mesNum, diasNoMes)}</div>
     </div>
@@ -882,7 +882,7 @@ async function escalaRemoverColab(matricula) {
 // Clica na célula pra selecionar (fica com contorno azul), depois digita
 // F, J ou K pra marcar — L é recusado (férias é automático, não digitável),
 // e qualquer outra tecla também é recusada. Backspace/Delete limpa.
-const ESCALA_TECLAS_VALIDAS = ['F', 'J', 'K'];
+const ESCALA_TECLAS_VALIDAS = ['F', 'J', 'K', 'CH'];
 
 function escalaSelecionarCelula(matricula, dia, elCel) {
   if (window._escalaCelSelecionadaEl) {
@@ -895,7 +895,7 @@ function escalaSelecionarCelula(matricula, dia, elCel) {
   }
   window._escalaCelSelecionadaEl = elCel;
   window._escalaCelulaSelecionada = { matricula, dia };
-  escalaMsg('Célula selecionada — digite F, J ou K. Backspace limpa.');
+  escalaMsg('Célula selecionada — digite F, J, K ou C (compensa). Backspace limpa.');
 }
 
 function escalaRestaurarSelecaoVisual() {
@@ -930,13 +930,19 @@ async function escalaAplicarTeclaNaCelula(tecla) {
     return;
   }
 
-  if (ESCALA_TECLAS_VALIDAS.indexOf(tecla) === -1) {
-    escalaMsg(`"${tecla}" não é uma letra válida nessa célula. Use F, J ou K.`, true);
+  // 'C' é o atalho de uma tecla só pra marcar CH (Folga compensa / banco de
+  // horas) — o status salvo sempre é 'CH' (duas letras, igual o resto do
+  // sistema já espera pra exibir e pra contar em Aderência); só o atalho de
+  // digitação é de uma tecla, pro mesmo jeito de usar F/J/K.
+  const statusFinal = tecla === 'C' ? 'CH' : tecla;
+
+  if (ESCALA_TECLAS_VALIDAS.indexOf(statusFinal) === -1) {
+    escalaMsg(`"${tecla}" não é uma letra válida nessa célula. Use F, J, K ou C (compensa).`, true);
     return;
   }
 
   const payload = {
-    base, mes, matricula, dia, status: tecla, origem: 'manual',
+    base, mes, matricula, dia, status: statusFinal, origem: 'manual',
     updated_at: new Date(), updated_by: currentUserProfile?.id || currentUser?.id || null,
   };
   const { error } = await db.from('escala_dia').upsert(payload, { onConflict: 'base,mes,matricula,dia' });
