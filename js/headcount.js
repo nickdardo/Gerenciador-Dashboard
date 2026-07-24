@@ -1148,6 +1148,7 @@ function hcMovRowsHTML() {
       <td>${r.filial}</td>
       <td style="font-weight:500">${r.nome||''}</td>
       <td>${r.cargo||''}</td>
+      <td class="r">${r.ch?r.ch+'h':'—'}</td>
       <td>${hcFmtISODate(r.data)||'—'}</td>
     </tr>`;
   }).join('');
@@ -1480,13 +1481,13 @@ function hcRenderMovimentacao(el) {
           <button class="adh-refresh-btn" style="margin-left:auto" id="hc-mov-copy-btn" onclick="hcCopiarResumoEmail()"><i class="ti ti-clipboard" aria-hidden="true"></i> Copiar p/ e-mail</button>
           <button class="adh-refresh-btn" onclick="hcExportarExcel(hcMovTabelaFiltrada(), [
             {header:'Tipo',field:'tipo'},{header:'Matrícula',field:'matricula'},{header:'Filial',field:'filial'},
-            {header:'Nome',field:'nome'},{header:'Cargo',field:'cargo'},{header:'Data',field:'data',fmt:hcFmtISODate}
+            {header:'Nome',field:'nome'},{header:'Cargo',field:'cargo'},{header:'CH',field:'ch'},{header:'Data',field:'data',fmt:hcFmtISODate}
           ], 'movimentacao.xlsx')"><i class="ti ti-download" aria-hidden="true"></i> Exportar Excel</button>
         </div>
         <div class="adh-colab-table-wrap">
           <table class="adh-colab-table">
             <thead><tr>
-              <th>Tipo</th><th>Matrícula</th><th>Filial</th><th>Nome</th><th>Cargo</th><th>Data</th>
+              <th>Tipo</th><th>Matrícula</th><th>Filial</th><th>Nome</th><th>Cargo</th><th class="r">CH</th><th>Data</th>
             </tr></thead>
             <tbody id="hc-mov-tbody">${hcMovRowsHTML()}</tbody>
           </table>
