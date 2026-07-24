@@ -1380,7 +1380,7 @@ function adhRenderDetalhe(el, base, showBack) {
             <button class="adh-sort-btn" data-quick onclick="adhSort('pct',this)">Menor %</button>
             <span class="adh-filter-divider"></span>
             <button class="adh-sort-btn" onclick="adhOpenRankingHE(${base?`'${base}'`:'null'})" style="color:#fc8181" title="Quem passou de 2h de hora extra num único dia, ordenado por frequência">
-              <i class="ti ti-alert-triangle" style="font-size:12px;vertical-align:middle"></i> Ofensores HE
+              <i class="ti ti-alert-triangle" style="font-size:12px;vertical-align:middle"></i> Ranking 2h+
             </button>
           </div>
         </div>
@@ -1427,7 +1427,12 @@ function adhRenderDetalhe(el, base, showBack) {
 // Ranking de "maiores ofensores" de hora extra — quem passou de 2h de HE
 // num único dia, ordenado por quantos dias isso aconteceu no mês.
 function adhOpenRankingHE(base) {
-  adhRenderRankingHE(document.getElementById('page-content'), base);
+  try {
+    adhRenderRankingHE(document.getElementById('page-content'), base);
+  } catch(e) {
+    console.error('[adhOpenRankingHE]', e);
+    alert('Erro ao abrir o ranking: ' + e.message + '\n\nTira um print dessa mensagem e manda pra gente corrigir.');
+  }
 }
 
 function adhRenderRankingHE(el, base) {
