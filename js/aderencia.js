@@ -478,12 +478,6 @@ async function adhForceRefresh() {
   if (typeof pontoMarcacao !== 'undefined') pontoMarcacao = new Map();
   adhBaseKPI = null; adhColabKPI = null;
   window._adhHistData = null;
-  // Além do cache local, força pular também o KPI já pré-calculado no banco
-  // (aderencia_kpi/aderencia_colab) — necessário quando esse KPI foi salvo
-  // antes de uma coluna nova existir (dias_he_alta ficava zerado pra sempre
-  // até alguém forçar um recálculo de verdade). Sem isso "Atualizar" limpava
-  // só o navegador e voltava a servir o mesmo KPI velho do banco.
-  window._adhForceLive = true;
   const el = window._adhCurrentEl;
   if (el) await pageAderencia(el);
 }
@@ -533,15 +527,6 @@ async function pageAderencia(el) {
   if (!window._adhMes) window._adhMes = adhCurrentMonth();
   const mes = window._adhMes;
 
-  // "Atualizar" pode pedir pra ignorar não só o cache local (localStorage)
-  // como também o KPI já pré-calculado no banco (aderencia_kpi/aderencia_colab)
-  // — necessário quando esse KPI foi salvo antes de uma coluna nova existir
-  // (ex.: dias_he_alta ficou zerado pra sempre até alguém recalcular). Sem
-  // isso, "Atualizar" limpava só o navegador e voltava a servir o mesmo KPI
-  // velho do banco, então o Ranking 2h+ continuava vazio.
-  const forceLive = !!window._adhForceLive;
-  window._adhForceLive = false; // consome a flag — é sempre um disparo único
-
   if (!ROLES_OK.includes(role)) {
     el.innerHTML = `
       <div class="page-header"><div>
@@ -587,7 +572,6 @@ async function pageAderencia(el) {
   const CACHE_MAX = 8 * 60 * 60 * 1000; // 8 hours
 
   try {
-    if (forceLive) throw new Error('force-live'); // pula direto pro cálculo ao vivo (LAYER 3)
     const ts    = parseInt(localStorage.getItem(CACHE_TS) || '0');
     const fresh = (Date.now() - ts) < CACHE_MAX;
     if (fresh) {
@@ -597,7 +581,6 @@ async function pageAderencia(el) {
         adhBaseKPI  = new Map(cached.baseKPI.map(r => [r.filial, r]));
         adhColabKPI = new Map(cached.colabKPI.map(r => [r.filial+'|'+r.matricula, {...r, mat: r.matricula, diasHEAlta: r.dias_he_alta || 0}]));
         console.log(`[aderencia] Loaded from localStorage cache (${mes})`);
-        window._adhKpiSource = 'cache local';
         // Skip loading, go straight to render
         await rosterPromise;
         if (role === 'admin') { adhRenderMultiBase(el); return; }
@@ -610,10 +593,6 @@ async function pageAderencia(el) {
   } catch(_) {}
 
   // ── LAYER 2: banco aderencia_kpi (rápido ~30 rows), filtrado pelo mês ──
-  // Pulado inteiro quando forceLive=true (botão Atualizar) — sem isso, um KPI
-  // pré-calculado e salvo no banco antes de uma coluna nova existir (ex.:
-  // dias_he_alta) nunca seria substituído, mesmo forçando atualização.
-  if (!forceLive) {
   setMsg('Carregando KPI do banco...');
   try {
     // aderencia_colab pode ter milhares de linhas — o Supabase corta em 1000
@@ -651,7 +630,6 @@ async function pageAderencia(el) {
         he: r.he, falta: r.falta, diasHEAlta: r.dias_he_alta || 0
       }]));
       console.log(`[aderencia] Loaded ${kpiRows.length} bases, ${colabRows.length} colaboradores from DB KPI (${mes})`);
-      window._adhKpiSource = 'banco (pré-calculado)';
 
       // Save to localStorage cache
       try {
@@ -671,7 +649,6 @@ async function pageAderencia(el) {
     }
   } catch(e) {
     console.warn('[aderencia] DB KPI error:', e.message);
-  }
   }
 
   // ── LAYER 3: calcular na hora (só 1ª vez, banco vazio, ou mês sem dado salvo ainda) ──
@@ -701,7 +678,6 @@ async function pageAderencia(el) {
   await rosterPromise; // precisa do roster carregado p/ isenção de cargo (gerente/coordenador)
   adhBaseKPI = null; adhColabKPI = null;
   adhBuildKPI(mes);
-  window._adhKpiSource = 'cálculo ao vivo';
 
   // Trigger precompute to save for next time (só faz sentido persistir o mês
   // corrente — meses anteriores são só consulta, não sobrescrevem nada novo)
@@ -1403,8 +1379,8 @@ function adhRenderDetalhe(el, base, showBack) {
             <button class="adh-sort-btn" data-quick onclick="adhSort('falta',this)">Mais falta</button>
             <button class="adh-sort-btn" data-quick onclick="adhSort('pct',this)">Menor %</button>
             <span class="adh-filter-divider"></span>
-            <button class="adh-sort-btn" onclick="adhOpenRankingHE(${base?`'${base}'`:'null'})" style="color:#fc8181" title="Quem passou de 2h de hora extra num único dia, ordenado por frequência">
-              <i class="ti ti-alert-triangle" style="font-size:12px;vertical-align:middle"></i> Ranking 2h+
+            <button class="adh-sort-btn" onclick="adhOpenRankingHE(${base?`'${base}'`:'null'})" style="color:var(--amber)" title="Ranking dos colaboradores com mais hora extra acumulada no mês">
+              <i class="ti ti-flame" style="font-size:12px;vertical-align:middle"></i> Ranking HE
             </button>
           </div>
         </div>
@@ -1448,8 +1424,11 @@ function adhRenderDetalhe(el, base, showBack) {
 // Merge the full colaborador roster (window.eoColabs, from HRCL204.xlsx) with
 // the computed aderência KPI — so people without ponto data this period still
 // show up in the list (with dashes), instead of silently disappearing.
-// Ranking de "maiores ofensores" de hora extra — quem passou de 2h de HE
-// num único dia, ordenado por quantos dias isso aconteceu no mês.
+// Ranking de hora extra — colaboradores ordenados por total de HE acumulado
+// no mês. Usa he_h (campo já confiável em toda a tela — a mesma coluna que
+// já aparece certinha na tabela ao lado) em vez de dias_he_alta: esse campo
+// depende de um recálculo no banco que só o Admin consegue persistir (RLS),
+// então ficava vazio pra quem não é admin mesmo depois de forçar "Atualizar".
 function adhOpenRankingHE(base) {
   try {
     adhRenderRankingHE(base);
@@ -1470,31 +1449,14 @@ function adhRenderRankingHE(base) {
   const mes = window._adhMes || adhCurrentMonth();
   const lista = window._adhColabListFull
     || (base ? adhBuildFullColabList(base) : [...(adhColabKPI || new Map()).values()]);
-  const ofensores = lista
-    .filter(c => (c.diasHEAlta||0) >= 1)
-    .sort((a,b) => (b.diasHEAlta||0) - (a.diasHEAlta||0) || (b.he_h||0) - (a.he_h||0));
+  const ranking = lista
+    .filter(c => (c.he_h||0) > 0)
+    .sort((a,b) => (b.he_h||0) - (a.he_h||0));
 
-  // Diagnóstico — visível na própria tela, sem precisar abrir o console.
-  // Ajuda a distinguir "dado realmente zerado na fonte" de "bug na hora de
-  // juntar/filtrar a lista".
-  const comDados = lista.filter(c => !c.semDados).length;
-  const maxDias  = comDados ? Math.max(0, ...lista.map(c => c.diasHEAlta || 0)) : 0;
-  const fonte    = window._adhKpiSource || 'desconhecida';
-  console.log('[adhRankingHE] diagnóstico', {
-    base, fonte, totalNaLista: lista.length, comDados, maxDiasHEAltaEncontrado: maxDias,
-    amostra: lista.filter(c => !c.semDados).slice(0, 8)
-      .map(c => ({ mat: c.mat || c.matricula, nome: c.nome, he_h: c.he_h, diasHEAlta: c.diasHEAlta }))
-  });
-  const diagHTML = `<div style="font-size:9.5px;color:var(--text-muted);margin-top:6px">
-    Diagnóstico: ${comDados} de ${lista.length} colaboradores com ponto neste período ·
-    fonte dos dados: ${fonte} · maior nº de dias &gt;2h encontrado: ${maxDias}
-  </div>`;
-
-  const rowsHTML = ofensores.length ? ofensores.map((c, i) => {
+  const rowsHTML = ranking.length ? ranking.map((c, i) => {
     const mat   = c.mat || c.matricula;
     const cargo = c.funcao || window.eoColabs?.get(mat)?.funcao || '—';
-    const cor = c.diasHEAlta>=7 ? 'var(--red)' : c.diasHEAlta>=4 ? 'var(--amber)' : 'var(--text-secondary)';
-    const bg  = c.diasHEAlta>=7 ? 'rgba(252,129,129,.14)' : c.diasHEAlta>=4 ? 'rgba(246,173,85,.14)' : 'rgba(136,150,170,.12)';
+    const pctCor = c.pct == null ? 'var(--text-muted)' : adhBarColor(c.pct);
     return `<tr>
       <td style="color:var(--text-muted);font-weight:800">${i+1}</td>
       <td>
@@ -1502,16 +1464,16 @@ function adhRenderRankingHE(base) {
         <div style="font-family:monospace;font-size:10.5px;color:var(--text-muted)">${mat}</div>
       </td>
       <td style="color:var(--text-secondary)">${cargo}</td>
-      <td style="text-align:right"><span style="background:${bg};color:${cor};border-radius:6px;padding:2px 8px;font-weight:800;font-size:11.5px">${c.diasHEAlta}</span></td>
-      <td style="text-align:right;color:var(--amber);font-weight:700">${adhHuman(c.he_h)}</td>
+      <td style="text-align:right;color:var(--amber);font-weight:800">${adhHuman(c.he_h)}</td>
+      <td style="text-align:right;color:${pctCor};font-weight:700">${c.pct==null?'—':c.pct+'%'}</td>
     </tr>`;
-  }).join('') : `<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text-muted);font-size:12px">Ninguém passou de 2h de hora extra num único dia esse mês.${diagHTML}</td></tr>`;
+  }).join('') : `<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text-muted);font-size:12px">Ninguém registrou hora extra esse mês.</td></tr>`;
 
   const html = `
     <div class="adh-panel-topbar">
       <div>
-        <div class="adh-panel-name">Maiores ofensores de hora extra ${base ? `<span class="adh-base-badge">${base}</span>` : ''}</div>
-        <div class="adh-panel-sub">Dias no mês com mais de 2h de HE num único dia · ${adhMonthLabel(mes)} · ${ofensores.length.toLocaleString('pt-BR')} colaborador${ofensores.length===1?'':'es'}</div>
+        <div class="adh-panel-name">Ranking de hora extra ${base ? `<span class="adh-base-badge">${base}</span>` : ''}</div>
+        <div class="adh-panel-sub">Total de HE acumulado no mês, do maior pro menor · ${adhMonthLabel(mes)} · ${ranking.length.toLocaleString('pt-BR')} colaborador${ranking.length===1?'':'es'}</div>
       </div>
     </div>
     <div class="adh-tip-table-section">
@@ -1521,13 +1483,12 @@ function adhRenderRankingHE(base) {
             <th></th>
             <th>Colaborador</th>
             <th>Cargo</th>
-            <th style="text-align:right">Dias &gt;2h</th>
             <th style="text-align:right">HE mês</th>
+            <th style="text-align:right">Aderência</th>
           </tr>
         </thead>
         <tbody>${rowsHTML}</tbody>
       </table>
-      ${ofensores.length ? diagHTML : ''}
     </div>`;
 
   _adhPanelFrozen = true;
