@@ -1437,7 +1437,18 @@ function adhOpenRankingHE(base) {
 
 function adhRenderRankingHE(el, base) {
   const mes = window._adhMes || adhCurrentMonth();
-  const lista = base ? adhBuildFullColabList(base) : [...adhColabKPI.values()];
+  // Usa a lista já carregada e exibida nesta tela (mesma fonte da tabela ao
+  // lado) em vez de recalcular a partir do Map global adhColabKPI. Isso evita
+  // um bug em que passar o mouse numa linha da tabela pra ver o painel diário
+  // dispara (em admin.js) o download de horarios/marcação sob demanda, que
+  // por sua vez zera adhColabKPI como efeito colateral (pensado pra forçar
+  // recálculo só quando o admin recarrega dados de verdade). Sem essa troca,
+  // clicar em "Ranking 2h+" depois de passar o mouse numa linha quebrava com
+  // "adhColabKPI is not iterable". window._adhColabListFull é montada no
+  // mesmo render que desenha o botão, então está sempre em sincronia com o
+  // que está na tela.
+  const lista = window._adhColabListFull
+    || (base ? adhBuildFullColabList(base) : [...(adhColabKPI || new Map()).values()]);
   const ofensores = lista
     .filter(c => (c.diasHEAlta||0) >= 1)
     .sort((a,b) => (b.diasHEAlta||0) - (a.diasHEAlta||0) || (b.he_h||0) - (a.he_h||0));
@@ -1487,7 +1498,9 @@ function adhRenderRankingHE(el, base) {
 
 function adhBuildFullColabList(base) {
   const kpiByMat = new Map();
-  for (const [k, d] of adhColabKPI) {
+  // adhColabKPI pode estar null aqui (ex.: zerado em segundo plano por outra
+  // tela) — não deixa a função quebrar, só cai pro fallback do roster puro.
+  for (const [k, d] of (adhColabKPI || new Map())) {
     if (base && !k.startsWith(base + '|')) continue;
     kpiByMat.set(String(d.mat || d.matricula || '').padStart(6,'0'), d);
   }
