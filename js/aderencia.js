@@ -597,6 +597,7 @@ async function pageAderencia(el) {
         adhBaseKPI  = new Map(cached.baseKPI.map(r => [r.filial, r]));
         adhColabKPI = new Map(cached.colabKPI.map(r => [r.filial+'|'+r.matricula, {...r, mat: r.matricula, diasHEAlta: r.dias_he_alta || 0}]));
         console.log(`[aderencia] Loaded from localStorage cache (${mes})`);
+        window._adhKpiSource = 'cache local';
         // Skip loading, go straight to render
         await rosterPromise;
         if (role === 'admin') { adhRenderMultiBase(el); return; }
@@ -650,6 +651,7 @@ async function pageAderencia(el) {
         he: r.he, falta: r.falta, diasHEAlta: r.dias_he_alta || 0
       }]));
       console.log(`[aderencia] Loaded ${kpiRows.length} bases, ${colabRows.length} colaboradores from DB KPI (${mes})`);
+      window._adhKpiSource = 'banco (pré-calculado)';
 
       // Save to localStorage cache
       try {
@@ -699,6 +701,7 @@ async function pageAderencia(el) {
   await rosterPromise; // precisa do roster carregado p/ isenção de cargo (gerente/coordenador)
   adhBaseKPI = null; adhColabKPI = null;
   adhBuildKPI(mes);
+  window._adhKpiSource = 'cálculo ao vivo';
 
   // Trigger precompute to save for next time (só faz sentido persistir o mês
   // corrente — meses anteriores são só consulta, não sobrescrevem nada novo)
@@ -1471,6 +1474,22 @@ function adhRenderRankingHE(base) {
     .filter(c => (c.diasHEAlta||0) >= 1)
     .sort((a,b) => (b.diasHEAlta||0) - (a.diasHEAlta||0) || (b.he_h||0) - (a.he_h||0));
 
+  // Diagnóstico — visível na própria tela, sem precisar abrir o console.
+  // Ajuda a distinguir "dado realmente zerado na fonte" de "bug na hora de
+  // juntar/filtrar a lista".
+  const comDados = lista.filter(c => !c.semDados).length;
+  const maxDias  = comDados ? Math.max(0, ...lista.map(c => c.diasHEAlta || 0)) : 0;
+  const fonte    = window._adhKpiSource || 'desconhecida';
+  console.log('[adhRankingHE] diagnóstico', {
+    base, fonte, totalNaLista: lista.length, comDados, maxDiasHEAltaEncontrado: maxDias,
+    amostra: lista.filter(c => !c.semDados).slice(0, 8)
+      .map(c => ({ mat: c.mat || c.matricula, nome: c.nome, he_h: c.he_h, diasHEAlta: c.diasHEAlta }))
+  });
+  const diagHTML = `<div style="font-size:9.5px;color:var(--text-muted);margin-top:6px">
+    Diagnóstico: ${comDados} de ${lista.length} colaboradores com ponto neste período ·
+    fonte dos dados: ${fonte} · maior nº de dias &gt;2h encontrado: ${maxDias}
+  </div>`;
+
   const rowsHTML = ofensores.length ? ofensores.map((c, i) => {
     const mat   = c.mat || c.matricula;
     const cargo = c.funcao || window.eoColabs?.get(mat)?.funcao || '—';
@@ -1486,7 +1505,7 @@ function adhRenderRankingHE(base) {
       <td style="text-align:right"><span style="background:${bg};color:${cor};border-radius:6px;padding:2px 8px;font-weight:800;font-size:11.5px">${c.diasHEAlta}</span></td>
       <td style="text-align:right;color:var(--amber);font-weight:700">${adhHuman(c.he_h)}</td>
     </tr>`;
-  }).join('') : `<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text-muted);font-size:12px">Ninguém passou de 2h de hora extra num único dia esse mês.</td></tr>`;
+  }).join('') : `<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text-muted);font-size:12px">Ninguém passou de 2h de hora extra num único dia esse mês.${diagHTML}</td></tr>`;
 
   const html = `
     <div class="adh-panel-topbar">
@@ -1508,6 +1527,7 @@ function adhRenderRankingHE(base) {
         </thead>
         <tbody>${rowsHTML}</tbody>
       </table>
+      ${ofensores.length ? diagHTML : ''}
     </div>`;
 
   _adhPanelFrozen = true;
