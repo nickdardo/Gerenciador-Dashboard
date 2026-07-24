@@ -478,6 +478,12 @@ async function adhForceRefresh() {
   if (typeof pontoMarcacao !== 'undefined') pontoMarcacao = new Map();
   adhBaseKPI = null; adhColabKPI = null;
   window._adhHistData = null;
+  // Além do cache local, força pular também o KPI já pré-calculado no banco
+  // (aderencia_kpi/aderencia_colab) — necessário quando esse KPI foi salvo
+  // antes de uma coluna nova existir (dias_he_alta ficava zerado pra sempre
+  // até alguém forçar um recálculo de verdade). Sem isso "Atualizar" limpava
+  // só o navegador e voltava a servir o mesmo KPI velho do banco.
+  window._adhForceLive = true;
   const el = window._adhCurrentEl;
   if (el) await pageAderencia(el);
 }
@@ -527,6 +533,15 @@ async function pageAderencia(el) {
   if (!window._adhMes) window._adhMes = adhCurrentMonth();
   const mes = window._adhMes;
 
+  // "Atualizar" pode pedir pra ignorar não só o cache local (localStorage)
+  // como também o KPI já pré-calculado no banco (aderencia_kpi/aderencia_colab)
+  // — necessário quando esse KPI foi salvo antes de uma coluna nova existir
+  // (ex.: dias_he_alta ficou zerado pra sempre até alguém recalcular). Sem
+  // isso, "Atualizar" limpava só o navegador e voltava a servir o mesmo KPI
+  // velho do banco, então o Ranking 2h+ continuava vazio.
+  const forceLive = !!window._adhForceLive;
+  window._adhForceLive = false; // consome a flag — é sempre um disparo único
+
   if (!ROLES_OK.includes(role)) {
     el.innerHTML = `
       <div class="page-header"><div>
@@ -572,6 +587,7 @@ async function pageAderencia(el) {
   const CACHE_MAX = 8 * 60 * 60 * 1000; // 8 hours
 
   try {
+    if (forceLive) throw new Error('force-live'); // pula direto pro cálculo ao vivo (LAYER 3)
     const ts    = parseInt(localStorage.getItem(CACHE_TS) || '0');
     const fresh = (Date.now() - ts) < CACHE_MAX;
     if (fresh) {
@@ -593,6 +609,10 @@ async function pageAderencia(el) {
   } catch(_) {}
 
   // ── LAYER 2: banco aderencia_kpi (rápido ~30 rows), filtrado pelo mês ──
+  // Pulado inteiro quando forceLive=true (botão Atualizar) — sem isso, um KPI
+  // pré-calculado e salvo no banco antes de uma coluna nova existir (ex.:
+  // dias_he_alta) nunca seria substituído, mesmo forçando atualização.
+  if (!forceLive) {
   setMsg('Carregando KPI do banco...');
   try {
     // aderencia_colab pode ter milhares de linhas — o Supabase corta em 1000
@@ -649,6 +669,7 @@ async function pageAderencia(el) {
     }
   } catch(e) {
     console.warn('[aderencia] DB KPI error:', e.message);
+  }
   }
 
   // ── LAYER 3: calcular na hora (só 1ª vez, banco vazio, ou mês sem dado salvo ainda) ──
@@ -1428,72 +1449,69 @@ function adhRenderDetalhe(el, base, showBack) {
 // num único dia, ordenado por quantos dias isso aconteceu no mês.
 function adhOpenRankingHE(base) {
   try {
-    adhRenderRankingHE(document.getElementById('page-content'), base);
+    adhRenderRankingHE(base);
   } catch(e) {
     console.error('[adhOpenRankingHE]', e);
     alert('Erro ao abrir o ranking: ' + e.message + '\n\nTira um print dessa mensagem e manda pra gente corrigir.');
   }
 }
 
-function adhRenderRankingHE(el, base) {
+// Abre o ranking como um painel flutuante (mesmo mecanismo do painel de
+// colaborador — overlay escurecido + X pra fechar), em vez de navegar pra
+// uma página cheia. Usa a lista já carregada e exibida na tela ao lado
+// (window._adhColabListFull) em vez de recalcular a partir do Map global
+// adhColabKPI — evita quebrar quando esse Map é resetado em segundo plano
+// (ex.: hover no painel diário dispara download de horarios/marcação, que
+// zera adhColabKPI como efeito colateral).
+function adhRenderRankingHE(base) {
   const mes = window._adhMes || adhCurrentMonth();
-  // Usa a lista já carregada e exibida nesta tela (mesma fonte da tabela ao
-  // lado) em vez de recalcular a partir do Map global adhColabKPI. Isso evita
-  // um bug em que passar o mouse numa linha da tabela pra ver o painel diário
-  // dispara (em admin.js) o download de horarios/marcação sob demanda, que
-  // por sua vez zera adhColabKPI como efeito colateral (pensado pra forçar
-  // recálculo só quando o admin recarrega dados de verdade). Sem essa troca,
-  // clicar em "Ranking 2h+" depois de passar o mouse numa linha quebrava com
-  // "adhColabKPI is not iterable". window._adhColabListFull é montada no
-  // mesmo render que desenha o botão, então está sempre em sincronia com o
-  // que está na tela.
   const lista = window._adhColabListFull
     || (base ? adhBuildFullColabList(base) : [...(adhColabKPI || new Map()).values()]);
   const ofensores = lista
     .filter(c => (c.diasHEAlta||0) >= 1)
     .sort((a,b) => (b.diasHEAlta||0) - (a.diasHEAlta||0) || (b.he_h||0) - (a.he_h||0));
 
-  el.innerHTML = `
-    <div class="adh-det-wrap">
-      <div class="adh-det-header">
-        <div style="display:flex;align-items:center;gap:12px">
-          <button class="adh-back-btn" onclick="pageAderencia(document.getElementById('page-content'))">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
-            </svg>
-          </button>
-          <div>
-            <h1 class="adh-full-title">Maiores ofensores de hora extra ${base ? `<span class="adh-base-badge">${base}</span>` : ''}</h1>
-            <p class="adh-full-sub">Dias no mês com mais de 2h de HE num único dia · ${adhMonthLabel(mes)} · ${ofensores.length.toLocaleString('pt-BR')} colaborador${ofensores.length===1?'':'es'}</p>
-          </div>
-        </div>
-      </div>
+  const rowsHTML = ofensores.length ? ofensores.map((c, i) => {
+    const mat   = c.mat || c.matricula;
+    const cargo = c.funcao || window.eoColabs?.get(mat)?.funcao || '—';
+    const cor = c.diasHEAlta>=7 ? 'var(--red)' : c.diasHEAlta>=4 ? 'var(--amber)' : 'var(--text-secondary)';
+    const bg  = c.diasHEAlta>=7 ? 'rgba(252,129,129,.14)' : c.diasHEAlta>=4 ? 'rgba(246,173,85,.14)' : 'rgba(136,150,170,.12)';
+    return `<tr>
+      <td style="color:var(--text-muted);font-weight:800">${i+1}</td>
+      <td>
+        <div style="font-weight:600;color:var(--text-primary)">${c.nome||''}</div>
+        <div style="font-family:monospace;font-size:10.5px;color:var(--text-muted)">${mat}</div>
+      </td>
+      <td style="color:var(--text-secondary)">${cargo}</td>
+      <td style="text-align:right"><span style="background:${bg};color:${cor};border-radius:6px;padding:2px 8px;font-weight:800;font-size:11.5px">${c.diasHEAlta}</span></td>
+      <td style="text-align:right;color:var(--amber);font-weight:700">${adhHuman(c.he_h)}</td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text-muted);font-size:12px">Ninguém passou de 2h de hora extra num único dia esse mês.</td></tr>`;
 
-      <div class="hc-panel">
-        <div class="adh-colab-table-wrap">
-          <table class="adh-colab-table">
-            <thead><tr>
-              <th>Matrícula</th><th>Colaborador</th><th>Cargo</th>
-              <th class="r">Dias &gt;2h</th><th class="r">Total HE mês</th>
-            </tr></thead>
-            <tbody>
-              ${ofensores.length ? ofensores.map(c => {
-                const mat = c.mat || c.matricula;
-                const cargo = c.funcao || window.eoColabs?.get(mat)?.funcao || '—';
-                const cor = c.diasHEAlta>=7 ? '#fc8181' : c.diasHEAlta>=4 ? '#f6ad55' : 'var(--text-primary)';
-                return `<tr class="adh-colab-row">
-                  <td style="font-family:monospace">${mat}</td>
-                  <td style="font-weight:500">${c.nome||''}</td>
-                  <td>${cargo}</td>
-                  <td class="r" style="font-weight:700;color:${cor}">${c.diasHEAlta}</td>
-                  <td class="r" style="color:#f6ad55">${adhHuman(c.he_h)}</td>
-                </tr>`;
-              }).join('') : `<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text-muted);font-size:12px">Ninguém passou de 2h de hora extra num único dia esse mês.</td></tr>`}
-            </tbody>
-          </table>
-        </div>
+  const html = `
+    <div class="adh-panel-topbar">
+      <div>
+        <div class="adh-panel-name">Maiores ofensores de hora extra ${base ? `<span class="adh-base-badge">${base}</span>` : ''}</div>
+        <div class="adh-panel-sub">Dias no mês com mais de 2h de HE num único dia · ${adhMonthLabel(mes)} · ${ofensores.length.toLocaleString('pt-BR')} colaborador${ofensores.length===1?'':'es'}</div>
       </div>
+    </div>
+    <div class="adh-tip-table-section">
+      <table class="adh-tip-table">
+        <thead>
+          <tr>
+            <th></th>
+            <th>Colaborador</th>
+            <th>Cargo</th>
+            <th style="text-align:right">Dias &gt;2h</th>
+            <th style="text-align:right">HE mês</th>
+          </tr>
+        </thead>
+        <tbody>${rowsHTML}</tbody>
+      </table>
     </div>`;
+
+  _adhPanelFrozen = true;
+  adhRenderFrozenPanel(html);
 }
 
 function adhBuildFullColabList(base) {
