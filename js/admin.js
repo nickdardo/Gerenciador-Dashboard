@@ -2863,7 +2863,7 @@ async function adminPrecomputeAderencia(mes) {
     const [filial, mat] = ck.split('|');
     if (window.eoDesligados?.has(mat)) continue; // desligado — fora do cálculo
     if (!adminCargoIsento(window.eoColabs?.get(mat)?.funcao)) continue; // só isenta gestão
-    colabAcc.set(ck, { filial, mat, nome: t.nome, mp: t.mp, mt: 0, desvio: 0, he: 0, falta: 0, isento: true });
+    colabAcc.set(ck, { filial, mat, nome: t.nome, mp: t.mp, mt: 0, desvio: 0, he: 0, falta: 0, diasHEAlta: 0, isento: true });
   }
 
   // Build per-colaborador rows + aggregate per base (BUGFIX: baseAcc/colabRows
@@ -2899,7 +2899,7 @@ async function adminPrecomputeAderencia(mes) {
       pct,
       he_h:     Math.round(acc.he    / 60 * 10) / 10,
       falta_h:  Math.round(acc.falta / 60 * 10) / 10,
-      dias_he_alta: acc.diasHEAlta,
+      dias_he_alta: acc.diasHEAlta || 0,
       updated_at: new Date(),
     });
 
