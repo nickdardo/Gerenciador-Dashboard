@@ -927,10 +927,9 @@ async function adhRenderMultiBase(el) {
           adhDeltaRow(global, prevGlobal),
         ]},
         { key:'amber', icon:'ti-clock-hour-4', title:'Horas', rows: [
-          { label:'Horas extras', sub:'total no mês', value: adhFmtH(totHE) },
-          { label:'Horas a menos', sub:'déficit de ponto no mês', value:`−${adhFmtH(totFalta)}`, color:'#b56666' },
+          { label:'Horas extras', sub:'total no mês (HE Feita)', value: adhFmtH(totHE) },
           { label:'Horas compensadas', sub:'folga CH na escala, no mês', value: adhFmtH(totCompensada) },
-          { label:'Horas líquidas', sub:'extras − compensadas (Saldo HE)', value:`${totHE-totCompensada>=0?'+':'−'}${adhFmtH(totHE-totCompensada)}`, color: totHE-totCompensada>=0 ? '#5fa87a' : '#b56666' },
+          { label:'Saldo HE', sub:'extras − compensadas', value:`${totHE-totCompensada>=0?'+':'−'}${adhFmtH(totHE-totCompensada)}`, color: totHE-totCompensada>=0 ? '#5fa87a' : '#b56666' },
         ]},
         { key:'purple', icon:'ti-users', title:'Colaboradores', rows: [
           { label:'Ativos', sub:'cadastro atual', value: (window.eoColabs?.size || totColabs).toLocaleString('pt-BR') },
@@ -1393,10 +1392,9 @@ function adhRenderDetalhe(el, base, showBack) {
           { label:'Horas programadas', sub:'base do cálculo', value: adhFmtH(prog_h) },
         ]},
         { key:'amber', icon:'ti-clock-hour-4', title:'Horas', rows: [
-          { label:'Horas extras', sub:'no mês', value: adhFmtH(he_h) },
-          { label:'Horas a menos', sub:'déficit de ponto no mês', value:`−${adhFmtH(fat_h)}`, color:'#b56666' },
+          { label:'Horas extras', sub:'no mês (HE Feita)', value: adhFmtH(he_h) },
           { label:'Horas compensadas', sub:'folga CH na escala, no mês', value: adhFmtH(compensada_h) },
-          { label:'Horas líquidas', sub:'extras − compensadas (Saldo HE)', value:`${he_h-compensada_h>=0?'+':'−'}${adhFmtH(he_h-compensada_h)}`, color: he_h-compensada_h>=0 ? '#5fa87a' : '#b56666' },
+          { label:'Saldo HE', sub:'extras − compensadas', value:`${he_h-compensada_h>=0?'+':'−'}${adhFmtH(he_h-compensada_h)}`, color: he_h-compensada_h>=0 ? '#5fa87a' : '#b56666' },
         ]},
         { key:'purple', icon:'ti-users', title:'Colaboradores', rows: [
           { label:'Total', sub: base ? 'nesta base' : 'todas as bases', value: colabs.toLocaleString('pt-BR') },
