@@ -274,60 +274,6 @@ async function adhEnsureRoster() {
   } catch (e) { console.warn('[aderencia] ensureRoster:', e.message); }
 }
 
-// Busca no roster tolerando o tipo (number/string) vir diferente entre as
-// tabelas — colaboradores.matricula e escala_dia.matricula nem sempre chegam
-// do banco com o mesmo tipo JS.
-function adhEoColabByMat(mat) {
-  if (!window.eoColabs) return null;
-  return window.eoColabs.get(mat) || window.eoColabs.get(String(mat)) || window.eoColabs.get(Number(mat)) || null;
-}
-
-// "Compensada" de verdade — igual o BI (Capacity): dias marcados como CH
-// ("Folga compensa", banco de horas) na Escala Online (tabela escala_dia),
-// convertidos em horas pela carga diária de cada colaborador. Isso é uma
-// fonte de dado totalmente diferente do ponto batido (horarios/marcacao) —
-// por isso "Horas a menos" (déficit de ponto) nunca ia bater com o
-// "Compensada" do BI: são métricas diferentes. Cacheada por mês, recarrega
-// só se o mês mudar.
-async function adhEnsureCompensadaMap(mes) {
-  if (window._adhCompensadaMes === mes && window._adhCompensadaMap) return;
-  const mapa = new Map(); // matricula -> horas de CH compensadas no mês
-  try {
-    await adhEnsureRoster();
-    const { data, error } = await db.from('escala_dia').select('matricula').eq('mes', mes).eq('status', 'CH');
-    if (error) throw new Error(error.message);
-    if (data?.length) {
-      const diasPorMat = new Map();
-      for (const r of data) diasPorMat.set(r.matricula, (diasPorMat.get(r.matricula)||0) + 1);
-      for (const [mat, dias] of diasPorMat) {
-        const colab = adhEoColabByMat(mat);
-        const chDiario = colab ? (typeof hcChDiario === 'function' ? hcChDiario(colab.ch) : Math.max(1, Math.round((colab.ch||0)/30))) : null;
-        if (chDiario) mapa.set(mat, dias * chDiario);
-      }
-    }
-  } catch(e) {
-    console.warn('[aderencia] compensada (CH):', e.message);
-  }
-  window._adhCompensadaMap = mapa;
-  window._adhCompensadaMes = mes;
-}
-
-// Soma as horas compensadas (CH) do mês já carregado, filtrando por base
-// quando informada (null = todas as bases).
-function adhCompensadaTotal(base) {
-  const mapa = window._adhCompensadaMap;
-  if (!mapa) return 0;
-  let total = 0;
-  for (const [mat, horas] of mapa) {
-    if (base) {
-      const colab = adhEoColabByMat(mat);
-      if (!colab || (colab.station||'').toUpperCase() !== base.toUpperCase()) continue;
-    }
-    total += horas;
-  }
-  return total;
-}
-
 // ── In-memory computed data ───────────────────────────
 // Built once per session when files are loaded
 let adhBaseKPI  = null;  // Map<base, {minProg, desvio, he, falta, colabs}>
@@ -637,7 +583,6 @@ async function pageAderencia(el) {
         console.log(`[aderencia] Loaded from localStorage cache (${mes})`);
         // Skip loading, go straight to render
         await rosterPromise;
-        await adhEnsureCompensadaMap(mes);
         if (role === 'admin') { adhRenderMultiBase(el); return; }
         const myBase = bases[0] || null; // '*' não dá mais visão de todas as bases pra quem não é admin
         if (!myBase) { showNoBaseAssigned(); return; }
@@ -695,11 +640,10 @@ async function pageAderencia(el) {
         localStorage.setItem(CACHE_TS, Date.now().toString());
       } catch(_) {}
 
-      if (role === 'admin') { await rosterPromise; await adhEnsureCompensadaMap(mes); adhRenderMultiBase(el); return; }
+      if (role === 'admin') { await rosterPromise; adhRenderMultiBase(el); return; }
       const myBase = bases[0] || null; // '*' não dá mais visão de todas as bases pra quem não é admin
       if (!myBase) { showNoBaseAssigned(); return; }
       await rosterPromise;
-      await adhEnsureCompensadaMap(mes);
       adhRenderDetalhe(el, myBase, false);
       return;
     }
@@ -740,8 +684,6 @@ async function pageAderencia(el) {
   if (mes === adhCurrentMonth() && typeof adminPrecomputeAderencia === 'function') {
     adminPrecomputeAderencia(mes).catch(console.warn);
   }
-
-  await adhEnsureCompensadaMap(mes);
 
   if (role === 'admin') {
     adhRenderMultiBase(el);
@@ -832,7 +774,9 @@ async function adhRenderMultiBase(el) {
     totColabs += d.colabs;
     totProg   += d.prog_h;
   }
-  const totCompensada = adhCompensadaTotal(null);
+  // "Horas compensadas" = déficit de ponto (horas não batidas), por
+  // definição do negócio: quem não bateu ponto teve essa hora tratada como
+  // compensada — mesmo conceito do "Compensada" no BI (Capacity).
 
   // Comparação real com o mês anterior — cacheada por mês (evita refetch a
   // cada busca/página; só busca de novo se o mês selecionado mudou).
@@ -928,8 +872,8 @@ async function adhRenderMultiBase(el) {
         ]},
         { key:'amber', icon:'ti-clock-hour-4', title:'Horas', rows: [
           { label:'Horas extras', sub:'total no mês (HE Feita)', value: adhFmtH(totHE) },
-          { label:'Horas compensadas', sub:'folga CH na escala, no mês', value: adhFmtH(totCompensada) },
-          { label:'Saldo HE', sub:'extras − compensadas', value:`${totHE-totCompensada>=0?'+':'−'}${adhFmtH(totHE-totCompensada)}`, color: totHE-totCompensada>=0 ? '#5fa87a' : '#b56666' },
+          { label:'Horas compensadas', sub:'déficit de ponto no mês', value: adhFmtH(totFalta) },
+          { label:'Saldo HE', sub:'extras − compensadas', value:`${totHE-totFalta>=0?'+':'−'}${adhFmtH(totHE-totFalta)}`, color: totHE-totFalta>=0 ? '#5fa87a' : '#b56666' },
         ]},
         { key:'purple', icon:'ti-users', title:'Colaboradores', rows: [
           { label:'Ativos', sub:'cadastro atual', value: (window.eoColabs?.size || totColabs).toLocaleString('pt-BR') },
@@ -1322,7 +1266,7 @@ function adhRenderDetalhe(el, base, showBack) {
   const he_h   = bk ? bk.he_h   : [...adhBaseKPI.values()].reduce((a,d)=>a+d.he_h,0);
   const fat_h  = bk ? bk.falta_h: [...adhBaseKPI.values()].reduce((a,d)=>a+d.falta_h,0);
   const prog_h = bk ? bk.prog_h  : [...adhBaseKPI.values()].reduce((a,d)=>a+d.prog_h,0);
-  const compensada_h = adhCompensadaTotal(base);
+  // "Horas compensadas" = déficit de ponto, mesmo conceito do "Compensada" no BI.
 
   // Build collaborator list for this base — merges the FULL roster
   // (colaboradores table, window.eoColabs) with the computed KPI, so people
@@ -1393,8 +1337,8 @@ function adhRenderDetalhe(el, base, showBack) {
         ]},
         { key:'amber', icon:'ti-clock-hour-4', title:'Horas', rows: [
           { label:'Horas extras', sub:'no mês (HE Feita)', value: adhFmtH(he_h) },
-          { label:'Horas compensadas', sub:'folga CH na escala, no mês', value: adhFmtH(compensada_h) },
-          { label:'Saldo HE', sub:'extras − compensadas', value:`${he_h-compensada_h>=0?'+':'−'}${adhFmtH(he_h-compensada_h)}`, color: he_h-compensada_h>=0 ? '#5fa87a' : '#b56666' },
+          { label:'Horas compensadas', sub:'déficit de ponto no mês', value: adhFmtH(fat_h) },
+          { label:'Saldo HE', sub:'extras − compensadas', value:`${he_h-fat_h>=0?'+':'−'}${adhFmtH(he_h-fat_h)}`, color: he_h-fat_h>=0 ? '#5fa87a' : '#b56666' },
         ]},
         { key:'purple', icon:'ti-users', title:'Colaboradores', rows: [
           { label:'Total', sub: base ? 'nesta base' : 'todas as bases', value: colabs.toLocaleString('pt-BR') },
