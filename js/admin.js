@@ -2938,7 +2938,7 @@ async function adminPrecomputeAderencia(mes) {
 
   // Save base KPI to DB — keep going even if one batch fails, so a single
   // bad batch doesn't silently wipe out every base/colaborador after it.
-  const BATCH = 500;
+  const BATCH = 1000;
   for (let i=0; i<baseRows.length; i+=BATCH) {
     const { error } = await db.from('aderencia_kpi')
       .upsert(baseRows.slice(i,i+BATCH), { onConflict:'filial,mes' });
