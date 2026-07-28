@@ -510,8 +510,8 @@ function hcRenderMain(el) {
         ]},
         { key:'red', icon:'ti-beach', title:'Férias', rows: [
           { label:'Ativas agora', sub:'colaboradores de férias hoje', value: stats.feriasAtivas.toLocaleString('pt-BR') },
-          { label:'Programadas', sub:'últimos 12 meses · clique para ver a lista', value: (stats.feriasProgramadas12m||0).toLocaleString('pt-BR'), color:'#b56666', onclick:'hcOpenFerias()' },
-          { label:'Previsto', sub:`início em ${stats.proxMesLabel} · clique para ver a lista`, value: (stats.feriasPrevistoProxMes||0).toLocaleString('pt-BR'), color:'#f6ad55', onclick:'hcOpenFerias()' },
+          { label:'Programadas', sub:'últimos 12 meses · clique para ver o mês atual', value: (stats.feriasProgramadas12m||0).toLocaleString('pt-BR'), color:'#b56666', onclick:'hcOpenFeriasMesAtual()' },
+          { label:'Previsto', sub:`início em ${stats.proxMesLabel} · clique para ver a lista`, value: (stats.feriasPrevistoProxMes||0).toLocaleString('pt-BR'), color:'#f6ad55', onclick:'hcOpenFeriasProxMes()' },
         ]},
         { key:'purple', icon:'ti-transfer', title:'Movimentação', rows: [
           { label:'Admissões', sub:'últimos 12 meses · clique para ver a lista', value: stats.admissoes12m.toLocaleString('pt-BR'), color:'#5fa87a', onclick:'hcOpenAdmissoes()' },
@@ -987,6 +987,21 @@ document.addEventListener('click', (e) => {
 // FÉRIAS — mesmo padrão de Desligados (filtro por período, busca, range)
 // ══════════════════════════════════════════════════════
 function hcOpenFerias() {
+  hcRenderFerias(window._hcCurrentEl);
+}
+
+// "Programadas" e "Previsto" clicam num mês específico (o atual e o
+// seguinte, respectivamente) — sem isso, os dois abriam a mesma lista sem
+// filtro nenhum de período (mostrando os 3 meses juntos no gráfico/tabela).
+function hcOpenFeriasMesAtual() {
+  const hoje = new Date();
+  window._hcFeriasPeriod = `${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}`;
+  hcRenderFerias(window._hcCurrentEl);
+}
+function hcOpenFeriasProxMes() {
+  const hoje = new Date();
+  const prox = new Date(hoje.getFullYear(), hoje.getMonth()+1, 1);
+  window._hcFeriasPeriod = `${prox.getFullYear()}-${String(prox.getMonth()+1).padStart(2,'0')}`;
   hcRenderFerias(window._hcCurrentEl);
 }
 
