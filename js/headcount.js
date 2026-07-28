@@ -171,8 +171,7 @@ function hcComputeStats() {
   const ha12m = new Date(hoje.getFullYear(), hoje.getMonth()-12, hoje.getDate());
   let desligados12m = 0;
   for (const r of (window.eoDesligadosAll || [])) {
-    if (base && (r.filial||'').toUpperCase() !== base.toUpperCase()) continue;
-    if (!r.data_demissao) continue;
+    if (!hcBaseSelected(r.filial)) continue;
     const d = new Date(r.data_demissao);
     if (d >= ha12m && d <= hoje) desligados12m++;
   }
@@ -181,7 +180,7 @@ function hcComputeStats() {
   let admissoes12m = 0;
   if (window.eoColabs) {
     for (const [, r] of window.eoColabs) {
-      if (base && (r.station||'').toUpperCase() !== base.toUpperCase()) continue;
+      if (!hcBaseSelected(r.station)) continue;
       if (!r.admissao) continue;
       const d = new Date(r.admissao);
       if (d >= ha12m && d <= hoje) admissoes12m++;
@@ -192,7 +191,7 @@ function hcComputeStats() {
   // igual desligados (não só a última férias por matrícula)
   let feriasProgramadas12m = 0;
   for (const r of (window.eoFeriasAll || [])) {
-    if (base && (r.filial||'').toUpperCase() !== base.toUpperCase()) continue;
+    if (!hcBaseSelected(r.filial)) continue;
     if (!r.data_inicio) continue;
     const d = new Date(r.data_inicio);
     if (d >= ha12m && d <= hoje) feriasProgramadas12m++;
