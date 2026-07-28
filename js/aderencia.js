@@ -901,7 +901,7 @@ async function adhRenderMultiBase(el) {
             <div class="adh-exec-panel-title">Comparativo mensal ${hist.meses.length < 3 ? '<span style="text-transform:none;font-weight:400;opacity:.7">· histórico crescendo mês a mês</span>' : ''}</div>
             ${adhBuildMiniCompareHTML(hist, global, prevGlobal)}
           </div>
-          <div class="adh-exec-panel">${adhSaldoRankingCardHTML()}</div>
+          <div class="adh-exec-panel adh-saldo-rank-panel">${adhSaldoRankingCardHTML()}</div>
         </div>
       </div>
 
@@ -932,7 +932,7 @@ function adhSaldoRankingCardHTML() {
 
   return `
     <div class="adh-exec-panel-title">Ranking de bases · Saldo HE</div>
-    <div style="max-height:440px;overflow-y:auto">${rowsHTML}</div>`;
+    <div style="flex:1;min-height:0;overflow-y:auto">${rowsHTML}</div>`;
 }
 
 function adhBarColor(pct) {
