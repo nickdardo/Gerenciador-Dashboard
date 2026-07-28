@@ -1423,7 +1423,7 @@ function adhRenderDetalhe(el, base, showBack) {
             <button class="adh-sort-btn" data-quick onclick="adhSort('falta',this)">Mais falta</button>
             <button class="adh-sort-btn" data-quick onclick="adhSort('pct',this)">Menor %</button>
             <span class="adh-filter-divider"></span>
-            <button class="adh-sort-btn" onclick="adhOpenRankingHE(${base?`'${base}'`:'null'})" style="color:var(--amber)" title="Ranking dos colaboradores com mais hora extra acumulada no mês">
+            <button class="adh-sort-btn" onclick="adhOpenRankingHE(${base?`'${base}'`:'null'})" style="color:var(--amber)" title="Ranking de quem mais passou de 2h de HE num único dia, ordenado pela quantidade de dias">
               <i class="ti ti-flame" style="font-size:12px;vertical-align:middle"></i> Ranking HE
             </button>
           </div>
@@ -1493,14 +1493,17 @@ function adhRenderRankingHE(base) {
   const mes = window._adhMes || adhCurrentMonth();
   const lista = window._adhColabListFull
     || (base ? adhBuildFullColabList(base) : [...(adhColabKPI || new Map()).values()]);
+  // Só quem teve pelo menos 1 dia com mais de 2h de HE, ordenado por essa
+  // contagem (do maior "ofensor" pro menor) — total de HE só desempata.
   const ranking = lista
-    .filter(c => (c.he_h||0) > 0)
-    .sort((a,b) => (b.he_h||0) - (a.he_h||0));
+    .filter(c => (c.diasHEAlta||0) >= 1)
+    .sort((a,b) => (b.diasHEAlta||0) - (a.diasHEAlta||0) || (b.he_h||0) - (a.he_h||0));
 
   const rowsHTML = ranking.length ? ranking.map((c, i) => {
     const mat   = c.mat || c.matricula;
     const cargo = c.funcao || window.eoColabs?.get(mat)?.funcao || '—';
     const pctCor = c.pct == null ? 'var(--text-muted)' : adhBarColor(c.pct);
+    const diasCor = c.diasHEAlta>=7 ? 'var(--red)' : c.diasHEAlta>=4 ? 'var(--amber)' : 'var(--text-secondary)';
     return `<tr>
       <td style="color:var(--text-muted);font-weight:800">${i+1}</td>
       <td>
@@ -1508,16 +1511,19 @@ function adhRenderRankingHE(base) {
         <div style="font-family:monospace;font-size:10.5px;color:var(--text-muted)">${mat}</div>
       </td>
       <td style="color:var(--text-secondary)">${cargo}</td>
-      <td style="text-align:right;color:var(--amber);font-weight:800">${adhHuman(c.he_h)}</td>
+      <td style="text-align:right">
+        <span style="color:var(--amber);font-weight:800">${adhHuman(c.he_h)}</span>
+        <span style="background:${diasCor}22;color:${diasCor};border-radius:4px;padding:1px 5px;font-size:9.5px;font-weight:700;margin-left:4px" title="${c.diasHEAlta} dias esse mês com mais de 2h de hora extra num único dia">⚠ ${c.diasHEAlta}x</span>
+      </td>
       <td style="text-align:right;color:${pctCor};font-weight:700">${c.pct==null?'—':c.pct+'%'}</td>
     </tr>`;
-  }).join('') : `<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text-muted);font-size:12px">Ninguém registrou hora extra esse mês.</td></tr>`;
+  }).join('') : `<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text-muted);font-size:12px">Ninguém passou de 2h de hora extra num único dia esse mês.</td></tr>`;
 
   const html = `
     <div class="adh-panel-topbar">
       <div>
         <div class="adh-panel-name">Ranking de hora extra ${base ? `<span class="adh-base-badge">${base}</span>` : ''}</div>
-        <div class="adh-panel-sub">Total de HE acumulado no mês, do maior pro menor · ${adhMonthLabel(mes)} · ${ranking.length.toLocaleString('pt-BR')} colaborador${ranking.length===1?'':'es'}</div>
+        <div class="adh-panel-sub">Só quem teve pelo menos 1 dia com mais de 2h de HE, do maior pro menor · ${adhMonthLabel(mes)} · ${ranking.length.toLocaleString('pt-BR')} colaborador${ranking.length===1?'':'es'}</div>
       </div>
     </div>
     <div class="adh-tip-table-section">
