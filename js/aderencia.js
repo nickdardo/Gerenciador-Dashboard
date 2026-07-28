@@ -1424,7 +1424,7 @@ function adhRenderDetalhe(el, base, showBack) {
             <button class="adh-sort-btn" data-quick onclick="adhSort('pct',this)">Menor %</button>
             <span class="adh-filter-divider"></span>
             <button class="adh-sort-btn" onclick="adhOpenRankingHE(${base?`'${base}'`:'null'})" style="color:var(--amber)" title="Ranking de quem mais passou de 2h de HE num único dia, ordenado pela quantidade de dias">
-              <i class="ti ti-flame" style="font-size:12px;vertical-align:middle"></i> Ranking HE
+              <i class="ti ti-flame" style="font-size:12px;vertical-align:middle"></i> Ranking 2h+
             </button>
           </div>
         </div>
@@ -1468,7 +1468,8 @@ function adhRenderDetalhe(el, base, showBack) {
 // Merge the full colaborador roster (window.eoColabs, from HRCL204.xlsx) with
 // the computed aderência KPI — so people without ponto data this period still
 // show up in the list (with dashes), instead of silently disappearing.
-// Ranking de hora extra — colaboradores ordenados por total de HE acumulado
+// Ranking 2h+ — colaboradores com pelo menos 1 dia acima de 2h de HE num
+// único dia, ordenados por essa contagem (do maior ofensor pro menor).
 // no mês. Usa he_h (campo já confiável em toda a tela — a mesma coluna que
 // já aparece certinha na tabela ao lado) em vez de dias_he_alta: esse campo
 // depende de um recálculo no banco que só o Admin consegue persistir (RLS),
@@ -1522,7 +1523,7 @@ function adhRenderRankingHE(base) {
   const html = `
     <div class="adh-panel-topbar">
       <div>
-        <div class="adh-panel-name">Ranking de hora extra ${base ? `<span class="adh-base-badge">${base}</span>` : ''}</div>
+        <div class="adh-panel-name">Ranking 2h+ ${base ? `<span class="adh-base-badge">${base}</span>` : ''}</div>
         <div class="adh-panel-sub">Só quem teve pelo menos 1 dia com mais de 2h de HE, do maior pro menor · ${adhMonthLabel(mes)} · ${ranking.length.toLocaleString('pt-BR')} colaborador${ranking.length===1?'':'es'}</div>
       </div>
     </div>
