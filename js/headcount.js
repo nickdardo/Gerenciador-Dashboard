@@ -58,7 +58,15 @@ function hcChDiario(ch) {
   return Math.max(1, Math.round(ch / 30));
 }
 
+// Cacheado — sem isso, hcBaseSelected() (chamado 1x por colaborador dentro
+// dos laços de hcComputeStats/hcBuildColabList) recalcularia isso escaneando
+// o cadastro inteiro de novo a cada colaborador, virando O(n²) e travando a
+// aba com milhares de colaboradores. Invalida sozinho quando eoColabs muda
+// (nova referência de Map, ex.: depois de um Atualizar).
+let _hcAllBasesCache = null;
+let _hcAllBasesCacheRef = null;
 function hcAllBases() {
+  if (_hcAllBasesCacheRef === window.eoColabs && _hcAllBasesCache) return _hcAllBasesCache;
   const set = new Set();
   if (window.eoColabs) {
     for (const [, r] of window.eoColabs) {
@@ -66,7 +74,9 @@ function hcAllBases() {
       if (st && !HC_EXCLUDE_BASES.has(st)) set.add(st);
     }
   }
-  return [...set].sort();
+  _hcAllBasesCache = [...set].sort();
+  _hcAllBasesCacheRef = window.eoColabs;
+  return _hcAllBasesCache;
 }
 
 // Garante que os 4 datasets estejam carregados (roster, férias, desligados, pcd)
@@ -284,6 +294,15 @@ function hcResetMainFilters() {
   window._hcSearch = '';
 }
 
+// Atalho rápido do <select> simples (uma base, ou "Todas as bases") — escreve
+// no mesmo estado _hcBaseSet do menu de múltipla seleção, então os dois
+// controles ficam sempre em sincronia.
+function hcQuickSelectBase(value, renderFnName) {
+  window._hcBaseSet = value ? new Set([value]) : null;
+  if (renderFnName === 'hcRenderMain') hcResetMainFilters();
+  if (typeof window[renderFnName] === 'function') window[renderFnName](window._hcCurrentEl);
+}
+
 function hcToggleBaseMenu() {
   window._hcBaseMenuOpen = !window._hcBaseMenuOpen;
   const panel = document.getElementById('hc-base-menu');
@@ -324,10 +343,12 @@ function hcBaseLabel() {
   return `${nSel} bases selecionadas`;
 }
 
-// Monta o seletor de base reutilizável — multi-seleção (checkbox por base +
-// "Todas as bases"), pra usar tanto na tela principal do Staff quanto dentro
-// de Desligados/Admissões/Movimentação/Férias. Se o usuário só tem 1 base
-// permitida, mostra só uma tag fixa (não faz sentido multi-selecionar 1 item só).
+// Monta os dois controles de base — o <select> simples de sempre (uma base
+// ou "Todas as bases", rápido pro caso comum) + um botão pequeno do lado que
+// abre o menu de múltipla seleção (checkbox por base), só pra quando precisar
+// combinar várias de uma vez ("todas exceto X"). Os dois escrevem no mesmo
+// estado (_hcBaseSet), então ficam sempre sincronizados entre si. Se o
+// usuário só tem 1 base permitida, mostra só uma tag fixa.
 function hcBaseSelectorHTML(renderFnName) {
   const permitted = hcPermittedBases();
   if (permitted.length <= 1) {
@@ -336,27 +357,35 @@ function hcBaseSelectorHTML(renderFnName) {
 
   const set = window._hcBaseSet;
   const allSelected = !set;
-  const label = hcBaseLabel();
+  const singleBase = set && set.size === 1 ? [...set][0] : null;
+  const isCustomMulti = set && set.size > 1;
 
   return `
-    <div style="position:relative;display:inline-block">
-      <button type="button" class="adh-month-select hc-base-menu-trigger" style="display:inline-flex;align-items:center;gap:8px;cursor:pointer" onclick="hcToggleBaseMenu()">
-        ${label} <i class="ti ti-chevron-down" style="font-size:12px" aria-hidden="true"></i>
-      </button>
-      <div class="hc-desl-filter-panel hc-base-menu-panel" id="hc-base-menu" style="display:${window._hcBaseMenuOpen?'block':'none'};width:230px">
-        <div class="hc-desl-filter-quick" style="max-height:280px">
-          <button class="${allSelected?'active':''}" onclick="hcToggleAllBasesSel(${allSelected?'false':'true'},'${renderFnName}')">
-            <i class="ti ${allSelected?'ti-square-rounded-check-filled':'ti-square'}" style="margin-right:6px" aria-hidden="true"></i>Todas as bases
-          </button>
-          <div style="border-top:1px solid var(--border);margin:6px 0"></div>
-          ${permitted.map(b => {
-            const sel = allSelected || set.has(b);
-            return `<button class="${sel?'active':''}" onclick="hcToggleOneBaseSel('${b}','${renderFnName}')">
-              <i class="ti ${sel?'ti-square-rounded-check-filled':'ti-square'}" style="margin-right:6px" aria-hidden="true"></i>${b}
-            </button>`;
+    <div style="display:flex;align-items:center;gap:6px">
+      <select class="adh-month-select" onchange="hcQuickSelectBase(this.value,'${renderFnName}')">
+        <option value="" ${allSelected?'selected':''}>Todas as bases</option>
+        ${isCustomMulti ? `<option value="" disabled selected>${hcBaseLabel()}</option>` : ''}
+        ${permitted.map(b => `<option value="${b}" ${b===singleBase?'selected':''}>${b}</option>`).join('')}
+      </select>
+      <div style="position:relative">
+        <button type="button" class="adh-back-btn hc-base-menu-trigger" style="width:34px;height:34px" onclick="hcToggleBaseMenu()" title="Selecionar várias bases específicas" aria-label="Selecionar várias bases específicas">
+          <i class="ti ti-filter" style="font-size:15px" aria-hidden="true"></i>
+        </button>
+        <div class="hc-desl-filter-panel hc-base-menu-panel" id="hc-base-menu" style="display:${window._hcBaseMenuOpen?'block':'none'};width:230px;left:auto;right:0">
+          <div class="hc-desl-filter-quick" style="max-height:280px">
+            <button class="${allSelected?'active':''}" onclick="hcToggleAllBasesSel(${allSelected?'false':'true'},'${renderFnName}')">
+              <i class="ti ${allSelected?'ti-square-rounded-check-filled':'ti-square'}" style="margin-right:6px" aria-hidden="true"></i>Todas as bases
+            </button>
+            <div style="border-top:1px solid var(--border);margin:6px 0"></div>
+            ${permitted.map(b => {
+              const sel = allSelected || set.has(b);
+              return `<button class="${sel?'active':''}" onclick="hcToggleOneBaseSel('${b}','${renderFnName}')">
+                <i class="ti ${sel?'ti-square-rounded-check-filled':'ti-square'}" style="margin-right:6px" aria-hidden="true"></i>${b}
+              </button>`;
           }).join('')}
         </div>
       </div>
+    </div>
     </div>`;
 }
 
