@@ -872,8 +872,8 @@ async function adhRenderMultiBase(el) {
         ]},
         { key:'amber', icon:'ti-clock-hour-4', title:'Horas', rows: [
           { label:'Horas extras', sub:'total no mês (HE Feita)', value: adhFmtH(totHE) },
-          { label:'Horas compensadas', sub:'extras − déficit no mês', value: `${totHE-totFalta>=0?'+':'−'}${adhFmtH(totHE-totFalta)}`, color: totHE-totFalta>=0 ? '#5fa87a' : '#b56666' },
-          { label:'Saldo HE', sub:'déficit de ponto no mês', value: adhFmtH(totFalta) },
+          { label:'Horas compensadas', sub:'déficit de ponto no mês', value: adhFmtH(totFalta) },
+          { label:'Saldo HE', sub:'extras − compensadas', value: `${totHE-totFalta>=0?'+':'−'}${adhFmtH(totHE-totFalta)}`, color: adhSaldoColor(totHE-totFalta, totHE) },
         ]},
         { key:'purple', icon:'ti-users', title:'Colaboradores', rows: [
           { label:'Ativos', sub:'cadastro atual', value: (window.eoColabs?.size || totColabs).toLocaleString('pt-BR') },
@@ -905,6 +905,7 @@ async function adhRenderMultiBase(el) {
             <div class="adh-exec-panel adh-insights-card">${adhInsightsCardHTML()}</div>
             <div class="adh-exec-panel adh-plano-card">${adhPlanoCardHTML()}</div>
           </div>
+          <div class="adh-exec-panel">${adhSaldoRankingCardHTML()}</div>
         </div>
       </div>
 
@@ -912,12 +913,48 @@ async function adhRenderMultiBase(el) {
   `;
 }
 
-// Tabela de ranking — separada em função própria (sync, sem refetch) pra
-// busca e paginação re-renderizarem só esse pedaço, na hora, sem recarregar
-// nada do banco.
+// Ranking de bases por Saldo HE (Extras − Compensada), da maior pra menor —
+// "maiores ofensores em hora extra" primeiro. Mesma cor proporcional do
+// card de KPI (adhSaldoColor), pra bater visualmente com o card ali de cima.
+function adhSaldoRankingCardHTML() {
+  if (!adhBaseKPI?.size) return '<div class="adh-exec-panel-title">Ranking de bases · Saldo HE</div><div style="font-size:12px;color:var(--text-muted);padding:8px 0">Sem dados.</div>';
+
+  const bases = [...adhBaseKPI.entries()]
+    .map(([filial, d]) => ({ filial, saldo: (d.he_h||0) - (d.falta_h||0), extras: d.he_h||0 }))
+    .sort((a,b) => b.saldo - a.saldo);
+
+  const rowsHTML = bases.map((b, i) => {
+    const cor = adhSaldoColor(b.saldo, b.extras);
+    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:7px 0;${i===0?'':'border-top:1px solid var(--border);'}">
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="width:18px;height:18px;border-radius:5px;background:${cor}22;color:${cor};font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0">${i+1}</div>
+        <span style="font-size:12px;color:var(--text-primary);font-weight:600">${b.filial}</span>
+      </div>
+      <div style="font-size:12px;color:${cor};font-weight:700">${b.saldo>=0?'+':'−'}${adhFmtH(b.saldo)}</div>
+    </div>`;
+  }).join('');
+
+  return `
+    <div class="adh-exec-panel-title">Ranking de bases · Saldo HE <span style="text-transform:none;font-weight:400;opacity:.7">· maior pro menor</span></div>
+    <div style="max-height:440px;overflow-y:auto">${rowsHTML}</div>`;
+}
+
 function adhBarColor(pct) {
   if (pct >= 85) return '#48bb78';
   if (pct >= 70) return '#f6ad55';
+  return '#fc8181';
+}
+
+// Cor do Saldo HE (Extras − Compensada) — proporcional, mesma ideia de
+// faixas do adhBarColor só que invertida (aqui, quanto MAIOR o saldo, pior):
+// negativo ou zero = verde (bom, sobra déficit); positivo cresce de neutro
+// pra âmbar pra vermelho conforme vai representando uma fatia maior do
+// total de horas extras da base.
+function adhSaldoColor(saldo, extras) {
+  if (saldo <= 0) return '#48bb78';
+  const ratio = extras > 0 ? saldo / extras : 1;
+  if (ratio < 0.15) return 'var(--text-primary)';
+  if (ratio < 0.35) return '#f6ad55';
   return '#fc8181';
 }
 
@@ -1342,8 +1379,8 @@ function adhRenderDetalhe(el, base, showBack) {
         ]},
         { key:'amber', icon:'ti-clock-hour-4', title:'Horas', rows: [
           { label:'Horas extras', sub:'no mês (HE Feita)', value: adhFmtH(he_h) },
-          { label:'Horas compensadas', sub:'extras − déficit no mês', value: `${he_h-fat_h>=0?'+':'−'}${adhFmtH(he_h-fat_h)}`, color: he_h-fat_h>=0 ? '#5fa87a' : '#b56666' },
-          { label:'Saldo HE', sub:'déficit de ponto no mês', value: adhFmtH(fat_h) },
+          { label:'Horas compensadas', sub:'déficit de ponto no mês', value: adhFmtH(fat_h) },
+          { label:'Saldo HE', sub:'extras − compensadas', value: `${he_h-fat_h>=0?'+':'−'}${adhFmtH(he_h-fat_h)}`, color: adhSaldoColor(he_h-fat_h, he_h) },
         ]},
         { key:'purple', icon:'ti-users', title:'Colaboradores', rows: [
           { label:'Total', sub: base ? 'nesta base' : 'todas as bases', value: colabs.toLocaleString('pt-BR') },
