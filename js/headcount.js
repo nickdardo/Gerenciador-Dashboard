@@ -1010,7 +1010,7 @@ function hcFeriasAllForBase() {
   return (window.eoFeriasAll || []).filter(r => {
     if (!hcBaseSelected(r.filial)) return false;
     return !!r.data_inicio;
-  });
+  }).map(r => ({ ...r, ch: window.eoColabs?.get(r.matricula)?.ch ?? null }));
 }
 
 function hcFeriasFilteredRows() {
@@ -1102,16 +1102,46 @@ function hcSetFeriasSearch(value) {
   if (countEl) { const n = hcFeriasFilteredRows().length; countEl.textContent = `${n.toLocaleString('pt-BR')} registro${n===1?'':'s'}`; }
 }
 
+// Ordenação genérica reutilizável pras listas de Férias/Desligados/
+// Admissões — mesma ideia do hcSortColabs, só que trabalha em cima do campo
+// bruto do registro (funciona pra qualquer uma dessas listas).
+function hcSortListGeneric(list, field, dir) {
+  const getVal = (r) => {
+    const v = r[field];
+    if (v == null) return '';
+    return typeof v === 'number' ? v : String(v).toLowerCase();
+  };
+  return list.slice().sort((a, b) => {
+    const va = getVal(a), vb = getVal(b);
+    if (va < vb) return -1 * dir;
+    if (va > vb) return  1 * dir;
+    return 0;
+  });
+}
+
+function hcFeriasSortByCol(field, thEl) {
+  const cur = window._hcFeriasSort || {};
+  const dir = (cur.field === field) ? -(cur.dir || 1) : 1;
+  window._hcFeriasSort = { field, dir };
+  document.querySelectorAll('#hc-ferias-table th[data-sort]').forEach(th => th.classList.remove('adh-sort-asc','adh-sort-desc'));
+  if (thEl) thEl.classList.add(dir === 1 ? 'adh-sort-asc' : 'adh-sort-desc');
+  const body = document.getElementById('hc-ferias-tbody');
+  if (body) body.innerHTML = hcFeriasRowsHTML();
+}
+
 function hcFeriasRowsHTML() {
-  const rows = hcFeriasFilteredRows();
+  let rows = hcFeriasFilteredRows();
+  const sort = window._hcFeriasSort;
+  if (sort) rows = hcSortListGeneric(rows, sort.field, sort.dir);
   if (!rows.length) {
-    return `<tr><td colspan="7" style="padding:24px 10px;text-align:center;color:var(--text-muted);font-size:12px">Nenhuma férias encontrada nesse período.</td></tr>`;
+    return `<tr><td colspan="8" style="padding:24px 10px;text-align:center;color:var(--text-muted);font-size:12px">Nenhuma férias encontrada nesse período.</td></tr>`;
   }
   return rows.map(r => `<tr class="adh-colab-row">
     <td style="font-family:monospace">${r.matricula}</td>
     <td>${r.filial}</td>
     <td style="font-weight:500">${r.nome||''}</td>
     <td>${r.cargo||''}</td>
+    <td class="r">${r.ch?r.ch+'h':'—'}</td>
     <td class="r">${r.dias?r.dias+' dias':'—'}</td>
     <td>${hcFmtISODate(r.data_inicio)||'—'}</td>
     <td>${hcFmtISODate(r.data_fim)||'—'}</td>
@@ -1155,14 +1185,20 @@ function hcRenderFerias(el) {
           </div>
           <button class="adh-refresh-btn" style="margin-left:auto" onclick="hcExportarExcel(hcFeriasFilteredRows(), [
             {header:'Matrícula',field:'matricula'},{header:'Filial',field:'filial'},{header:'Nome',field:'nome'},
-            {header:'Cargo',field:'cargo'},{header:'Dias',field:'dias'},{header:'Início',field:'data_inicio',fmt:hcFmtISODate},{header:'Fim',field:'data_fim',fmt:hcFmtISODate}
+            {header:'Cargo',field:'cargo'},{header:'CH',field:'ch'},{header:'Dias',field:'dias'},{header:'Início',field:'data_inicio',fmt:hcFmtISODate},{header:'Fim',field:'data_fim',fmt:hcFmtISODate}
           ], 'ferias.xlsx')"><i class="ti ti-download" aria-hidden="true"></i> Exportar Excel</button>
         </div>
         <div class="adh-colab-table-wrap">
-          <table class="adh-colab-table">
+          <table class="adh-colab-table" id="hc-ferias-table">
             <thead><tr>
-              <th>Matrícula</th><th>Filial</th><th>Nome</th><th>Cargo</th>
-              <th class="r">Dias</th><th>Início</th><th>Fim</th>
+              <th data-sort="matricula" onclick="hcFeriasSortByCol('matricula',this)">Matrícula</th>
+              <th data-sort="filial"    onclick="hcFeriasSortByCol('filial',this)">Filial</th>
+              <th data-sort="nome"      onclick="hcFeriasSortByCol('nome',this)">Nome</th>
+              <th data-sort="cargo"     onclick="hcFeriasSortByCol('cargo',this)">Cargo</th>
+              <th class="r" data-sort="ch"   onclick="hcFeriasSortByCol('ch',this)">CH</th>
+              <th class="r" data-sort="dias" onclick="hcFeriasSortByCol('dias',this)">Dias</th>
+              <th data-sort="data_inicio" onclick="hcFeriasSortByCol('data_inicio',this)">Início</th>
+              <th data-sort="data_fim"    onclick="hcFeriasSortByCol('data_fim',this)">Fim</th>
             </tr></thead>
             <tbody id="hc-ferias-tbody">${hcFeriasRowsHTML()}</tbody>
           </table>
