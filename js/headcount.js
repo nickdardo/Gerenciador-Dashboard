@@ -207,6 +207,20 @@ function hcComputeStats() {
     if (d >= ha12m && d <= hoje) feriasProgramadas12m++;
   }
 
+  // Previsto — férias com início no mês seguinte ao atual (ex.: hoje é
+  // julho, conta quem começa férias em agosto). Ajuda o gestor a se
+  // planejar com antecedência pro próximo mês.
+  const proxMesIni = new Date(hoje.getFullYear(), hoje.getMonth()+1, 1);
+  const proxMesFim = new Date(hoje.getFullYear(), hoje.getMonth()+2, 0);
+  let feriasPrevistoProxMes = 0;
+  for (const r of (window.eoFeriasAll || [])) {
+    if (!hcBaseSelected(r.filial)) continue;
+    if (!r.data_inicio) continue;
+    const d = new Date(r.data_inicio);
+    if (d >= proxMesIni && d <= proxMesFim) feriasPrevistoProxMes++;
+  }
+  const proxMesLabel = proxMesIni.toLocaleDateString('pt-BR', { month: 'long' });
+
   const fte = somaCh > 0 ? Math.round(somaCh / 180 * 10) / 10 : 0; // 1 FTE = 180h (confirmado com o cliente)
   const ftPct = (fullTime+partTime) > 0 ? Math.round(fullTime/(fullTime+partTime)*1000)/10 : 0;
 
@@ -222,6 +236,7 @@ function hcComputeStats() {
 
   return {
     headcount, ativos, inativos, afastados, totalCadastro, pcd, atestados, feriasAtivas, desligados12m, admissoes12m, feriasProgramadas12m,
+    feriasPrevistoProxMes, proxMesLabel,
     fullTime, partTime, ftPct, fte, grupos, funcoes, chList: [...chSet].sort((a,b)=>a-b),
     situacoes, altaTemporada,
   };
@@ -309,12 +324,22 @@ function hcToggleBaseMenu() {
   if (panel) panel.style.display = window._hcBaseMenuOpen ? 'block' : 'none';
 }
 
+// Guarda/restaura o scroll da listinha de bases entre re-renders — sem isso,
+// como o clique reconstrói a tela inteira, o painel sempre voltava pro topo.
+function hcRerenderKeepingBaseMenuScroll(renderFnName) {
+  const scrollEl = document.querySelector('#hc-base-menu .hc-desl-filter-quick');
+  const scrollTop = scrollEl ? scrollEl.scrollTop : 0;
+  if (typeof window[renderFnName] === 'function') window[renderFnName](window._hcCurrentEl);
+  const newScrollEl = document.querySelector('#hc-base-menu .hc-desl-filter-quick');
+  if (newScrollEl) newScrollEl.scrollTop = scrollTop;
+}
+
 // selectAll=true → volta pro estado "todas" (null); false → desmarca tudo
 // (conjunto vazio, nenhuma base visível até marcar alguma de novo).
 function hcToggleAllBasesSel(selectAll, renderFnName) {
   window._hcBaseSet = selectAll ? null : new Set();
   if (renderFnName === 'hcRenderMain') hcResetMainFilters();
-  if (typeof window[renderFnName] === 'function') window[renderFnName](window._hcCurrentEl);
+  hcRerenderKeepingBaseMenuScroll(renderFnName);
 }
 
 // Liga/desliga uma base específica dentro da seleção atual — parte do estado
@@ -326,7 +351,7 @@ function hcToggleOneBaseSel(base, renderFnName) {
   if (set.has(base)) set.delete(base); else set.add(base);
   window._hcBaseSet = (set.size === permitted.length) ? null : set;
   if (renderFnName === 'hcRenderMain') hcResetMainFilters();
-  if (typeof window[renderFnName] === 'function') window[renderFnName](window._hcCurrentEl);
+  hcRerenderKeepingBaseMenuScroll(renderFnName);
 }
 
 // Texto legível da seleção atual de bases — "Todas as bases" | "BEL" |
@@ -368,8 +393,8 @@ function hcBaseSelectorHTML(renderFnName) {
         ${permitted.map(b => `<option value="${b}" ${b===singleBase?'selected':''}>${b}</option>`).join('')}
       </select>
       <div style="position:relative">
-        <button type="button" class="adh-back-btn hc-base-menu-trigger" style="width:34px;height:34px" onclick="hcToggleBaseMenu()" title="Selecionar várias bases específicas" aria-label="Selecionar várias bases específicas">
-          <i class="ti ti-filter" style="font-size:15px" aria-hidden="true"></i>
+        <button type="button" class="hc-base-menu-trigger" style="width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:rgba(0,160,210,.10);border:1px solid rgba(0,160,210,.30);color:var(--blue);cursor:pointer;flex-shrink:0;transition:background .15s" onmouseover="this.style.background='rgba(0,160,210,.18)'" onmouseout="this.style.background='rgba(0,160,210,.10)'" onclick="hcToggleBaseMenu()" title="Selecionar várias bases específicas" aria-label="Selecionar várias bases específicas">
+          <i class="ti ti-list-check" style="font-size:17px" aria-hidden="true"></i>
         </button>
         <div class="hc-desl-filter-panel hc-base-menu-panel" id="hc-base-menu" style="display:${window._hcBaseMenuOpen?'block':'none'};width:230px;left:auto;right:0">
           <div class="hc-desl-filter-quick" style="max-height:280px">
@@ -486,6 +511,7 @@ function hcRenderMain(el) {
         { key:'red', icon:'ti-beach', title:'Férias', rows: [
           { label:'Ativas agora', sub:'colaboradores de férias hoje', value: stats.feriasAtivas.toLocaleString('pt-BR') },
           { label:'Programadas', sub:'últimos 12 meses · clique para ver a lista', value: (stats.feriasProgramadas12m||0).toLocaleString('pt-BR'), color:'#b56666', onclick:'hcOpenFerias()' },
+          { label:'Previsto', sub:`início em ${stats.proxMesLabel} · clique para ver a lista`, value: (stats.feriasPrevistoProxMes||0).toLocaleString('pt-BR'), color:'#f6ad55', onclick:'hcOpenFerias()' },
         ]},
         { key:'purple', icon:'ti-transfer', title:'Movimentação', rows: [
           { label:'Admissões', sub:'últimos 12 meses · clique para ver a lista', value: stats.admissoes12m.toLocaleString('pt-BR'), color:'#5fa87a', onclick:'hcOpenAdmissoes()' },
