@@ -262,16 +262,62 @@ async function hcForceRefresh() {
   if (el) await pageHeadcount(el);
 }
 
-function hcChangeBase(base) {
+function hcSetBase(base) {
   const role    = currentUserProfile?.role;
   const myBases = currentUserProfile?.bases || [];
   const isAdmin = role === 'admin'; // '*' não dá mais acesso a todas as bases pra quem não é admin
-  if (!isAdmin && base && !myBases.includes(base)) return; // ignora troca pra base não autorizada
+  if (!isAdmin && base && !myBases.includes(base)) return false; // ignora troca pra base não autorizada
   window._hcBase = base || null;
+  return true;
+}
+
+function hcChangeBase(base) {
+  if (!hcSetBase(base)) return;
   window._hcGrupoFilter = null;
   window._hcSituFilter = 'todos';
   window._hcSearch = '';
   hcRenderMain(window._hcCurrentEl);
+}
+
+// Mesma troca de base, mas re-renderizando o relatório atual (Desligados,
+// Admissões, Movimentação) em vez de voltar pra tela principal do Staff —
+// antes disso, a base ficava travada num badge fixo dentro desses relatórios
+// e só dava pra trocar saindo e voltando.
+function hcChangeBaseDesligados(base) {
+  if (!hcSetBase(base)) return;
+  hcRenderDesligados(window._hcCurrentEl);
+}
+function hcChangeBaseAdmissoes(base) {
+  if (!hcSetBase(base)) return;
+  hcRenderAdmissoes(window._hcCurrentEl);
+}
+function hcChangeBaseMovimentacao(base) {
+  if (!hcSetBase(base)) return;
+  hcRenderMovimentacao(window._hcCurrentEl);
+}
+
+// Monta o <select>/tag de base reutilizável (mesma lógica de permissão da
+// tela principal do Staff), pra usar tanto lá quanto dentro dos relatórios
+// de Desligados/Admissões/Movimentação.
+function hcBaseSelectorHTML(onchangeFn) {
+  const base    = window._hcBase;
+  const role    = currentUserProfile?.role;
+  const myBases = currentUserProfile?.bases || [];
+  const isAdmin = role === 'admin';
+  const bases   = isAdmin ? hcAllBases() : hcAllBases().filter(b => myBases.includes(b));
+
+  if (isAdmin) {
+    return `<select class="adh-month-select" onchange="${onchangeFn}(this.value||null)">
+              <option value="">Todas as bases</option>
+              ${bases.map(b => `<option value="${b}" ${b===base?'selected':''}>${b}</option>`).join('')}
+            </select>`;
+  }
+  if (bases.length > 1) {
+    return `<select class="adh-month-select" onchange="${onchangeFn}(this.value)">
+              ${bases.map(b => `<option value="${b}" ${b===base?'selected':''}>${b}</option>`).join('')}
+            </select>`;
+  }
+  return `<span class="adm-base-tag" style="font-size:12.5px;padding:7px 14px">${bases[0] || 'Sem base atribuída'}</span>`;
 }
 
 function hcFilterSitu(mode, btn) {
@@ -345,16 +391,7 @@ function hcRenderMain(el) {
 
   const ftDeg = stats.ftPct * 3.6;
 
-  const baseControlHTML = isAdmin
-    ? `<select class="adh-month-select" onchange="hcChangeBase(this.value||null)">
-         <option value="">Todas as bases</option>
-         ${bases.map(b => `<option value="${b}" ${b===base?'selected':''}>${b}</option>`).join('')}
-       </select>`
-    : bases.length > 1
-      ? `<select class="adh-month-select" onchange="hcChangeBase(this.value)">
-           ${bases.map(b => `<option value="${b}" ${b===base?'selected':''}>${b}</option>`).join('')}
-         </select>`
-      : `<span class="adm-base-tag" style="font-size:12.5px;padding:7px 14px">${bases[0] || 'Sem base atribuída'}</span>`;
+  const baseControlHTML = hcBaseSelectorHTML('hcChangeBase');
 
   el.innerHTML = `
     <div class="hc-wrap">
@@ -464,8 +501,14 @@ function hcRenderMain(el) {
               <table class="adh-colab-table" id="hc-colab-table">
                 <thead>
                   <tr>
-                    <th>Matrícula</th><th>Filial</th><th>Nome</th><th>Função</th>
-                    <th class="r">CH</th><th>Situação</th><th>Admissão</th><th>Observação</th>
+                    <th data-sort="mat"      onclick="hcSortByCol('mat',this)">Matrícula</th>
+                    <th data-sort="filial"   onclick="hcSortByCol('filial',this)">Filial</th>
+                    <th data-sort="nome"     onclick="hcSortByCol('nome',this)">Nome</th>
+                    <th data-sort="funcao"   onclick="hcSortByCol('funcao',this)">Função</th>
+                    <th class="r" data-sort="ch" onclick="hcSortByCol('ch',this)">CH</th>
+                    <th data-sort="situacao" onclick="hcSortByCol('situacao',this)">Situação</th>
+                    <th data-sort="admissao" onclick="hcSortByCol('admissao',this)">Admissão</th>
+                    <th>Observação</th>
                   </tr>
                 </thead>
                 <tbody id="hc-colab-tbody">${hcRenderColabRows(window._hcColabListFull)}</tbody>
@@ -606,6 +649,46 @@ function hcRenderColabRows(list) {
   }).join('');
 }
 
+// Mesma ideia do adhSortColabs/adhSortByCol (js/aderencia.js) — clique no
+// título da coluna ordena a tabela por aquele campo, alternando asc/desc.
+function hcSortColabs(list, field, dir) {
+  const getVal = (c) => {
+    switch (field) {
+      case 'mat':      return c.mat || '';
+      case 'filial':   return (c.filial || '').toLowerCase();
+      case 'nome':     return (c.nome || '').toLowerCase();
+      case 'funcao':   return (c.funcao || '').toLowerCase();
+      case 'ch':       return c.ch || 0;
+      case 'situacao': return (c.desligado ? 'desligado' : (c.situacao || '')).toLowerCase();
+      case 'admissao': return c.admissao || '';
+      default:         return '';
+    }
+  };
+  return list.sort((a, b) => {
+    const va = getVal(a), vb = getVal(b);
+    if (va < vb) return -1 * dir;
+    if (va > vb) return  1 * dir;
+    return 0;
+  });
+}
+
+function hcSortByCol(field, thEl) {
+  let dir;
+  if (window._hcSortField === field) {
+    dir = -(window._hcSortDir || 1);
+  } else {
+    const descDefault = new Set(['ch']);
+    dir = descDefault.has(field) ? -1 : 1;
+  }
+  window._hcSortField = field;
+  window._hcSortDir   = dir;
+
+  document.querySelectorAll('#hc-colab-table th[data-sort]').forEach(th => th.classList.remove('adh-sort-asc','adh-sort-desc'));
+  if (thEl) thEl.classList.add(dir === 1 ? 'adh-sort-asc' : 'adh-sort-desc');
+
+  hcRerenderColabTable();
+}
+
 function hcRerenderColabTable() {
   let list = (window._hcColabListFull || []).slice();
   if (window._hcSituFilter === 'ativo')   list = list.filter(c => !c.desligado && !c.afastado);
@@ -614,6 +697,7 @@ function hcRerenderColabTable() {
   if (window._hcGrupoFilter) list = list.filter(c => hcCargoGrupo(c.funcao) === window._hcGrupoFilter);
   const q = (window._hcSearch||'').trim().toLowerCase();
   if (q) list = list.filter(c => String(c.mat).includes(q) || String(c.nome||'').toLowerCase().includes(q));
+  if (window._hcSortField) list = hcSortColabs(list, window._hcSortField, window._hcSortDir || 1);
 
   const tbody = document.getElementById('hc-colab-tbody');
   if (tbody) tbody.innerHTML = hcRenderColabRows(list);
@@ -758,8 +842,9 @@ function hcRenderDesligados(el) {
             </svg>
           </button>
           <div style="position:relative">
-            <h1 class="page-title">Desligamentos ${base?`<span class="adh-base-badge">${base}</span>`:''}</h1>
+            <h1 class="page-title">Desligamentos</h1>
             <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+              ${hcBaseSelectorHTML('hcChangeBaseDesligados')}
               <button class="hc-desl-filter-trigger" onclick="hcToggleDeslFilter()">
                 <i class="ti ti-filter" aria-hidden="true"></i> ${hcDeslPeriodLabel()} <i class="ti ti-chevron-down" aria-hidden="true"></i>
               </button>
@@ -1453,8 +1538,9 @@ function hcRenderMovimentacao(el) {
             </svg>
           </button>
           <div style="position:relative">
-            <h1 class="page-title">Movimentação ${base?`<span class="adh-base-badge">${base}</span>`:''}</h1>
+            <h1 class="page-title">Movimentação</h1>
             <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+              ${hcBaseSelectorHTML('hcChangeBaseMovimentacao')}
               <button class="hc-desl-filter-trigger" onclick="hcToggleMovFilter()">
                 <i class="ti ti-filter" aria-hidden="true"></i> ${hcMovPeriodLabel()} <i class="ti ti-chevron-down" aria-hidden="true"></i>
               </button>
@@ -1639,8 +1725,9 @@ function hcRenderAdmissoes(el) {
             </svg>
           </button>
           <div style="position:relative">
-            <h1 class="page-title">Admissões ${base?`<span class="adh-base-badge">${base}</span>`:''}</h1>
+            <h1 class="page-title">Admissões</h1>
             <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+              ${hcBaseSelectorHTML('hcChangeBaseAdmissoes')}
               <button class="hc-desl-filter-trigger" onclick="hcToggleAdmFilter()">
                 <i class="ti ti-filter" aria-hidden="true"></i> ${hcAdmPeriodLabel()} <i class="ti ti-chevron-down" aria-hidden="true"></i>
               </button>

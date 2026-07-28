@@ -872,8 +872,8 @@ async function adhRenderMultiBase(el) {
         ]},
         { key:'amber', icon:'ti-clock-hour-4', title:'Horas', rows: [
           { label:'Horas extras', sub:'total no mês (HE Feita)', value: adhFmtH(totHE) },
-          { label:'Horas compensadas', sub:'déficit de ponto no mês', value: adhFmtH(totFalta) },
-          { label:'Saldo HE', sub:'extras − compensadas', value:`${totHE-totFalta>=0?'+':'−'}${adhFmtH(totHE-totFalta)}`, color: totHE-totFalta>=0 ? '#5fa87a' : '#b56666' },
+          { label:'Horas compensadas', sub:'extras − déficit no mês', value: `${totHE-totFalta>=0?'+':'−'}${adhFmtH(totHE-totFalta)}`, color: totHE-totFalta>=0 ? '#5fa87a' : '#b56666' },
+          { label:'Saldo HE', sub:'déficit de ponto no mês', value: adhFmtH(totFalta) },
         ]},
         { key:'purple', icon:'ti-users', title:'Colaboradores', rows: [
           { label:'Ativos', sub:'cadastro atual', value: (window.eoColabs?.size || totColabs).toLocaleString('pt-BR') },
@@ -1282,17 +1282,22 @@ function adhRenderDetalhe(el, base, showBack) {
   window._adhSortDir   = -1;
 
   // Group cargos into broad categories, and collect distinct carga horária
-  // values — both used to build the quick-filter pills below.
-  const catCounts = new Map();
+  // values — both used to build the quick-filter pills below. Categorias
+  // ordenadas pela soma de HE (maior primeiro), não pela quantidade de
+  // colaboradores — é isso que salta aos olhos pra quem tá de olho em HE.
+  const catCounts = new Map(); // cat -> { n, he }
   const chCounts  = new Map();
   for (const c of colabListFull) {
     const funcao = c.funcao || window.eoColabs?.get(c.mat)?.funcao;
     const cat = adhCargoCategoria(funcao);
-    catCounts.set(cat, (catCounts.get(cat) || 0) + 1);
+    const prev = catCounts.get(cat) || { n:0, he:0 };
+    prev.n  += 1;
+    prev.he += (c.he_h || 0);
+    catCounts.set(cat, prev);
     const chVal = c.ch ?? window.eoColabs?.get(c.mat)?.ch ?? 0;
     if (chVal) chCounts.set(chVal, (chCounts.get(chVal) || 0) + 1);
   }
-  const catList = [...catCounts.entries()].sort((a,b) => b[1]-a[1]);
+  const catList = [...catCounts.entries()].sort((a,b) => b[1].he - a[1].he);
   const chList  = [...chCounts.entries()].sort((a,b) => a[0]-b[0]);
   const colabList = adhSortColabs(colabListFull.slice(), 'desvio', -1);
 
@@ -1337,8 +1342,8 @@ function adhRenderDetalhe(el, base, showBack) {
         ]},
         { key:'amber', icon:'ti-clock-hour-4', title:'Horas', rows: [
           { label:'Horas extras', sub:'no mês (HE Feita)', value: adhFmtH(he_h) },
-          { label:'Horas compensadas', sub:'déficit de ponto no mês', value: adhFmtH(fat_h) },
-          { label:'Saldo HE', sub:'extras − compensadas', value:`${he_h-fat_h>=0?'+':'−'}${adhFmtH(he_h-fat_h)}`, color: he_h-fat_h>=0 ? '#5fa87a' : '#b56666' },
+          { label:'Horas compensadas', sub:'extras − déficit no mês', value: `${he_h-fat_h>=0?'+':'−'}${adhFmtH(he_h-fat_h)}`, color: he_h-fat_h>=0 ? '#5fa87a' : '#b56666' },
+          { label:'Saldo HE', sub:'déficit de ponto no mês', value: adhFmtH(fat_h) },
         ]},
         { key:'purple', icon:'ti-users', title:'Colaboradores', rows: [
           { label:'Total', sub: base ? 'nesta base' : 'todas as bases', value: colabs.toLocaleString('pt-BR') },
@@ -1355,9 +1360,9 @@ function adhRenderDetalhe(el, base, showBack) {
 
         <div class="adh-filter-pills-row">
           <span class="adh-filter-pills-label">Função</span>
-          ${catList.map(([cat,n]) => `
+          ${catList.map(([cat,d]) => `
             <button class="adh-cat-pill" onclick="adhToggleCargoFilter('${cat.replace(/'/g,"\\'")}',this)">
-              ${cat} <span class="adh-pill-count">${n}</span>
+              ${cat} <span class="adh-pill-count">${d.n}</span> <span style="color:var(--text-muted);font-weight:600">(${Math.round(d.he).toLocaleString('pt-BR')}h)</span>
             </button>`).join('')}
         </div>
         <div class="adh-filter-pills-row">
@@ -1561,23 +1566,25 @@ function adhSituacaoEfetiva(mat) {
   return null;
 }
 
-// Groups varied cargo/função strings into broad categories for quick
-// filtering. Order matters — checked top to bottom, first match wins.
+// Groups varied cargo/função strings into broad categories — delega pra
+// hcCargoGrupo (js/headcount.js) pra usar exatamente o mesmo padrão de
+// categoria que a tela de Staff já usa (RAMP/CLEANING/GSE/PAX/SUPERVISION/
+// SECURITY/LEADERSHIP/OPERATOR/OTHERS), em vez de uma categorização própria
+// e divergente. Mantém um fallback local só pra não quebrar se, por algum
+// motivo, headcount.js não tiver carregado ainda.
 function adhCargoCategoria(funcao) {
+  if (typeof hcCargoGrupo === 'function') return hcCargoGrupo(funcao);
   const f = String(funcao || '').toUpperCase();
-  if (!f) return 'Sem cargo';
-  if (f.includes('RAMPA'))                              return 'Rampa';
-  if (f.includes('LIMPEZA'))                             return 'Limpeza';
-  if (f.includes('GERENTE'))                             return 'Gestão';
-  if (f.includes('COORDENADOR'))                         return 'Coordenação';
-  if (f.includes('SUPERVISOR') || f.includes('LIDER'))   return 'Supervisão';
-  if (f.includes('MECANIC') || f.includes('ELETRIC') || f.includes('MANUTEN')) return 'Manutenção';
-  if (f.includes('SEGURAN'))                             return 'Segurança';
-  if (f.includes('PASSAGEIRO') || f.includes('AGENTE'))  return 'Atendimento';
-  if (f.includes('APRENDIZ'))                            return 'Aprendiz';
-  if (f.includes('ADMINISTRATIVO') || f.includes('ANALISTA') || f.includes('ESPECIALISTA') || f.includes('PLAN')) return 'Administrativo';
-  if (f.includes('OPERADOR') || f.includes('OPERA'))     return 'Operações';
-  return 'Outros';
+  if (!f) return 'OTHERS';
+  if (f.includes('RAMPA'))                              return 'RAMP';
+  if (f.includes('LIMPEZA'))                             return 'CLEANING';
+  if (f.includes('MECANIC') || f.includes('ELETRIC') || f.includes('GSE')) return 'GSE';
+  if (f.includes('PASSAGEIRO'))                         return 'PAX';
+  if (f.includes('SUPERVISOR'))                         return 'SUPERVISION';
+  if (f.includes('SEGURAN'))                            return 'SECURITY';
+  if (f.includes('GERENTE') || f.includes('COORDENADOR') || f.includes('LIDER')) return 'LEADERSHIP';
+  if (f.includes('OPERADOR'))                           return 'OPERATOR';
+  return 'OTHERS';
 }
 
 function adhRenderColabRows(list, base) {
