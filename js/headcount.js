@@ -652,7 +652,7 @@ function hcMesAbrev(mesStr) {
 
 // Gráfico de barras por mês, com o mês/período do filtro atual destacado —
 // mostra todos os meses que existirem de dado (não fixo em 12).
-function hcExemploChartHTML(allRows, dataField, periodoAtual, cor) {
+function hcExemploChartHTML(allRows, dataField, periodoAtual, cor, setPeriodFn) {
   const hoje = new Date();
   let de = null, ate = null;
 
@@ -692,14 +692,15 @@ function hcExemploChartHTML(allRows, dataField, periodoAtual, cor) {
           if (periodoAtual === '12m') { destacado = new Date(m+'-01') >= ha12m; }
           else if (periodoAtual === 'todos' || periodoAtual === 'custom') { destacado = true; }
           else { destacado = m === periodoAtual; }
-          return `<div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;align-items:center" title="${hcMesAbrev(m)}: ${v}">
+          const clique = setPeriodFn ? ` onclick="${setPeriodFn}('${m}')" style="cursor:pointer" title="${hcMesAbrev(m)}: ${v} · clique para filtrar só esse mês"` : ` title="${hcMesAbrev(m)}: ${v}"`;
+          return `<div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;align-items:center"${clique}>
             <div style="font-size:10px;color:${destacado?'var(--text-primary)':'var(--text-secondary)'};font-weight:600;margin-bottom:2px">${v}</div>
             <div style="width:100%;height:${Math.round(v/max*54)}px;background:${destacado?cor:'rgba(255,255,255,.1)'};border-radius:3px 3px 0 0"></div>
           </div>`;
         }).join('')}
       </div>
       <div style="display:flex;gap:6px;margin-top:4px">
-        ${meses.map(m => `<div style="flex:1;text-align:center;font-size:10px;color:var(--text-secondary)">${hcMesAbrev(m)}</div>`).join('')}
+        ${meses.map(m => `<div style="flex:1;text-align:center;font-size:10px;color:var(--text-secondary)${setPeriodFn?';cursor:pointer':''}"${setPeriodFn?` onclick="${setPeriodFn}('${m}')"`:''}>${hcMesAbrev(m)}</div>`).join('')}
       </div>
     </div>`;
 }
@@ -942,7 +943,7 @@ function hcRenderDesligados(el) {
         </div>
       </div>
 
-      ${hcExemploChartHTML(hcDeslAllForBase(), 'data_demissao', window._hcDeslPeriod, '#b56666')}
+      ${hcExemploChartHTML(hcDeslAllForBase(), 'data_demissao', window._hcDeslPeriod, '#b56666', 'hcSetDeslPeriod')}
 
       <div class="hc-panel">
         <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
@@ -1144,7 +1145,7 @@ function hcRenderFerias(el) {
         </div>
       </div>
 
-      ${hcExemploChartHTML(hcFeriasAllForBase(), 'data_inicio', window._hcFeriasPeriod, '#c9a24a')}
+      ${hcExemploChartHTML(hcFeriasAllForBase(), 'data_inicio', window._hcFeriasPeriod, '#c9a24a', 'hcSetFeriasPeriod')}
 
       <div class="hc-panel">
         <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
@@ -1846,7 +1847,7 @@ function hcRenderAdmissoes(el) {
         </div>
       </div>
 
-      ${hcExemploChartHTML(hcAdmissoesAllForBase(), 'admissao', window._hcAdmPeriod, '#5fa87a')}
+      ${hcExemploChartHTML(hcAdmissoesAllForBase(), 'admissao', window._hcAdmPeriod, '#5fa87a', 'hcSetAdmPeriod')}
 
       <div class="hc-panel">
         <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
