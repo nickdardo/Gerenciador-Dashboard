@@ -105,13 +105,13 @@ async function hcEnsureData() {
 }
 
 // ── Cálculo principal ──────────────────────────────────
-function hcComputeStats(base) {
+function hcComputeStats() {
   const roster = [];
   if (window.eoColabs) {
     for (const [mat, r] of window.eoColabs) {
       const st = (r.station || '').toUpperCase();
       if (HC_EXCLUDE_BASES.has(st)) continue;
-      if (base && st !== base.toUpperCase()) continue;
+      if (!hcBaseSelected(st)) continue;
       roster.push({ mat, ...r });
     }
   }
@@ -247,9 +247,7 @@ async function pageHeadcount(el) {
   await hcEnsureData();
 
   const bases = currentUserProfile?.bases || [];
-  if (!window._hcBase) {
-    window._hcBase = (role === 'admin') ? null : (bases[0] || null); // '*' não dá mais acesso a todas as bases pra quem não é admin
-  }
+  if (window._hcBaseSet === undefined) window._hcBaseSet = null; // null = todas as bases permitidas
   if (!window._hcSituFilter) window._hcSituFilter = 'todos';
   if (!window._hcSearch) window._hcSearch = '';
 
@@ -262,62 +260,105 @@ async function hcForceRefresh() {
   if (el) await pageHeadcount(el);
 }
 
-function hcSetBase(base) {
+// Todas as bases que o usuário atual tem permissão de ver (admin: todas as
+// bases existentes; os demais: só as bases atribuídas ao perfil).
+function hcPermittedBases() {
   const role    = currentUserProfile?.role;
   const myBases = currentUserProfile?.bases || [];
-  const isAdmin = role === 'admin'; // '*' não dá mais acesso a todas as bases pra quem não é admin
-  if (!isAdmin && base && !myBases.includes(base)) return false; // ignora troca pra base não autorizada
-  window._hcBase = base || null;
-  return true;
+  return role === 'admin' ? hcAllBases() : hcAllBases().filter(b => myBases.includes(b));
 }
 
-function hcChangeBase(base) {
-  if (!hcSetBase(base)) return;
+// Seleção múltipla de base: window._hcBaseSet null = todas as permitidas;
+// Set<string> = só essas (permite "selecionar tudo e tirar 1 ou mais de
+// dentro", em vez de só poder escolher uma base de cada vez).
+function hcBaseSelected(filial) {
+  const f = String(filial||'').toUpperCase();
+  if (!hcPermittedBases().includes(f)) return false; // fora da permissão do usuário
+  const set = window._hcBaseSet;
+  if (!set) return true; // null = todas selecionadas
+  return set.has(f);
+}
+
+function hcResetMainFilters() {
   window._hcGrupoFilter = null;
   window._hcSituFilter = 'todos';
   window._hcSearch = '';
-  hcRenderMain(window._hcCurrentEl);
 }
 
-// Mesma troca de base, mas re-renderizando o relatório atual (Desligados,
-// Admissões, Movimentação) em vez de voltar pra tela principal do Staff —
-// antes disso, a base ficava travada num badge fixo dentro desses relatórios
-// e só dava pra trocar saindo e voltando.
-function hcChangeBaseDesligados(base) {
-  if (!hcSetBase(base)) return;
-  hcRenderDesligados(window._hcCurrentEl);
-}
-function hcChangeBaseAdmissoes(base) {
-  if (!hcSetBase(base)) return;
-  hcRenderAdmissoes(window._hcCurrentEl);
-}
-function hcChangeBaseMovimentacao(base) {
-  if (!hcSetBase(base)) return;
-  hcRenderMovimentacao(window._hcCurrentEl);
+function hcToggleBaseMenu() {
+  window._hcBaseMenuOpen = !window._hcBaseMenuOpen;
+  const panel = document.getElementById('hc-base-menu');
+  if (panel) panel.style.display = window._hcBaseMenuOpen ? 'block' : 'none';
 }
 
-// Monta o <select>/tag de base reutilizável (mesma lógica de permissão da
-// tela principal do Staff), pra usar tanto lá quanto dentro dos relatórios
-// de Desligados/Admissões/Movimentação.
-function hcBaseSelectorHTML(onchangeFn) {
-  const base    = window._hcBase;
-  const role    = currentUserProfile?.role;
-  const myBases = currentUserProfile?.bases || [];
-  const isAdmin = role === 'admin';
-  const bases   = isAdmin ? hcAllBases() : hcAllBases().filter(b => myBases.includes(b));
+// selectAll=true → volta pro estado "todas" (null); false → desmarca tudo
+// (conjunto vazio, nenhuma base visível até marcar alguma de novo).
+function hcToggleAllBasesSel(selectAll, renderFnName) {
+  window._hcBaseSet = selectAll ? null : new Set();
+  if (renderFnName === 'hcRenderMain') hcResetMainFilters();
+  if (typeof window[renderFnName] === 'function') window[renderFnName](window._hcCurrentEl);
+}
 
-  if (isAdmin) {
-    return `<select class="adh-month-select" onchange="${onchangeFn}(this.value||null)">
-              <option value="">Todas as bases</option>
-              ${bases.map(b => `<option value="${b}" ${b===base?'selected':''}>${b}</option>`).join('')}
-            </select>`;
+// Liga/desliga uma base específica dentro da seleção atual — parte do estado
+// "todas" (null) materializa o conjunto completo primeiro, pra poder tirar
+// só essa uma. Se sobrar tudo marcado de novo, volta pro estado "todas".
+function hcToggleOneBaseSel(base, renderFnName) {
+  const permitted = hcPermittedBases();
+  const set = window._hcBaseSet ? new Set(window._hcBaseSet) : new Set(permitted);
+  if (set.has(base)) set.delete(base); else set.add(base);
+  window._hcBaseSet = (set.size === permitted.length) ? null : set;
+  if (renderFnName === 'hcRenderMain') hcResetMainFilters();
+  if (typeof window[renderFnName] === 'function') window[renderFnName](window._hcCurrentEl);
+}
+
+// Texto legível da seleção atual de bases — "Todas as bases" | "BEL" |
+// "Todas, exceto GIG" | "3 bases selecionadas" | "Nenhuma base".
+function hcBaseLabel() {
+  const permitted = hcPermittedBases();
+  const set = window._hcBaseSet;
+  const allSelected = !set;
+  const nSel = allSelected ? permitted.length : set.size;
+  if (nSel === 0) return 'Nenhuma base';
+  if (allSelected) return 'Todas as bases';
+  if (nSel === permitted.length - 1) return `Todas, exceto ${permitted.find(b => !set.has(b))}`;
+  if (nSel === 1) return [...set][0];
+  return `${nSel} bases selecionadas`;
+}
+
+// Monta o seletor de base reutilizável — multi-seleção (checkbox por base +
+// "Todas as bases"), pra usar tanto na tela principal do Staff quanto dentro
+// de Desligados/Admissões/Movimentação/Férias. Se o usuário só tem 1 base
+// permitida, mostra só uma tag fixa (não faz sentido multi-selecionar 1 item só).
+function hcBaseSelectorHTML(renderFnName) {
+  const permitted = hcPermittedBases();
+  if (permitted.length <= 1) {
+    return `<span class="adm-base-tag" style="font-size:12.5px;padding:7px 14px">${permitted[0] || 'Sem base atribuída'}</span>`;
   }
-  if (bases.length > 1) {
-    return `<select class="adh-month-select" onchange="${onchangeFn}(this.value)">
-              ${bases.map(b => `<option value="${b}" ${b===base?'selected':''}>${b}</option>`).join('')}
-            </select>`;
-  }
-  return `<span class="adm-base-tag" style="font-size:12.5px;padding:7px 14px">${bases[0] || 'Sem base atribuída'}</span>`;
+
+  const set = window._hcBaseSet;
+  const allSelected = !set;
+  const label = hcBaseLabel();
+
+  return `
+    <div style="position:relative;display:inline-block">
+      <button type="button" class="adh-month-select hc-base-menu-trigger" style="display:inline-flex;align-items:center;gap:8px;cursor:pointer" onclick="hcToggleBaseMenu()">
+        ${label} <i class="ti ti-chevron-down" style="font-size:12px" aria-hidden="true"></i>
+      </button>
+      <div class="hc-desl-filter-panel hc-base-menu-panel" id="hc-base-menu" style="display:${window._hcBaseMenuOpen?'block':'none'};width:230px">
+        <div class="hc-desl-filter-quick" style="max-height:280px">
+          <button class="${allSelected?'active':''}" onclick="hcToggleAllBasesSel(${allSelected?'false':'true'},'${renderFnName}')">
+            <i class="ti ${allSelected?'ti-square-rounded-check-filled':'ti-square'}" style="margin-right:6px" aria-hidden="true"></i>Todas as bases
+          </button>
+          <div style="border-top:1px solid var(--border);margin:6px 0"></div>
+          ${permitted.map(b => {
+            const sel = allSelected || set.has(b);
+            return `<button class="${sel?'active':''}" onclick="hcToggleOneBaseSel('${b}','${renderFnName}')">
+              <i class="ti ${sel?'ti-square-rounded-check-filled':'ti-square'}" style="margin-right:6px" aria-hidden="true"></i>${b}
+            </button>`;
+          }).join('')}
+        </div>
+      </div>
+    </div>`;
 }
 
 function hcFilterSitu(mode, btn) {
@@ -379,19 +420,13 @@ function hcSearch(value) {
 
 // ── Main dashboard ─────────────────────────────────────
 function hcRenderMain(el) {
-  const base = window._hcBase;
-  const stats = hcComputeStats(base);
+  const stats = hcComputeStats();
   window._hcStats = stats;
-  window._hcColabListFull = hcBuildColabList(base);
-
-  const role     = currentUserProfile?.role;
-  const myBases  = currentUserProfile?.bases || [];
-  const isAdmin = role === 'admin'; // '*' não dá mais acesso a todas as bases pra quem não é admin
-  const bases    = isAdmin ? hcAllBases() : hcAllBases().filter(b => myBases.includes(b));
+  window._hcColabListFull = hcBuildColabList();
 
   const ftDeg = stats.ftPct * 3.6;
 
-  const baseControlHTML = hcBaseSelectorHTML('hcChangeBase');
+  const baseControlHTML = hcBaseSelectorHTML('hcRenderMain');
 
   el.innerHTML = `
     <div class="hc-wrap">
@@ -523,13 +558,13 @@ function hcRenderMain(el) {
 }
 
 // Build the base colaborador list (roster only, cross-referenced)
-function hcBuildColabList(base) {
+function hcBuildColabList() {
   const out = [];
   if (!window.eoColabs) return out;
   for (const [mat, r] of window.eoColabs) {
     const st = (r.station || '').toUpperCase();
     if (HC_EXCLUDE_BASES.has(st)) continue;
-    if (base && st !== base.toUpperCase()) continue;
+    if (!hcBaseSelected(st)) continue;
     const desligado = hcIsDesligado(mat);
     const desligInfo = window.eoDesligados?.get(mat);
     const feriasInfo = window.eoFerias?.get(mat);
@@ -712,9 +747,8 @@ function hcOpenDesligados() {
 }
 
 function hcDeslAllForBase() {
-  const base = window._hcBase;
   return (window.eoDesligadosAll || []).filter(r => {
-    if (base && (r.filial||'').toUpperCase() !== base.toUpperCase()) return false;
+    if (!hcBaseSelected(r.filial)) return false;
     return !!r.data_demissao;
   });
 }
@@ -828,7 +862,6 @@ function hcDeslRowsHTML() {
 }
 
 function hcRenderDesligados(el) {
-  const base = window._hcBase;
   if (window._hcDeslPeriod == null) window._hcDeslPeriod = '12m';
   const rows = hcDeslFilteredRows();
 
@@ -844,7 +877,7 @@ function hcRenderDesligados(el) {
           <div style="position:relative">
             <h1 class="page-title">Desligamentos</h1>
             <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
-              ${hcBaseSelectorHTML('hcChangeBaseDesligados')}
+              ${hcBaseSelectorHTML('hcRenderDesligados')}
               <button class="hc-desl-filter-trigger" onclick="hcToggleDeslFilter()">
                 <i class="ti ti-filter" aria-hidden="true"></i> ${hcDeslPeriodLabel()} <i class="ti ti-chevron-down" aria-hidden="true"></i>
               </button>
@@ -882,6 +915,14 @@ function hcRenderDesligados(el) {
 }
 
 document.addEventListener('click', (e) => {
+  if (!e.target.closest('.hc-base-menu-panel') && !e.target.closest('.hc-base-menu-trigger')) {
+    window._hcBaseMenuOpen = false;
+    const panel = document.getElementById('hc-base-menu');
+    if (panel) panel.style.display = 'none';
+  }
+});
+
+document.addEventListener('click', (e) => {
   if (!e.target.closest('.hc-desl-filter-panel') && !e.target.closest('.hc-desl-filter-trigger')) {
     const panel = document.getElementById('hc-desl-filter-panel');
     if (panel) panel.style.display = 'none';
@@ -896,9 +937,8 @@ function hcOpenFerias() {
 }
 
 function hcFeriasAllForBase() {
-  const base = window._hcBase;
   return (window.eoFeriasAll || []).filter(r => {
-    if (base && (r.filial||'').toUpperCase() !== base.toUpperCase()) return false;
+    if (!hcBaseSelected(r.filial)) return false;
     return !!r.data_inicio;
   });
 }
@@ -1009,7 +1049,6 @@ function hcFeriasRowsHTML() {
 }
 
 function hcRenderFerias(el) {
-  const base = window._hcBase;
   if (window._hcFeriasPeriod == null) window._hcFeriasPeriod = '12m';
   const rows = hcFeriasFilteredRows();
 
@@ -1023,8 +1062,9 @@ function hcRenderFerias(el) {
             </svg>
           </button>
           <div style="position:relative">
-            <h1 class="page-title">Férias ${base?`<span class="adh-base-badge">${base}</span>`:''}</h1>
+            <h1 class="page-title">Férias</h1>
             <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+              ${hcBaseSelectorHTML('hcRenderFerias')}
               <button class="hc-desl-filter-trigger" onclick="hcToggleFeriasFilter()">
                 <i class="ti ti-filter" aria-hidden="true"></i> ${hcFeriasPeriodLabel()} <i class="ti ti-chevron-down" aria-hidden="true"></i>
               </button>
@@ -1305,7 +1345,9 @@ function hcHeadcountPorBase() {
 }
 
 function hcMovPorBaseHTML() {
-  if (window._hcBase) return '';
+  const permitted = hcPermittedBases();
+  const nSel = window._hcBaseSet ? window._hcBaseSet.size : permitted.length;
+  if (nSel <= 1) return ''; // só 1 base em vista — não faz sentido "detalhar por base"
   const rows = hcMovFilteredRows();
   const headcountPorBase = hcHeadcountPorBase();
   const porBase = new Map();
@@ -1447,7 +1489,7 @@ function hcMovTempoCasaHTML() {
 // e um fallback em texto simples, pra não depender de print de tela.
 async function hcCopiarResumoEmail() {
   const rows = hcMovFilteredRows();
-  const base = window._hcBase || 'Todas as bases';
+  const base = hcBaseLabel();
   const porMes = new Map();
   rows.forEach(r => {
     const mes = String(r.data).slice(0,7);
@@ -1524,7 +1566,6 @@ async function hcCopiarResumoEmail() {
 }
 
 function hcRenderMovimentacao(el) {
-  const base = window._hcBase;
   if (window._hcMovPeriod == null) window._hcMovPeriod = '12m';
   const rows = hcMovTabelaFiltrada();
 
@@ -1540,7 +1581,7 @@ function hcRenderMovimentacao(el) {
           <div style="position:relative">
             <h1 class="page-title">Movimentação</h1>
             <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
-              ${hcBaseSelectorHTML('hcChangeBaseMovimentacao')}
+              ${hcBaseSelectorHTML('hcRenderMovimentacao')}
               <button class="hc-desl-filter-trigger" onclick="hcToggleMovFilter()">
                 <i class="ti ti-filter" aria-hidden="true"></i> ${hcMovPeriodLabel()} <i class="ti ti-chevron-down" aria-hidden="true"></i>
               </button>
@@ -1594,11 +1635,10 @@ function hcOpenAdmissoes() {
 }
 
 function hcAdmissoesAllForBase() {
-  const base = window._hcBase;
   const out = [];
   if (window.eoColabs) {
     for (const [mat, r] of window.eoColabs) {
-      if (base && (r.station||'').toUpperCase() !== base.toUpperCase()) continue;
+      if (!hcBaseSelected(r.station)) continue;
       if (!r.admissao) continue;
       out.push({ matricula: mat, filial: r.station, nome: r.nome, cargo: r.funcao, ch: r.ch, admissao: r.admissao });
     }
@@ -1711,7 +1751,6 @@ function hcAdmRowsHTML() {
 }
 
 function hcRenderAdmissoes(el) {
-  const base = window._hcBase;
   if (window._hcAdmPeriod == null) window._hcAdmPeriod = '12m';
   const rows = hcAdmissoesFilteredRows();
 
@@ -1727,7 +1766,7 @@ function hcRenderAdmissoes(el) {
           <div style="position:relative">
             <h1 class="page-title">Admissões</h1>
             <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
-              ${hcBaseSelectorHTML('hcChangeBaseAdmissoes')}
+              ${hcBaseSelectorHTML('hcRenderAdmissoes')}
               <button class="hc-desl-filter-trigger" onclick="hcToggleAdmFilter()">
                 <i class="ti ti-filter" aria-hidden="true"></i> ${hcAdmPeriodLabel()} <i class="ti ti-chevron-down" aria-hidden="true"></i>
               </button>
