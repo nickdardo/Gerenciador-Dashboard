@@ -685,7 +685,7 @@ function hcExemploChartHTML(allRows, dataField, periodoAtual, cor, setPeriodFn) 
 
   return `
     <div class="hc-panel" style="margin-bottom:16px">
-      <div style="display:flex;align-items:flex-end;gap:6px;height:80px">
+      <div style="display:flex;align-items:stretch;gap:6px;height:80px">
         ${meses.map(m => {
           const v = porMes.get(m);
           let destacado;
