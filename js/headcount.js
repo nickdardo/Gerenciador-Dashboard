@@ -503,10 +503,10 @@ function hcRenderMain(el) {
           { label:'Ativos', sub:'trabalhando hoje', value: stats.ativos.toLocaleString('pt-BR') },
         ]},
         { key:'amber', icon:'ti-report-medical', title:'Situação', rows: [
-          { label:'Atestados', sub:'auxílio doença + atestado médico', value: stats.atestados.toLocaleString('pt-BR') },
-          { label:'Afastados', sub:'aux. doença, invalidez, acidente, susp. · fora do headcount', value: stats.afastados.toLocaleString('pt-BR') },
-          { label:'Inativos', sub:'no cadastro, já desligados', value: stats.inativos.toLocaleString('pt-BR') },
-          { label:'PCD', sub:'pessoas com deficiência', value: stats.pcd.toLocaleString('pt-BR') },
+          { label:'Atestados', sub:'auxílio doença + atestado médico', value: stats.atestados.toLocaleString('pt-BR'), onclick:"hcOpenSituacao('atestado')" },
+          { label:'Afastados', sub:'aux. doença, invalidez, acidente, susp. · fora do headcount', value: stats.afastados.toLocaleString('pt-BR'), onclick:"hcOpenSituacao('afastado')" },
+          { label:'Inativos', sub:'no cadastro, já desligados', value: stats.inativos.toLocaleString('pt-BR'), onclick:'hcOpenDesligados()' },
+          { label:'PCD', sub:'pessoas com deficiência', value: stats.pcd.toLocaleString('pt-BR'), onclick:"hcOpenSituacao('pcd')" },
         ]},
         { key:'red', icon:'ti-beach', title:'Férias', rows: [
           { label:'Ativas agora', sub:'colaboradores de férias hoje', value: stats.feriasAtivas.toLocaleString('pt-BR') },
@@ -1119,6 +1119,141 @@ function hcSortListGeneric(list, field, dir) {
   });
 }
 
+// ══════════════════════════════════════════════════════
+// SITUAÇÃO — Atestados/Afastados/PCD, mesmo padrão de Férias (base, busca,
+// cabeçalho clicável, Excel), só sem o gráfico por mês (são status atuais,
+// não eventos com data). "Inativos" reaproveita a tela de Desligados, que já
+// é exatamente isso.
+// ══════════════════════════════════════════════════════
+const HC_SITUACAO_META = {
+  atestado: { titulo: 'Atestados',  sub: 'auxílio doença + atestado médico' },
+  afastado: { titulo: 'Afastados',  sub: 'aux. doença, invalidez, acidente, suspensão' },
+  pcd:      { titulo: 'PCD',        sub: 'pessoas com deficiência' },
+};
+
+function hcSituacaoAllForBase(tipo) {
+  const out = [];
+  if (!window.eoColabs) return out;
+  for (const [mat, r] of window.eoColabs) {
+    const st = (r.station || '').toUpperCase();
+    if (HC_EXCLUDE_BASES.has(st)) continue;
+    if (!hcBaseSelected(st)) continue;
+    if (hcIsDesligado(mat)) continue; // mesma regra do card: desligado não conta aqui
+    if (tipo === 'atestado' && !hcIsAtestado(r.situacao)) continue;
+    if (tipo === 'afastado' && !hcIsAfastado(r.situacao)) continue;
+    if (tipo === 'pcd' && !window.eoPcd?.has(mat)) continue;
+    out.push({ matricula: mat, filial: st, nome: r.nome, cargo: r.funcao, ch: r.ch, situacao: r.situacao });
+  }
+  return out;
+}
+
+function hcSituacaoFilteredRows(tipo) {
+  let rows = hcSituacaoAllForBase(tipo);
+  const q = (window._hcSituListSearch || '').trim().toLowerCase();
+  if (q) rows = rows.filter(r =>
+    String(r.matricula).includes(q) ||
+    (r.nome||'').toLowerCase().includes(q) ||
+    (r.cargo||'').toLowerCase().includes(q));
+  const sort = window._hcSituListSort;
+  if (sort) rows = hcSortListGeneric(rows, sort.field, sort.dir);
+  return rows;
+}
+
+function hcSetSituListSearch(value) {
+  window._hcSituListSearch = value;
+  const body = document.getElementById('hc-situ-tbody');
+  if (body) body.innerHTML = hcSituacaoRowsHTML();
+  const countEl = document.getElementById('hc-situ-count');
+  if (countEl) {
+    const n = hcSituacaoFilteredRows(window._hcSituListTipo).length;
+    countEl.textContent = `${n.toLocaleString('pt-BR')} colaborador${n===1?'':'es'}`;
+  }
+}
+
+function hcSituacaoSortByCol(field, thEl) {
+  const cur = window._hcSituListSort || {};
+  const dir = (cur.field === field) ? -(cur.dir || 1) : 1;
+  window._hcSituListSort = { field, dir };
+  document.querySelectorAll('#hc-situ-table th[data-sort]').forEach(th => th.classList.remove('adh-sort-asc','adh-sort-desc'));
+  if (thEl) thEl.classList.add(dir === 1 ? 'adh-sort-asc' : 'adh-sort-desc');
+  const body = document.getElementById('hc-situ-tbody');
+  if (body) body.innerHTML = hcSituacaoRowsHTML();
+}
+
+function hcSituacaoRowsHTML() {
+  const rows = hcSituacaoFilteredRows(window._hcSituListTipo);
+  if (!rows.length) {
+    return `<tr><td colspan="6" style="padding:24px 10px;text-align:center;color:var(--text-muted);font-size:12px">Ninguém encontrado.</td></tr>`;
+  }
+  return rows.map(r => `<tr class="adh-colab-row">
+    <td style="font-family:monospace">${r.matricula}</td>
+    <td>${r.filial}</td>
+    <td style="font-weight:500">${r.nome||''}</td>
+    <td>${r.cargo||''}</td>
+    <td class="r">${r.ch?r.ch+'h':'—'}</td>
+    <td>${r.situacao||'—'}</td>
+  </tr>`).join('');
+}
+
+function hcOpenSituacao(tipo) {
+  window._hcSituListTipo = tipo;
+  window._hcSituListSearch = '';
+  window._hcSituListSort = null;
+  hcRenderSituacaoList(window._hcCurrentEl);
+}
+
+function hcRenderSituacaoList(el) {
+  const tipo = window._hcSituListTipo;
+  const meta = HC_SITUACAO_META[tipo] || { titulo: 'Situação', sub: '' };
+  const rows = hcSituacaoFilteredRows(tipo);
+
+  el.innerHTML = `
+    <div class="hc-wrap">
+      <div class="hc-header">
+        <div style="display:flex;align-items:center;gap:12px">
+          <button class="adh-back-btn" onclick="hcRenderMain(window._hcCurrentEl)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
+            </svg>
+          </button>
+          <div>
+            <h1 class="page-title">${meta.titulo}</h1>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+              ${hcBaseSelectorHTML('hcRenderSituacaoList')}
+              <span class="page-sub" style="margin:0">${meta.sub} · <span id="hc-situ-count">${rows.length.toLocaleString('pt-BR')} colaborador${rows.length===1?'':'es'}</span></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="hc-panel">
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+          <div class="adh-search-wrap" style="max-width:340px;margin-bottom:0">
+            <i class="ti ti-search" aria-hidden="true"></i>
+            <input type="text" class="adh-search-input" placeholder="Buscar por nome, matrícula ou cargo..." oninput="hcSetSituListSearch(this.value)" value="${window._hcSituListSearch||''}">
+          </div>
+          <button class="adh-refresh-btn" style="margin-left:auto" onclick="hcExportarExcel(hcSituacaoFilteredRows(window._hcSituListTipo), [
+            {header:'Matrícula',field:'matricula'},{header:'Filial',field:'filial'},{header:'Nome',field:'nome'},
+            {header:'Cargo',field:'cargo'},{header:'CH',field:'ch'},{header:'Situação',field:'situacao'}
+          ], 'situacao.xlsx')"><i class="ti ti-download" aria-hidden="true"></i> Exportar Excel</button>
+        </div>
+        <div class="adh-colab-table-wrap">
+          <table class="adh-colab-table" id="hc-situ-table">
+            <thead><tr>
+              <th data-sort="matricula" onclick="hcSituacaoSortByCol('matricula',this)">Matrícula</th>
+              <th data-sort="filial"    onclick="hcSituacaoSortByCol('filial',this)">Filial</th>
+              <th data-sort="nome"      onclick="hcSituacaoSortByCol('nome',this)">Nome</th>
+              <th data-sort="cargo"     onclick="hcSituacaoSortByCol('cargo',this)">Cargo</th>
+              <th class="r" data-sort="ch" onclick="hcSituacaoSortByCol('ch',this)">CH</th>
+              <th data-sort="situacao"  onclick="hcSituacaoSortByCol('situacao',this)">Situação</th>
+            </tr></thead>
+            <tbody id="hc-situ-tbody">${hcSituacaoRowsHTML()}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+}
+
 function hcFeriasSortByCol(field, thEl) {
   const cur = window._hcFeriasSort || {};
   const dir = (cur.field === field) ? -(cur.dir || 1) : 1;
@@ -1226,6 +1361,11 @@ function hcOpenMovimentacao() {
   hcRenderMovimentacao(window._hcCurrentEl);
 }
 
+function hcMovTogglePcd() {
+  window._hcMovPcdOnly = !window._hcMovPcdOnly;
+  hcRenderMovimentacao(window._hcCurrentEl);
+}
+
 function hcMovAllForBase() {
   const admissoes = hcAdmissoesAllForBase().map(r => ({ ...r, tipo: 'Admissão', data: r.admissao }));
   const desligados = hcDeslAllForBase().map(r => ({ ...r, tipo: 'Desligamento', data: r.data_demissao }));
@@ -1236,6 +1376,7 @@ function hcMovAllForBase() {
 // nos gráficos em si, só afeta a lista de colaboradores embaixo.
 function hcMovTabelaFiltrada() {
   let rows = hcMovFilteredRows();
+  if (window._hcMovPcdOnly) rows = rows.filter(r => window.eoPcd?.has(r.matricula));
   const extra = window._hcMovFiltroExtra;
   if (extra) {
     if (extra.tipo === 'mes')   rows = rows.filter(r => String(r.data).slice(0,7) === extra.valor);
@@ -1690,6 +1831,9 @@ function hcRenderMovimentacao(el) {
               ${hcBaseSelectorHTML('hcRenderMovimentacao')}
               <button class="hc-desl-filter-trigger" onclick="hcToggleMovFilter()">
                 <i class="ti ti-filter" aria-hidden="true"></i> ${hcMovPeriodLabel()} <i class="ti ti-chevron-down" aria-hidden="true"></i>
+              </button>
+              <button class="hc-desl-filter-trigger${window._hcMovPcdOnly?' active':''}" onclick="hcMovTogglePcd()" title="Mostrar só admissões/desligamentos de colaboradores PCD">
+                <i class="ti ${window._hcMovPcdOnly?'ti-square-rounded-check-filled':'ti-accessible'}" aria-hidden="true"></i> Só PCD
               </button>
               <span class="page-sub" style="margin:0"><span id="hc-mov-count">${rows.length.toLocaleString('pt-BR')} registro${rows.length===1?'':'s'}</span></span>
             </div>
