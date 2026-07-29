@@ -415,7 +415,7 @@ function hcBaseSelectorHTML(renderFnName) {
       </select>
       <div style="position:relative">
         <button type="button" class="hc-base-menu-trigger" style="width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:rgba(0,160,210,.10);border:1px solid rgba(0,160,210,.30);color:var(--blue);cursor:pointer;flex-shrink:0;transition:background .15s" onmouseover="this.style.background='rgba(0,160,210,.18)'" onmouseout="this.style.background='rgba(0,160,210,.10)'" onclick="hcToggleBaseMenu()" title="Selecionar várias bases específicas" aria-label="Selecionar várias bases específicas">
-          <i class="ti ti-list-check" style="font-size:17px" aria-hidden="true"></i>
+          <i class="ti ti-filter" style="font-size:15px" aria-hidden="true"></i>
         </button>
         <div class="hc-desl-filter-panel hc-base-menu-panel" id="hc-base-menu" style="display:${window._hcBaseMenuOpen?'block':'none'};width:230px;left:auto;right:0">
           <div class="hc-desl-filter-quick" style="max-height:280px">
