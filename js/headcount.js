@@ -1167,7 +1167,10 @@ function hcSituacaoAllForBase(tipo) {
     if (tipo === 'atestado' && !hcIsAtestado(r.situacao)) continue;
     if (tipo === 'afastado' && !hcIsAfastado(r.situacao)) continue;
     if (tipo === 'pcd' && !window.eoPcd?.has(mat)) continue;
-    out.push({ matricula: mat, filial: st, nome: r.nome, cargo: r.funcao, ch: r.ch, situacao: r.situacao });
+    out.push({
+      matricula: mat, filial: st, nome: r.nome, cargo: r.funcao, ch: r.ch, situacao: r.situacao,
+      deficiencia: tipo === 'pcd' ? (window.eoPcd?.get(mat)?.deficiencia || null) : null,
+    });
   }
   return out;
 }
@@ -1207,8 +1210,9 @@ function hcSituacaoSortByCol(field, thEl) {
 
 function hcSituacaoRowsHTML() {
   const rows = hcSituacaoFilteredRows(window._hcSituListTipo);
+  const isPcd = window._hcSituListTipo === 'pcd';
   if (!rows.length) {
-    return `<tr><td colspan="6" style="padding:24px 10px;text-align:center;color:var(--text-muted);font-size:12px">Ninguém encontrado.</td></tr>`;
+    return `<tr><td colspan="${isPcd?7:6}" style="padding:24px 10px;text-align:center;color:var(--text-muted);font-size:12px">Ninguém encontrado.</td></tr>`;
   }
   return rows.map(r => `<tr class="adh-colab-row">
     <td style="font-family:monospace">${r.matricula}</td>
@@ -1217,6 +1221,7 @@ function hcSituacaoRowsHTML() {
     <td>${r.cargo||''}</td>
     <td class="r">${r.ch?r.ch+'h':'—'}</td>
     <td>${r.situacao||'—'}</td>
+    ${isPcd ? `<td>${r.deficiencia||'—'}</td>` : ''}
   </tr>`).join('');
 }
 
@@ -1229,6 +1234,7 @@ function hcOpenSituacao(tipo) {
 
 function hcRenderSituacaoList(el) {
   const tipo = window._hcSituListTipo;
+  const isPcd = tipo === 'pcd';
   const meta = HC_SITUACAO_META[tipo] || { titulo: 'Situação', sub: '' };
   const rows = hcSituacaoFilteredRows(tipo);
 
@@ -1259,7 +1265,7 @@ function hcRenderSituacaoList(el) {
           </div>
           <button class="adh-refresh-btn" style="margin-left:auto" onclick="hcExportarExcel(hcSituacaoFilteredRows(window._hcSituListTipo), [
             {header:'Matrícula',field:'matricula'},{header:'Filial',field:'filial'},{header:'Nome',field:'nome'},
-            {header:'Cargo',field:'cargo'},{header:'CH',field:'ch'},{header:'Situação',field:'situacao'}
+            {header:'Cargo',field:'cargo'},{header:'CH',field:'ch'},{header:'Situação',field:'situacao'}${isPcd?`,{header:'Deficiência',field:'deficiencia'}`:''}
           ], 'situacao.xlsx')"><i class="ti ti-download" aria-hidden="true"></i> Exportar Excel</button>
         </div>
         <div class="adh-colab-table-wrap">
@@ -1271,6 +1277,7 @@ function hcRenderSituacaoList(el) {
               <th data-sort="cargo"     onclick="hcSituacaoSortByCol('cargo',this)">Cargo</th>
               <th class="r" data-sort="ch" onclick="hcSituacaoSortByCol('ch',this)">CH</th>
               <th data-sort="situacao"  onclick="hcSituacaoSortByCol('situacao',this)">Situação</th>
+              ${isPcd ? `<th data-sort="deficiencia" onclick="hcSituacaoSortByCol('deficiencia',this)">Deficiência</th>` : ''}
             </tr></thead>
             <tbody id="hc-situ-tbody">${hcSituacaoRowsHTML()}</tbody>
           </table>
