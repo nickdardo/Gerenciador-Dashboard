@@ -579,11 +579,16 @@ function hcRenderMain(el) {
               <span id="hc-colab-count" style="font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted)">
                 ${window._hcColabListFull.length} colaboradores
               </span>
-              <div class="adh-sort-btns">
+              <div class="adh-sort-btns" style="display:flex;align-items:center;gap:8px">
                 <button class="adh-sort-btn hc-situ-filter-btn active" onclick="hcFilterSitu('todos',this)">Todos</button>
                 <button class="adh-sort-btn hc-situ-filter-btn" onclick="hcFilterSitu('ativo',this)">Ativos</button>
                 <button class="adh-sort-btn hc-situ-filter-btn" onclick="hcFilterSitu('inativo',this)">Inativos</button>
                 <button class="adh-sort-btn hc-situ-filter-btn" onclick="hcFilterSitu('ferias',this)">Férias</button>
+                <button class="adh-refresh-btn" style="margin-left:8px" onclick="hcExportarExcel(hcColabExportRows(hcColabListFiltered()), [
+                  {header:'Matrícula',field:'mat'},{header:'Filial',field:'filial'},{header:'Nome',field:'nome'},
+                  {header:'Função',field:'funcao'},{header:'CH',field:'ch'},{header:'Situação',field:'situacao_export'},
+                  {header:'Admissão',field:'admissao',fmt:hcFmtISODate},{header:'Observação',field:'observacao_export'}
+                ], 'staff.xlsx')"><i class="ti ti-download" aria-hidden="true"></i> Exportar Excel</button>
               </div>
             </div>
             <div class="adh-colab-table-wrap" style="max-height:calc(100vh - 360px);min-height:320px;overflow-y:auto">
@@ -779,7 +784,10 @@ function hcSortByCol(field, thEl) {
   hcRerenderColabTable();
 }
 
-function hcRerenderColabTable() {
+// Mesmo filtro aplicado na tela (grupo/situação/busca/ordenação) — extraído
+// numa função própria pra poder reaproveitar tanto no re-render quanto no
+// botão de Exportar Excel (exporta exatamente o que está filtrado na tela).
+function hcColabListFiltered() {
   let list = (window._hcColabListFull || []).slice();
   if (window._hcSituFilter === 'ativo')   list = list.filter(c => !c.desligado && !c.afastado);
   if (window._hcSituFilter === 'inativo') list = list.filter(c => c.desligado || c.afastado);
@@ -788,6 +796,23 @@ function hcRerenderColabTable() {
   const q = (window._hcSearch||'').trim().toLowerCase();
   if (q) list = list.filter(c => String(c.mat).includes(q) || String(c.nome||'').toLowerCase().includes(q));
   if (window._hcSortField) list = hcSortColabs(list, window._hcSortField, window._hcSortDir || 1);
+  return list;
+}
+
+// Achata os campos derivados (situação/observação) num objeto simples, já
+// que o exportador só lê um campo por coluna — não dá pra combinar vários
+// campos (ex.: desligado+situacao+emFerias) direto no fmt.
+function hcColabExportRows(list) {
+  return list.map(c => ({
+    mat: c.mat, filial: c.filial, nome: c.nome, funcao: c.funcao, ch: c.ch,
+    situacao_export: c.desligado ? 'Desligado' : (c.situacao || ''),
+    admissao: c.admissao,
+    observacao_export: c.desligado ? (hcFmtISODate(c.demissao)||'') : (c.emFerias ? `Férias até ${hcFmtISODate(c.feriasFim)||''}` : ''),
+  }));
+}
+
+function hcRerenderColabTable() {
+  const list = hcColabListFiltered();
 
   const tbody = document.getElementById('hc-colab-tbody');
   if (tbody) tbody.innerHTML = hcRenderColabRows(list);
