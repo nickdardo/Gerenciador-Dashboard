@@ -937,8 +937,8 @@ async function adhRenderMultiBase(el) {
           adhDeltaRow(global, prevGlobal),
         ]},
         { key:'amber', icon:'ti-clock-hour-4', title:'Horas', rows: [
-          { label:'Horas extras', sub: folhaParcial ? `total no mês (HE Feita) · folha em ${basesComFolha}/${totalBases} bases, resto do ponto` : usaFolha ? 'total no mês (HE Feita) · dados da folha' : 'total no mês (HE Feita) · calculado do ponto', value: adhFmtH(horasExtrasVal) },
-          { label:'Horas compensadas', sub: usaFolha ? 'ausência na folha, no mês' : 'déficit de ponto no mês', value: adhFmtH(compensadaVal) },
+          { label:'Hora extra', sub: folhaParcial ? `total no mês (HE Feita) · folha em ${basesComFolha}/${totalBases} bases, resto do ponto` : usaFolha ? 'total no mês (HE Feita) · dados da folha' : 'total no mês (HE Feita) · calculado do ponto', value: adhFmtH(horasExtrasVal) },
+          { label:'Compensada', sub: usaFolha ? 'ausência na folha, no mês' : 'déficit de ponto no mês', value: adhFmtH(compensadaVal) },
           { label:'Saldo HE', sub:'extras − compensadas', value: `${horasExtrasVal-compensadaVal>=0?'+':'−'}${adhFmtH(horasExtrasVal-compensadaVal)}`, color: adhSaldoColor(horasExtrasVal-compensadaVal, horasExtrasVal) },
         ]},
         { key:'purple', icon:'ti-users', title:'Colaboradores', rows: [
@@ -1380,6 +1380,20 @@ function adhRenderDetalhe(el, base, showBack) {
   const usaFolhaBase = !!folhaTotBase;
   const horasExtrasValBase = usaFolhaBase ? folhaTotBase.heFeita  : he_h;
   const compensadaValBase  = usaFolhaBase ? folhaTotBase.ausencia : fat_h;
+  // Diagnóstico visível — sem isso não dá pra saber, só olhando a tela, se
+  // a folha não bateu com essa base porque (a) não tem folha nenhuma
+  // carregada pro mês, ou (b) tem folha, mas de outras bases, não desta.
+  let folhaDebug = '';
+  if (!usaFolhaBase) {
+    const mapa = window._adhFolhaMap;
+    if (!mapa || !mapa.size) {
+      folhaDebug = 'folha: nenhum registro carregado pra esse mês ainda';
+    } else {
+      const basesNaFolha = [...new Set([...mapa.keys()].map(k => k.split('|')[0]))].sort();
+      folhaDebug = `folha tem ${mapa.size} registro(s), mas nenhum de "${base}" — bases encontradas na folha: ${basesNaFolha.join(', ') || '(nenhuma)'}`;
+    }
+    console.log('[aderencia] diagnóstico folha:', { base, mes: window._adhFolhaMes, detalhe: folhaDebug });
+  }
 
   // Build collaborator list for this base — merges the FULL roster
   // (colaboradores table, window.eoColabs) with the computed KPI, so people
@@ -1454,8 +1468,8 @@ function adhRenderDetalhe(el, base, showBack) {
           { label:'Horas programadas', sub:'base do cálculo', value: adhFmtH(prog_h) },
         ]},
         { key:'amber', icon:'ti-clock-hour-4', title:'Horas', rows: [
-          { label:'Horas extras', sub: usaFolhaBase ? 'no mês (HE Feita) · dados da folha' : 'no mês (HE Feita) · calculado do ponto', value: adhFmtH(horasExtrasValBase) },
-          { label:'Horas compensadas', sub: usaFolhaBase ? 'ausência na folha, no mês' : 'déficit de ponto no mês', value: adhFmtH(compensadaValBase) },
+          { label:'Hora extra', sub: usaFolhaBase ? 'no mês (HE Feita) · dados da folha' : `calculado do ponto${folhaDebug ? ' · '+folhaDebug : ''}`, value: adhFmtH(horasExtrasValBase) },
+          { label:'Compensada', sub: usaFolhaBase ? 'ausência na folha, no mês' : 'déficit de ponto no mês', value: adhFmtH(compensadaValBase) },
           { label:'Saldo HE', sub:'extras − compensadas', value: `${horasExtrasValBase-compensadaValBase>=0?'+':'−'}${adhFmtH(horasExtrasValBase-compensadaValBase)}`, color: adhSaldoColor(horasExtrasValBase-compensadaValBase, horasExtrasValBase) },
         ]},
         { key:'purple', icon:'ti-users', title:'Colaboradores', rows: [
