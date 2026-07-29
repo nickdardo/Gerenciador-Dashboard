@@ -2476,6 +2476,11 @@ a { color: inherit; text-decoration: none; }
   z-index: 50;
   padding: 10px;
 }
+/* Painel de seleção múltipla de base — mesmo degradê azul do card "Quadro" */
+.hc-base-menu-panel {
+  background: linear-gradient(180deg, rgba(56,189,248,.16), rgba(56,189,248,0) 64px), var(--adh-surface);
+  border-color: rgba(56,189,248,.28);
+}
 .hc-desl-filter-quick {
   display: flex;
   flex-direction: column;
