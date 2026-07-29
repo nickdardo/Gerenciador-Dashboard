@@ -519,6 +519,7 @@ async function adhForceRefresh() {
   if (typeof pontoMarcacao !== 'undefined') pontoMarcacao = new Map();
   adhBaseKPI = null; adhColabKPI = null;
   window._adhHistData = null;
+  window._adhFolhaMap = null; window._adhFolhaMes = null;
   const el = window._adhCurrentEl;
   if (el) await pageAderencia(el);
 }

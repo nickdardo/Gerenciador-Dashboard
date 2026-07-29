@@ -279,10 +279,38 @@ const ADM_BATCH_PATTERNS = [
   { fn: 'adminLoadHorarios',  label: 'Ponto planejado',   test: n => n.includes('horario') },
   { fn: 'adminLoadMarcacao',  label: 'Marcação de ponto', test: n => n.includes('marcac') },
   { fn: 'adminLoadMalha',     label: 'Malha aérea',       test: n => n.includes('rvpe') || n.includes('malha') },
-  { fn: 'adminLoadFerias',    label: 'Férias',            test: n => n.includes('hrcl107') || n.includes('feria') },
+  { fn: 'adminLoadHorasExtrasFolha', label: 'Horas Extras (Folha)', test: n => n.includes('horasextras') },
+  // "hrcl107" saiu daqui de propósito — ver ADM_HRCL107_SNIFF logo abaixo,
+  // esse nome sozinho é ambíguo entre Férias e Absenteísmo.
+  { fn: 'adminLoadFerias',    label: 'Férias',            test: n => n.includes('feria') },
   { fn: 'adminLoadDesligados',label: 'Desligamentos',     test: n => n.includes('hrcl106') || n.includes('desliga') },
   { fn: 'adminLoadPcd',       label: 'PCD',                test: n => n.includes('hrcl114') || n.includes('pcd') },
+  { fn: 'adminLoadAbsenteismo', label: 'Absenteísmo',      test: n => n.includes('absenteismo') || n.includes('afastamento') },
 ];
+
+// "HRCL107" já foi usado tanto pra Férias quanto pra Absenteísmo (mesmo
+// número de relatório, arquivos diferentes) — em vez de chutar pelo nome,
+// abre o arquivo e olha as colunas do cabeçalho pra decidir de verdade.
+const ADM_HRCL107_SNIFF = {
+  test: n => n.includes('hrcl107'),
+  async resolve(file) {
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type:'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:true });
+      const headerRow = rows.find(r => Array.isArray(r) && r.some(c => typeof c === 'string' && c.trim())) || [];
+      const headerText = headerRow.map(c => String(c||'').toLowerCase()).join(' | ');
+      if (headerText.includes('afastam') || headerText.includes('cid') || headerText.includes('situa')) {
+        return { fn: 'adminLoadAbsenteismo', label: 'Absenteísmo' };
+      }
+      return { fn: 'adminLoadFerias', label: 'Férias' };
+    } catch(e) {
+      console.warn('[batchUpload] não consegui abrir HRCL107 pra identificar pelo conteúdo, assumindo Absenteísmo:', e.message);
+      return { fn: 'adminLoadAbsenteismo', label: 'Absenteísmo' };
+    }
+  },
+};
 
 function adminLoadEach(input, fnName) {
   const files = [...(input.files || [])];
@@ -292,17 +320,25 @@ function adminLoadEach(input, fnName) {
   input.value = '';
 }
 
-function adminBatchUpload(input) {
+async function adminBatchUpload(input) {
   const files = [...(input.files || [])];
   if (!files.length) return;
 
   const statusEl = document.getElementById('adm-batch-status');
+  if (statusEl) statusEl.innerHTML = 'Identificando arquivos...';
+
   const matched = [];
   const unmatched = [];
   for (const file of files) {
     const nameLower = file.name.toLowerCase();
     const pat = ADM_BATCH_PATTERNS.find(p => p.test(nameLower));
-    if (pat) matched.push({ file, pat }); else unmatched.push(file);
+    if (pat) { matched.push({ file, pat }); continue; }
+    if (ADM_HRCL107_SNIFF.test(nameLower)) {
+      const resolved = await ADM_HRCL107_SNIFF.resolve(file);
+      matched.push({ file, pat: resolved });
+      continue;
+    }
+    unmatched.push(file);
   }
 
   if (statusEl) {
@@ -435,7 +471,7 @@ function adminFilesTab() {
       icon: 'ti-calendar-off',
       color: '#fc8181',
       name: 'Absenteísmo',
-      desc: 'HRCL107.xlsx (afastamentos) · atenção: nome de arquivo igual ao de Férias, subir manualmente aqui',
+      desc: 'HRCL107.xlsx (afastamentos) · o upload em lote agora reconhece pelo conteúdo, sem conflito com Férias',
       accept: '.xls,.xlsx',
       fn: 'adminLoadAbsenteismo',
       info: adminFiles.absenteismo ? `${adminFiles.absenteismo.count.toLocaleString()} eventos` : null,
@@ -457,7 +493,7 @@ function adminFilesTab() {
         <i class="ti ti-upload" aria-hidden="true"></i>
         <div>
           <div class="adm-batch-upload-title">Upload em lote</div>
-          <div class="adm-batch-upload-sub">Arraste vários arquivos aqui de uma vez (ou clique pra escolher) — o painel reconhece cada um pelo nome (HRCL106, HRCL107, HRCL114, HRCL204, Horarios, Marcacao, RVPE127...) e joga pro lugar certo sozinho.</div>
+          <div class="adm-batch-upload-sub">Arraste vários arquivos aqui de uma vez (ou clique pra escolher) — o painel reconhece cada um pelo nome (HRCL106, HRCL107, HRCL114, HRCL204, Horarios, Marcacao, RVPE127, HorasExtras...) e joga pro lugar certo sozinho. HRCL107 é ambíguo (Férias × Absenteísmo) — nesse caso o painel abre o arquivo e decide pelas colunas.</div>
         </div>
       </div>
       <input type="file" id="adm-batch-input" multiple accept=".xlsx,.xls,.csv" style="display:none" onchange="adminBatchUpload(this)">
@@ -854,7 +890,16 @@ async function adminLoadHorasExtrasFolha(input) {
         }
         const acc = porMat.get(mat);
         const totalizador = parseInt(row[6]);
-        const total = parseFloat(row[9]) || 0;
+        // Soma os dias em vez de ler a coluna "Total" pronta (índice 9) — o
+        // BI monta o gráfico dia a dia a partir dessas mesmas colunas, então
+        // isso bate certinho com o range de dias que o arquivo realmente tem
+        // preenchido (ex.: só até dia 28), em vez de confiar num total que
+        // pode ter sido calculado num corte de dias diferente.
+        let total = 0;
+        for (let c = 10; c < row.length; c++) {
+          const v = parseFloat(row[c]);
+          if (!isNaN(v)) total += v;
+        }
         if (totalizador === 101) acc.he_feita = total;
         else if (totalizador === 102) acc.horas_ausencia = total;
         else if (totalizador === 105) acc.horas_diarias = total;
