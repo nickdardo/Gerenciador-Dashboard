@@ -823,12 +823,26 @@ async function adhRenderMultiBase(el) {
   // "Horas compensadas" = déficit de ponto (horas não batidas), por
   // definição do negócio: quem não bateu ponto teve essa hora tratada como
   // compensada — mesmo conceito do "Compensada" no BI (Capacity).
-  // Se a folha (HorasExtras.xls) já foi carregada pra esse mês, usa os
-  // números dela em vez de recalcular do ponto — bate certinho com o BI.
-  const folhaTot = adhFolhaTotais(null);
-  const usaFolha = !!folhaTot;
-  const horasExtrasVal = usaFolha ? folhaTot.heFeita  : totHE;
-  const compensadaVal  = usaFolha ? folhaTot.ausencia : totFalta;
+  // Monta o total base por base: usa a folha só na(s) base(s) que já têm
+  // esse dado carregado, e cai pro cálculo de ponto nas demais — nunca soma
+  // só o que tem na folha "pura", porque isso ignora silenciosamente as
+  // bases sem folha ainda e derruba o total pra um número irreal.
+  let horasExtrasVal = 0, compensadaVal = 0;
+  let basesComFolha = 0;
+  const totalBases = adhBaseKPI.size;
+  for (const [filial, d] of adhBaseKPI) {
+    const folhaBase = adhFolhaTotais(filial);
+    if (folhaBase) {
+      horasExtrasVal += folhaBase.heFeita;
+      compensadaVal  += folhaBase.ausencia;
+      basesComFolha++;
+    } else {
+      horasExtrasVal += (d.he_h||0);
+      compensadaVal  += (d.falta_h||0);
+    }
+  }
+  const usaFolha = basesComFolha > 0;
+  const folhaParcial = basesComFolha > 0 && basesComFolha < totalBases;
 
   // Comparação real com o mês anterior — cacheada por mês (evita refetch a
   // cada busca/página; só busca de novo se o mês selecionado mudou).
@@ -923,7 +937,7 @@ async function adhRenderMultiBase(el) {
           adhDeltaRow(global, prevGlobal),
         ]},
         { key:'amber', icon:'ti-clock-hour-4', title:'Horas', rows: [
-          { label:'Horas extras', sub: usaFolha ? 'total no mês (HE Feita) · dados da folha' : 'total no mês (HE Feita) · calculado do ponto', value: adhFmtH(horasExtrasVal) },
+          { label:'Horas extras', sub: folhaParcial ? `total no mês (HE Feita) · folha em ${basesComFolha}/${totalBases} bases, resto do ponto` : usaFolha ? 'total no mês (HE Feita) · dados da folha' : 'total no mês (HE Feita) · calculado do ponto', value: adhFmtH(horasExtrasVal) },
           { label:'Horas compensadas', sub: usaFolha ? 'ausência na folha, no mês' : 'déficit de ponto no mês', value: adhFmtH(compensadaVal) },
           { label:'Saldo HE', sub:'extras − compensadas', value: `${horasExtrasVal-compensadaVal>=0?'+':'−'}${adhFmtH(horasExtrasVal-compensadaVal)}`, color: adhSaldoColor(horasExtrasVal-compensadaVal, horasExtrasVal) },
         ]},
@@ -1039,6 +1053,9 @@ function adhRenderRankingBodyHTML() {
       <tbody>
         ${filtered.map(([base, d]) => {
           const porMes = hist.porBase.get(base) || new Map();
+          const folhaBase = adhFolhaTotais(base);
+          const extrasVal = folhaBase ? folhaBase.heFeita  : d.he_h;
+          const deficitVal = folhaBase ? folhaBase.ausencia : d.falta_h;
           return `
           <tr onclick="adhOpenBase('${base}')">
             <td style="font-weight:500">${base}</td>
@@ -1048,8 +1065,8 @@ function adhRenderRankingBodyHTML() {
               return `<td><div style="display:flex;align-items:center;gap:6px"><div class="adh-exec-bar" style="width:50px;height:7px"><div style="width:${Math.round(v)}%;background:${adhBarColor(v)}"></div></div><span style="font-size:11.5px;font-weight:600">${v}%</span></div></td>`;
             }).join('')}
             <td>${adhDeltaHTML(d.pct, (window._adhPrevByBase||new Map()).get(base))}</td>
-            <td class="r">+${adhFmtH(d.he_h)}</td>
-            <td class="r">−${adhFmtH(d.falta_h)}</td>
+            <td class="r">+${adhFmtH(extrasVal)}</td>
+            <td class="r">−${adhFmtH(deficitVal)}</td>
             <td class="r">${d.colabs}</td>
             <td style="text-align:center">${adhStatusIcon(d.pct)}</td>
           </tr>`;
