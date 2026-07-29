@@ -282,15 +282,26 @@ async function adhEnsureFolhaMap(mes) {
   if (window._adhFolhaMes === mes && window._adhFolhaMap) return;
   const mapa = new Map(); // "filial|matricula" -> {he_feita, horas_ausencia, horas_diarias}
   try {
-    const { data, error } = await db.from('aderencia_folha')
-      .select('filial,matricula,he_feita,horas_ausencia,horas_diarias')
-      .eq('mes', mes);
-    if (error) throw new Error(error.message);
-    for (const r of (data||[])) {
-      mapa.set(`${(r.filial||'').toUpperCase()}|${r.matricula}`, {
-        he_feita: r.he_feita||0, horas_ausencia: r.horas_ausencia||0, horas_diarias: r.horas_diarias||0,
-      });
+    // Sem paginar, o Supabase corta em 1000 linhas por padrão — com ~6 mil
+    // colaboradores isso deixava bases inteiras de fora do mapa (a mesma
+    // armadilha que já resolvemos em outras tabelas grandes, tipo o roster).
+    const { count, error: countErr } = await db.from('aderencia_folha')
+      .select('*', { count:'exact', head:true }).eq('mes', mes);
+    if (countErr) throw new Error(countErr.message);
+    const PAGE = 1000;
+    for (let from = 0; from < (count||0); from += PAGE) {
+      const { data, error } = await db.from('aderencia_folha')
+        .select('filial,matricula,he_feita,horas_ausencia,horas_diarias')
+        .eq('mes', mes)
+        .range(from, from + PAGE - 1);
+      if (error) throw new Error(error.message);
+      for (const r of (data||[])) {
+        mapa.set(`${(r.filial||'').toUpperCase()}|${r.matricula}`, {
+          he_feita: r.he_feita||0, horas_ausencia: r.horas_ausencia||0, horas_diarias: r.horas_diarias||0,
+        });
+      }
     }
+    console.log(`[aderencia] folha: ${mapa.size} registros carregados pro mês ${mes}`);
   } catch(e) {
     console.warn('[aderencia] folha:', e.message);
   }
