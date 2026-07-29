@@ -112,6 +112,12 @@ async function hcEnsureData() {
       window.eoPcd = new Map((data||[]).map(r => [r.matricula, r]));
     } catch(e) { console.warn('[headcount] pcd:', e.message); window.eoPcd = new Map(); }
   }
+  if (!window.eoAbsenteismoAll) {
+    try {
+      const data = await dbFetchAll('colaboradores_absenteismo', 'matricula,nome,cargo,ch,filial,data_afastamento,situacao_codigo,motivo,dias,cid');
+      window.eoAbsenteismoAll = data || [];
+    } catch(e) { console.warn('[headcount] absenteismo:', e.message); window.eoAbsenteismoAll = []; }
+  }
 }
 
 // ── Cálculo principal ──────────────────────────────────
@@ -221,6 +227,21 @@ function hcComputeStats() {
   }
   const proxMesLabel = proxMesIni.toLocaleDateString('pt-BR', { month: 'long' });
 
+  // Absenteísmo do mês atual — total de eventos + top 3 motivos, pro card
+  // da tela principal (a lista completa/histórico fica na tela dedicada).
+  const mesAtualStr = `${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}`;
+  let absenteismoEventosMes = 0;
+  const absMotivosMes = new Map();
+  for (const r of (window.eoAbsenteismoAll || [])) {
+    if (!hcBaseSelected(r.filial)) continue;
+    if (!r.data_afastamento) continue;
+    if (String(r.data_afastamento).slice(0,7) !== mesAtualStr) continue;
+    absenteismoEventosMes++;
+    const motivo = r.motivo || 'Não informado';
+    absMotivosMes.set(motivo, (absMotivosMes.get(motivo)||0) + 1);
+  }
+  const absenteismoTop3 = [...absMotivosMes.entries()].sort((a,b) => b[1]-a[1]).slice(0,3);
+
   const fte = somaCh > 0 ? Math.round(somaCh / 180 * 10) / 10 : 0; // 1 FTE = 180h (confirmado com o cliente)
   const ftPct = (fullTime+partTime) > 0 ? Math.round(fullTime/(fullTime+partTime)*1000)/10 : 0;
 
@@ -236,7 +257,7 @@ function hcComputeStats() {
 
   return {
     headcount, ativos, inativos, afastados, totalCadastro, pcd, atestados, feriasAtivas, desligados12m, admissoes12m, feriasProgramadas12m,
-    feriasPrevistoProxMes, proxMesLabel,
+    feriasPrevistoProxMes, proxMesLabel, absenteismoEventosMes, absenteismoTop3,
     fullTime, partTime, ftPct, fte, grupos, funcoes, chList: [...chSet].sort((a,b)=>a-b),
     situacoes, altaTemporada,
   };
@@ -517,6 +538,13 @@ function hcRenderMain(el) {
           { label:'Admissões', sub:'últimos 12 meses · clique para ver a lista', value: stats.admissoes12m.toLocaleString('pt-BR'), color:'#5fa87a', onclick:'hcOpenAdmissoes()' },
           { label:'Desligados', sub:'últimos 12 meses · clique para ver a lista', value: stats.desligados12m.toLocaleString('pt-BR'), color:'#b56666', onclick:'hcOpenDesligados()' },
           { label:'Relatório completo', sub:'admissões + desligados juntos, com gráfico e exportar Excel', value: '', onclick:'hcOpenMovimentacao()' },
+        ]},
+        { key:'red', icon:'ti-calendar-off', title:'Absenteísmo', rows: [
+          { label:'Eventos no mês', sub:'todos os motivos · clique para ver a lista', value: (stats.absenteismoEventosMes||0).toLocaleString('pt-BR'), onclick:'hcOpenAbsenteismoMesAtual()' },
+          ...stats.absenteismoTop3.map(([motivo,n]) => ({
+            label: motivo, sub: 'no mês atual · clique para ver quem', value: n.toLocaleString('pt-BR'),
+            color:'#f6ad55', onclick:`hcOpenAbsenteismoMotivo('${motivo.replace(/'/g,"\\'")}')`,
+          })),
         ]},
       ], true)}
 
@@ -1386,6 +1414,271 @@ function hcRenderFerias(el) {
 document.addEventListener('click', (e) => {
   if (!e.target.closest('.hc-desl-filter-panel') && !e.target.closest('.hc-desl-filter-trigger')) {
     const panel = document.getElementById('hc-ferias-filter-panel');
+    if (panel) panel.style.display = 'none';
+  }
+});
+
+// ══════════════════════════════════════════════════════
+// ABSENTEÍSMO — histórico de afastamentos (HRCL107, ver aviso de nome no
+// admin.js). Mesmo padrão de Férias, mais um card de "motivos mais comuns"
+// (igual o de causa de desligamento na Movimentação) e filtro extra por
+// motivo ao clicar numa barra.
+// ══════════════════════════════════════════════════════
+function hcAbsenteismoAllForBase(pcdOnly) {
+  return (window.eoAbsenteismoAll || []).filter(r => {
+    if (!hcBaseSelected(r.filial)) return false;
+    if (pcdOnly && !window.eoPcd?.has(r.matricula)) return false;
+    return !!r.data_afastamento;
+  });
+}
+
+function hcAbsenteismoFilteredRows() {
+  const period = window._hcAbsPeriod || '12m';
+  const term = (window._hcAbsSearch || '').trim().toUpperCase();
+  const hoje = new Date();
+  const ha12m = new Date(hoje.getFullYear(), hoje.getMonth()-12, hoje.getDate());
+
+  let rows = hcAbsenteismoAllForBase(window._hcAbsPcdOnly);
+  if (period === '12m') {
+    rows = rows.filter(r => { const d = new Date(r.data_afastamento); return d >= ha12m && d <= hoje; });
+  } else if (period === 'custom') {
+    const from = window._hcAbsFrom ? new Date(window._hcAbsFrom) : null;
+    const to   = window._hcAbsTo   ? new Date(window._hcAbsTo)   : null;
+    rows = rows.filter(r => {
+      const d = new Date(r.data_afastamento);
+      if (from && d < from) return false;
+      if (to && d > to) return false;
+      return true;
+    });
+  } else if (period !== 'todos') {
+    rows = rows.filter(r => String(r.data_afastamento).slice(0,7) === period);
+  }
+  if (window._hcAbsMotivoFiltro) rows = rows.filter(r => (r.motivo||'Não informado') === window._hcAbsMotivoFiltro);
+  if (term) {
+    rows = rows.filter(r =>
+      (r.nome||'').toUpperCase().includes(term) ||
+      String(r.matricula||'').includes(term) ||
+      (r.cargo||'').toUpperCase().includes(term) ||
+      (r.motivo||'').toUpperCase().includes(term));
+  }
+  return rows.sort((a,b) => (b.data_afastamento||'').localeCompare(a.data_afastamento||''));
+}
+
+function hcAbsenteismoPeriodLabel() {
+  const period = window._hcAbsPeriod || '12m';
+  if (period === '12m')   return 'Últimos 12 meses';
+  if (period === 'todos') return 'Todo o período';
+  if (period === 'custom') {
+    const de  = window._hcAbsFrom ? hcFmtISODate(window._hcAbsFrom) : 'início';
+    const ate = window._hcAbsTo   ? hcFmtISODate(window._hcAbsTo)   : 'hoje';
+    return `De ${de} até ${ate}`;
+  }
+  return adhMonthLabel(period);
+}
+
+function hcAbsenteismoFilterPanelHTML() {
+  const meses = [...new Set(hcAbsenteismoAllForBase(window._hcAbsPcdOnly).map(r => String(r.data_afastamento).slice(0,7)))].sort().reverse();
+  const period = window._hcAbsPeriod || '12m';
+  const quick = [['12m','Últimos 12 meses'], ['todos','Tudo'], ...meses.slice(0,18).map(m => [m, adhMonthLabel(m)])];
+  return `
+    <div class="hc-desl-filter-panel" id="hc-abs-filter-panel" style="display:none">
+      <div class="hc-desl-filter-quick">
+        ${quick.map(([v,label]) => `<button class="${period===v?'active':''}" onclick="hcSetAbsenteismoPeriod('${v}')">${label}</button>`).join('')}
+      </div>
+      <div class="hc-desl-filter-custom">
+        <div class="hc-desl-filter-custom-label">Ou escolha um período personalizado</div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <input type="date" id="hc-abs-from" class="adm-input" style="width:auto" value="${window._hcAbsFrom||''}">
+          <span style="color:var(--text-muted);font-size:12px">até</span>
+          <input type="date" id="hc-abs-to" class="adm-input" style="width:auto" value="${window._hcAbsTo||''}">
+          <button class="adh-refresh-btn" onclick="hcApplyAbsenteismoCustomRange()">Aplicar</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function hcToggleAbsenteismoFilter() {
+  const panel = document.getElementById('hc-abs-filter-panel');
+  if (!panel) return;
+  panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+}
+
+function hcSetAbsenteismoPeriod(value) {
+  window._hcAbsPeriod = value;
+  hcRenderAbsenteismo(window._hcCurrentEl);
+}
+
+function hcApplyAbsenteismoCustomRange() {
+  window._hcAbsFrom = document.getElementById('hc-abs-from').value || null;
+  window._hcAbsTo   = document.getElementById('hc-abs-to').value || null;
+  window._hcAbsPeriod = 'custom';
+  hcRenderAbsenteismo(window._hcCurrentEl);
+}
+
+function hcAbsenteismoTogglePcd() {
+  window._hcAbsPcdOnly = !window._hcAbsPcdOnly;
+  hcRenderAbsenteismo(window._hcCurrentEl);
+}
+
+function hcAbsenteismoFiltrarPorMotivo(motivo) {
+  window._hcAbsMotivoFiltro = (window._hcAbsMotivoFiltro === motivo) ? null : motivo;
+  hcRenderAbsenteismo(window._hcCurrentEl);
+}
+
+function hcSetAbsenteismoSearch(value) {
+  window._hcAbsSearch = value;
+  const body = document.getElementById('hc-abs-tbody');
+  if (body) body.innerHTML = hcAbsenteismoRowsHTML();
+  const countEl = document.getElementById('hc-abs-count');
+  if (countEl) { const n = hcAbsenteismoFilteredRows().length; countEl.textContent = `${n.toLocaleString('pt-BR')} evento${n===1?'':'s'}`; }
+}
+
+function hcAbsenteismoSortByCol(field, thEl) {
+  const cur = window._hcAbsSort || {};
+  const dir = (cur.field === field) ? -(cur.dir || 1) : 1;
+  window._hcAbsSort = { field, dir };
+  document.querySelectorAll('#hc-abs-table th[data-sort]').forEach(th => th.classList.remove('adh-sort-asc','adh-sort-desc'));
+  if (thEl) thEl.classList.add(dir === 1 ? 'adh-sort-asc' : 'adh-sort-desc');
+  const body = document.getElementById('hc-abs-tbody');
+  if (body) body.innerHTML = hcAbsenteismoRowsHTML();
+}
+
+function hcAbsenteismoRowsHTML() {
+  let rows = hcAbsenteismoFilteredRows();
+  const sort = window._hcAbsSort;
+  if (sort) rows = hcSortListGeneric(rows, sort.field, sort.dir);
+  if (!rows.length) {
+    return `<tr><td colspan="8" style="padding:24px 10px;text-align:center;color:var(--text-muted);font-size:12px">Nenhum afastamento encontrado nesse período.</td></tr>`;
+  }
+  return rows.map(r => `<tr class="adh-colab-row">
+    <td style="font-family:monospace">${r.matricula}</td>
+    <td>${r.filial||''}</td>
+    <td style="font-weight:500">${r.nome||''}</td>
+    <td>${r.cargo||''}</td>
+    <td class="r">${r.ch?r.ch+'h':'—'}</td>
+    <td>${r.motivo||'—'}</td>
+    <td class="r">${r.dias?r.dias+' dias':'—'}</td>
+    <td>${hcFmtISODate(r.data_afastamento)||'—'}</td>
+  </tr>`).join('');
+}
+
+// Motivos mais comuns — mesmo molde do hcMovCausaHTML (causa de
+// desligamento), clicável pra filtrar a lista abaixo por aquele motivo.
+function hcAbsenteismoMotivosHTML() {
+  const rows = hcAbsenteismoFilteredRows();
+  const porMotivo = new Map();
+  rows.forEach(r => {
+    const motivo = r.motivo || 'Não informado';
+    porMotivo.set(motivo, (porMotivo.get(motivo)||0)+1);
+  });
+  const motivos = [...porMotivo.entries()].sort((a,b) => b[1]-a[1]);
+  if (!motivos.length) return '';
+  const total = rows.length;
+  const max = Math.max(1, ...motivos.map(m=>m[1]));
+
+  return `
+    <div class="hc-panel" style="margin-bottom:16px">
+      <div class="hc-panel-title" style="margin-bottom:12px">Motivos mais comuns</div>
+      ${motivos.slice(0,10).map(([motivo,n]) => { const ativo = window._hcAbsMotivoFiltro === motivo; return `
+        <div onclick="hcAbsenteismoFiltrarPorMotivo('${motivo.replace(/'/g,"\\'")}')" style="display:flex;align-items:center;gap:10px;margin-bottom:8px;cursor:pointer;border-radius:6px;background:${ativo?'rgba(0,160,210,.1)':'transparent'};padding:3px 6px;margin-left:-6px" title="Clique pra ver quem teve esse motivo">
+          <div style="width:220px;font-size:12px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${motivo}">${motivo}</div>
+          <div style="flex:1;height:16px;border-radius:3px;overflow:hidden;background:rgba(255,255,255,.05)">
+            <div style="width:${Math.round(n/max*100)}%;height:100%;background:#fc8181"></div>
+          </div>
+          <div style="width:50px;text-align:right;font-size:11px;color:var(--text-secondary)">${Math.round(n/total*1000)/10}%</div>
+          <div style="width:34px;text-align:right;font-size:13px;font-weight:700;color:var(--text-primary)">${n}</div>
+        </div>
+      `; }).join('')}
+    </div>`;
+}
+
+function hcOpenAbsenteismo() {
+  hcRenderAbsenteismo(window._hcCurrentEl);
+}
+
+// Card da tela principal abre já filtrado no mês atual — e, pro clique
+// num motivo específico do "top 3", já filtra por esse motivo também.
+function hcOpenAbsenteismoMesAtual() {
+  const hoje = new Date();
+  window._hcAbsPeriod = `${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}`;
+  window._hcAbsMotivoFiltro = null;
+  hcRenderAbsenteismo(window._hcCurrentEl);
+}
+function hcOpenAbsenteismoMotivo(motivo) {
+  const hoje = new Date();
+  window._hcAbsPeriod = `${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}`;
+  window._hcAbsMotivoFiltro = motivo;
+  hcRenderAbsenteismo(window._hcCurrentEl);
+}
+
+function hcRenderAbsenteismo(el) {
+  if (window._hcAbsPeriod == null) window._hcAbsPeriod = '12m';
+  const rows = hcAbsenteismoFilteredRows();
+
+  el.innerHTML = `
+    <div class="hc-wrap">
+      <div class="hc-header">
+        <div style="display:flex;align-items:center;gap:12px">
+          <button class="adh-back-btn" onclick="hcRenderMain(window._hcCurrentEl)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
+            </svg>
+          </button>
+          <div style="position:relative">
+            <h1 class="page-title">Absenteísmo</h1>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+              ${hcBaseSelectorHTML('hcRenderAbsenteismo')}
+              <button class="hc-desl-filter-trigger" onclick="hcToggleAbsenteismoFilter()">
+                <i class="ti ti-filter" aria-hidden="true"></i> ${hcAbsenteismoPeriodLabel()} <i class="ti ti-chevron-down" aria-hidden="true"></i>
+              </button>
+              <button class="hc-desl-filter-trigger${window._hcAbsPcdOnly?' active':''}" onclick="hcAbsenteismoTogglePcd()" title="Mostrar só afastamentos de colaboradores PCD">
+                <i class="ti ${window._hcAbsPcdOnly?'ti-square-rounded-check-filled':'ti-accessible'}" aria-hidden="true"></i> Só PCD
+              </button>
+              <span class="page-sub" style="margin:0"><span id="hc-abs-count">${rows.length.toLocaleString('pt-BR')} evento${rows.length===1?'':'s'}</span></span>
+            </div>
+            ${hcAbsenteismoFilterPanelHTML()}
+          </div>
+        </div>
+      </div>
+
+      ${hcExemploChartHTML(hcAbsenteismoAllForBase(window._hcAbsPcdOnly), 'data_afastamento', window._hcAbsPeriod, '#fc8181', 'hcSetAbsenteismoPeriod')}
+      ${hcAbsenteismoMotivosHTML()}
+
+      <div class="hc-panel">
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+          <div class="adh-search-wrap" style="max-width:340px;margin-bottom:0">
+            <i class="ti ti-search" aria-hidden="true"></i>
+            <input type="text" class="adh-search-input" placeholder="Buscar por nome, matrícula, cargo ou motivo..." oninput="hcSetAbsenteismoSearch(this.value)" value="${window._hcAbsSearch||''}">
+          </div>
+          ${window._hcAbsMotivoFiltro ? `<span class="hc-grupo-clear" onclick="hcAbsenteismoFiltrarPorMotivo(null)" style="cursor:pointer"><i class="ti ti-x" aria-hidden="true"></i> Filtrado: ${window._hcAbsMotivoFiltro}</span>` : ''}
+          <button class="adh-refresh-btn" style="margin-left:auto" onclick="hcExportarExcel(hcAbsenteismoFilteredRows(), [
+            {header:'Matrícula',field:'matricula'},{header:'Filial',field:'filial'},{header:'Nome',field:'nome'},
+            {header:'Cargo',field:'cargo'},{header:'CH',field:'ch'},{header:'Motivo',field:'motivo'},
+            {header:'Dias',field:'dias'},{header:'Data',field:'data_afastamento',fmt:hcFmtISODate}
+          ], 'absenteismo.xlsx')"><i class="ti ti-download" aria-hidden="true"></i> Exportar Excel</button>
+        </div>
+        <div class="adh-colab-table-wrap">
+          <table class="adh-colab-table" id="hc-abs-table">
+            <thead><tr>
+              <th data-sort="matricula" onclick="hcAbsenteismoSortByCol('matricula',this)">Matrícula</th>
+              <th data-sort="filial"    onclick="hcAbsenteismoSortByCol('filial',this)">Filial</th>
+              <th data-sort="nome"      onclick="hcAbsenteismoSortByCol('nome',this)">Nome</th>
+              <th data-sort="cargo"     onclick="hcAbsenteismoSortByCol('cargo',this)">Cargo</th>
+              <th class="r" data-sort="ch" onclick="hcAbsenteismoSortByCol('ch',this)">CH</th>
+              <th data-sort="motivo"    onclick="hcAbsenteismoSortByCol('motivo',this)">Motivo</th>
+              <th class="r" data-sort="dias" onclick="hcAbsenteismoSortByCol('dias',this)">Dias</th>
+              <th data-sort="data_afastamento" onclick="hcAbsenteismoSortByCol('data_afastamento',this)">Data</th>
+            </tr></thead>
+            <tbody id="hc-abs-tbody">${hcAbsenteismoRowsHTML()}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+}
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.hc-desl-filter-panel') && !e.target.closest('.hc-desl-filter-trigger')) {
+    const panel = document.getElementById('hc-abs-filter-panel');
     if (panel) panel.style.display = 'none';
   }
 });

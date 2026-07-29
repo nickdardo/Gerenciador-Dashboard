@@ -274,6 +274,47 @@ async function adhEnsureRoster() {
   } catch (e) { console.warn('[aderencia] ensureRoster:', e.message); }
 }
 
+// "Horas extras"/"Saldo HE" direto da folha (tabela aderencia_folha,
+// alimentada pelo upload de HorasExtras.xls no Admin) — quando existe pro
+// mês, usamos esse valor em vez de recalcular do ponto batido, pra bater
+// 1:1 com o BI (Capacity). Cacheado por mês, igual o resto.
+async function adhEnsureFolhaMap(mes) {
+  if (window._adhFolhaMes === mes && window._adhFolhaMap) return;
+  const mapa = new Map(); // "filial|matricula" -> {he_feita, horas_ausencia, horas_diarias}
+  try {
+    const { data, error } = await db.from('aderencia_folha')
+      .select('filial,matricula,he_feita,horas_ausencia,horas_diarias')
+      .eq('mes', mes);
+    if (error) throw new Error(error.message);
+    for (const r of (data||[])) {
+      mapa.set(`${(r.filial||'').toUpperCase()}|${r.matricula}`, {
+        he_feita: r.he_feita||0, horas_ausencia: r.horas_ausencia||0, horas_diarias: r.horas_diarias||0,
+      });
+    }
+  } catch(e) {
+    console.warn('[aderencia] folha:', e.message);
+  }
+  window._adhFolhaMap = mapa;
+  window._adhFolhaMes = mes;
+}
+
+// Soma HE Feita / Horas Ausência da folha pra uma base (ou todas, se
+// base=null). Retorna null se não tiver nenhum dado de folha pro mês —
+// aí quem chamar sabe que precisa cair pro cálculo via ponto batido.
+function adhFolhaTotais(base) {
+  const mapa = window._adhFolhaMap;
+  if (!mapa || !mapa.size) return null;
+  let heFeita = 0, ausencia = 0, achou = false;
+  for (const [key, d] of mapa) {
+    const filial = key.split('|')[0];
+    if (base && filial !== base.toUpperCase()) continue;
+    heFeita  += d.he_feita;
+    ausencia += d.horas_ausencia;
+    achou = true;
+  }
+  return achou ? { heFeita, ausencia } : null;
+}
+
 // ── In-memory computed data ───────────────────────────
 // Built once per session when files are loaded
 let adhBaseKPI  = null;  // Map<base, {minProg, desvio, he, falta, colabs}>
@@ -583,6 +624,7 @@ async function pageAderencia(el) {
         console.log(`[aderencia] Loaded from localStorage cache (${mes})`);
         // Skip loading, go straight to render
         await rosterPromise;
+        await adhEnsureFolhaMap(mes);
         if (role === 'admin') { adhRenderMultiBase(el); return; }
         const myBase = bases[0] || null; // '*' não dá mais visão de todas as bases pra quem não é admin
         if (!myBase) { showNoBaseAssigned(); return; }
@@ -640,10 +682,11 @@ async function pageAderencia(el) {
         localStorage.setItem(CACHE_TS, Date.now().toString());
       } catch(_) {}
 
-      if (role === 'admin') { await rosterPromise; adhRenderMultiBase(el); return; }
+      if (role === 'admin') { await rosterPromise; await adhEnsureFolhaMap(mes); adhRenderMultiBase(el); return; }
       const myBase = bases[0] || null; // '*' não dá mais visão de todas as bases pra quem não é admin
       if (!myBase) { showNoBaseAssigned(); return; }
       await rosterPromise;
+      await adhEnsureFolhaMap(mes);
       adhRenderDetalhe(el, myBase, false);
       return;
     }
@@ -684,6 +727,8 @@ async function pageAderencia(el) {
   if (mes === adhCurrentMonth() && typeof adminPrecomputeAderencia === 'function') {
     adminPrecomputeAderencia(mes).catch(console.warn);
   }
+
+  await adhEnsureFolhaMap(mes);
 
   if (role === 'admin') {
     adhRenderMultiBase(el);
@@ -777,6 +822,12 @@ async function adhRenderMultiBase(el) {
   // "Horas compensadas" = déficit de ponto (horas não batidas), por
   // definição do negócio: quem não bateu ponto teve essa hora tratada como
   // compensada — mesmo conceito do "Compensada" no BI (Capacity).
+  // Se a folha (HorasExtras.xls) já foi carregada pra esse mês, usa os
+  // números dela em vez de recalcular do ponto — bate certinho com o BI.
+  const folhaTot = adhFolhaTotais(null);
+  const usaFolha = !!folhaTot;
+  const horasExtrasVal = usaFolha ? folhaTot.heFeita  : totHE;
+  const compensadaVal  = usaFolha ? folhaTot.ausencia : totFalta;
 
   // Comparação real com o mês anterior — cacheada por mês (evita refetch a
   // cada busca/página; só busca de novo se o mês selecionado mudou).
@@ -871,9 +922,9 @@ async function adhRenderMultiBase(el) {
           adhDeltaRow(global, prevGlobal),
         ]},
         { key:'amber', icon:'ti-clock-hour-4', title:'Horas', rows: [
-          { label:'Horas extras', sub:'total no mês (HE Feita)', value: adhFmtH(totHE) },
-          { label:'Horas compensadas', sub:'déficit de ponto no mês', value: adhFmtH(totFalta) },
-          { label:'Saldo HE', sub:'extras − compensadas', value: `${totHE-totFalta>=0?'+':'−'}${adhFmtH(totHE-totFalta)}`, color: adhSaldoColor(totHE-totFalta, totHE) },
+          { label:'Horas extras', sub: usaFolha ? 'total no mês (HE Feita) · dados da folha' : 'total no mês (HE Feita) · calculado do ponto', value: adhFmtH(horasExtrasVal) },
+          { label:'Horas compensadas', sub: usaFolha ? 'ausência na folha, no mês' : 'déficit de ponto no mês', value: adhFmtH(compensadaVal) },
+          { label:'Saldo HE', sub:'extras − compensadas', value: `${horasExtrasVal-compensadaVal>=0?'+':'−'}${adhFmtH(horasExtrasVal-compensadaVal)}`, color: adhSaldoColor(horasExtrasVal-compensadaVal, horasExtrasVal) },
         ]},
         { key:'purple', icon:'ti-users', title:'Colaboradores', rows: [
           { label:'Ativos', sub:'cadastro atual', value: (window.eoColabs?.size || totColabs).toLocaleString('pt-BR') },
@@ -916,7 +967,12 @@ function adhSaldoRankingCardHTML() {
   if (!adhBaseKPI?.size) return '<div class="adh-exec-panel-title">Ranking de bases · Saldo HE</div><div style="font-size:12px;color:var(--text-muted);padding:8px 0">Sem dados.</div>';
 
   const bases = [...adhBaseKPI.entries()]
-    .map(([filial, d]) => ({ filial, saldo: (d.he_h||0) - (d.falta_h||0), extras: d.he_h||0 }))
+    .map(([filial, d]) => {
+      const folha = adhFolhaTotais(filial);
+      const extras = folha ? folha.heFeita  : (d.he_h||0);
+      const comp   = folha ? folha.ausencia : (d.falta_h||0);
+      return { filial, saldo: extras - comp, extras };
+    })
     .sort((a,b) => b.saldo - a.saldo);
 
   const rowsHTML = bases.map((b, i) => {
@@ -1300,6 +1356,12 @@ function adhRenderDetalhe(el, base, showBack) {
   const fat_h  = bk ? bk.falta_h: [...adhBaseKPI.values()].reduce((a,d)=>a+d.falta_h,0);
   const prog_h = bk ? bk.prog_h  : [...adhBaseKPI.values()].reduce((a,d)=>a+d.prog_h,0);
   // "Horas compensadas" = déficit de ponto, mesmo conceito do "Compensada" no BI.
+  // Se a folha (HorasExtras.xls) já foi carregada pra esse mês/base, usa os
+  // números dela em vez de recalcular do ponto — bate certinho com o BI.
+  const folhaTotBase = adhFolhaTotais(base);
+  const usaFolhaBase = !!folhaTotBase;
+  const horasExtrasValBase = usaFolhaBase ? folhaTotBase.heFeita  : he_h;
+  const compensadaValBase  = usaFolhaBase ? folhaTotBase.ausencia : fat_h;
 
   // Build collaborator list for this base — merges the FULL roster
   // (colaboradores table, window.eoColabs) with the computed KPI, so people
@@ -1374,9 +1436,9 @@ function adhRenderDetalhe(el, base, showBack) {
           { label:'Horas programadas', sub:'base do cálculo', value: adhFmtH(prog_h) },
         ]},
         { key:'amber', icon:'ti-clock-hour-4', title:'Horas', rows: [
-          { label:'Horas extras', sub:'no mês (HE Feita)', value: adhFmtH(he_h) },
-          { label:'Horas compensadas', sub:'déficit de ponto no mês', value: adhFmtH(fat_h) },
-          { label:'Saldo HE', sub:'extras − compensadas', value: `${he_h-fat_h>=0?'+':'−'}${adhFmtH(he_h-fat_h)}`, color: adhSaldoColor(he_h-fat_h, he_h) },
+          { label:'Horas extras', sub: usaFolhaBase ? 'no mês (HE Feita) · dados da folha' : 'no mês (HE Feita) · calculado do ponto', value: adhFmtH(horasExtrasValBase) },
+          { label:'Horas compensadas', sub: usaFolhaBase ? 'ausência na folha, no mês' : 'déficit de ponto no mês', value: adhFmtH(compensadaValBase) },
+          { label:'Saldo HE', sub:'extras − compensadas', value: `${horasExtrasValBase-compensadaValBase>=0?'+':'−'}${adhFmtH(horasExtrasValBase-compensadaValBase)}`, color: adhSaldoColor(horasExtrasValBase-compensadaValBase, horasExtrasValBase) },
         ]},
         { key:'purple', icon:'ti-users', title:'Colaboradores', rows: [
           { label:'Total', sub: base ? 'nesta base' : 'todas as bases', value: colabs.toLocaleString('pt-BR') },

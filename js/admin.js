@@ -50,6 +50,8 @@ const adminFiles = {
   ferias:        null,  // { count, date, data: Map<mat, {data_inicio,data_fim,dias}> }
   desligados:    null,  // { count, date, data: Map<mat, {data_demissao,causa_texto}> }
   pcd:           null,  // { count, date, data: Map<mat, {deficiencia,base}> }
+  horasextrasfolha: null, // { count, mes, date } — HE/Compensada/Saldo prontos da folha
+  absenteismo:   null,  // { count, date } — histórico de afastamentos
 };
 
 // ── Entry point ───────────────────────────────────────
@@ -381,6 +383,18 @@ function adminFilesTab() {
         ? `${adminFiles.malha.count.toLocaleString()} voos · ${adminFiles.malha.bases} bases · ${adminFiles.malha.period}`
         : null,
     },
+    {
+      key: 'horasextrasfolha',
+      icon: 'ti-clock-dollar',
+      color: '#f6ad55',
+      name: 'Horas Extras (Folha)',
+      desc: 'HorasExtras.xls · HE/Compensada/Saldo prontos da folha — bate com o BI',
+      accept: '.xls,.xlsx',
+      fn: 'adminLoadHorasExtrasFolha',
+      info: adminFiles.horasextrasfolha
+        ? `${adminFiles.horasextrasfolha.count.toLocaleString()} colaboradores · ${adminFiles.horasextrasfolha.mes}`
+        : null,
+    },
   ];
 
   // Arquivos complementares de colaboradores — renderizados como sub-linhas
@@ -415,6 +429,16 @@ function adminFilesTab() {
       accept: '.xls,.xlsx',
       fn: 'adminLoadPcd',
       info: adminFiles.pcd ? `${adminFiles.pcd.count.toLocaleString()} colaboradores` : null,
+    },
+    {
+      key: 'absenteismo',
+      icon: 'ti-calendar-off',
+      color: '#fc8181',
+      name: 'Absenteísmo',
+      desc: 'HRCL107.xlsx (afastamentos) · atenção: nome de arquivo igual ao de Férias, subir manualmente aqui',
+      accept: '.xls,.xlsx',
+      fn: 'adminLoadAbsenteismo',
+      info: adminFiles.absenteismo ? `${adminFiles.absenteismo.count.toLocaleString()} eventos` : null,
     },
   ];
 
@@ -778,6 +802,178 @@ async function adminLoadPcd(input) {
     } catch(err) {
       adminSetFileStatus('pcd', 'Erro: ' + err.message, 'err');
       console.error('[adminLoadPcd]', err);
+    }
+  };
+  r.readAsArrayBuffer(file);
+}
+
+// ── Horas Extras (Folha) — HorasExtras.xls ─────────────
+// Cada colaborador tem 3 linhas fixas (uma por Totalizador), com os dias
+// do mês como colunas e uma coluna "Total" já pronta por linha:
+//   101 = Horas Excedentes → HE Feita
+//   102 = Horas Ausencia   → "Compensada" do BI
+//   105 = Horas Diarias    → carga diária programada (baseline)
+// Colunas (índice 0-based via header:1): 0 ID, 1 Matrícula, 2 Nome,
+// 3 (vazio), 4 Filial, 5 Cargo, 6 Totalizador, 7 Descrição,
+// 8 C.Hor. (texto "210:00"), 9 Total, 10+ dias do mês (cabeçalho
+// "DD/MM/AAAA" — usado só pra descobrir qual mês é esse arquivo).
+async function adminLoadHorasExtrasFolha(input) {
+  const file = input.files[0];
+  if (!file) return;
+  adminSetFileStatus('horasextrasfolha', 'Lendo arquivo...', 'load');
+
+  const r = new FileReader();
+  r.onload = async e => {
+    try {
+      const wb   = XLSX.read(e.target.result, { type:'array' });
+      const ws   = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:true });
+
+      // Descobre o mês pelo cabeçalho de dia (ex.: "01/07/2026" → "2026-07")
+      let mes = null;
+      for (const cell of (rows[0] || [])) {
+        const m = String(cell||'').match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+        if (m) { mes = `${m[3]}-${m[2].padStart(2,'0')}`; break; }
+      }
+      if (!mes) throw new Error('Não consegui identificar o mês pelo cabeçalho do arquivo (esperava datas tipo "01/07/2026").');
+
+      const porMat = new Map(); // matricula -> {filial,nome,cargo,ch,he_feita,horas_ausencia,horas_diarias}
+      rows.forEach((row, i) => {
+        if (i === 0 || !row) return;
+        const matRaw = String(row[1]||'').trim();
+        if (!matRaw || isNaN(parseInt(matRaw))) return;
+        const mat = matRaw.padStart(6, '0');
+        if (!porMat.has(mat)) {
+          porMat.set(mat, {
+            filial: String(row[4]||'').trim().toUpperCase(),
+            nome: String(row[2]||'').trim(),
+            cargo: String(row[5]||'').trim(),
+            ch: parseInt(String(row[8]||'').trim()) || null,
+            he_feita: 0, horas_ausencia: 0, horas_diarias: 0,
+          });
+        }
+        const acc = porMat.get(mat);
+        const totalizador = parseInt(row[6]);
+        const total = parseFloat(row[9]) || 0;
+        if (totalizador === 101) acc.he_feita = total;
+        else if (totalizador === 102) acc.horas_ausencia = total;
+        else if (totalizador === 105) acc.horas_diarias = total;
+      });
+
+      const records = [...porMat.entries()].map(([mat, d]) => ({
+        filial: d.filial, matricula: mat, nome: d.nome, cargo: d.cargo, ch: d.ch, mes,
+        he_feita: d.he_feita, horas_ausencia: d.horas_ausencia, horas_diarias: d.horas_diarias,
+        updated_at: new Date(),
+      }));
+
+      const total = records.length;
+      adminSetFileStatus('horasextrasfolha', `Gravando ${total.toLocaleString()} no banco...`, 'load');
+
+      const BATCH = 1000;
+      let saved = 0;
+      for (let i = 0; i < records.length; i += BATCH) {
+        const batch = records.slice(i, i + BATCH);
+        const { error } = await db.from('aderencia_folha')
+          .upsert(batch, { onConflict: 'filial,matricula,mes' });
+        if (error) throw new Error(error.message);
+        saved += batch.length;
+        adminSetFileStatus('horasextrasfolha', `Gravando... ${saved}/${total}`, 'load');
+      }
+
+      adminFiles.horasextrasfolha = { count: total, mes, date: new Date().toLocaleDateString('pt-BR') };
+      adminSetFileStatus('horasextrasfolha', `✓ ${total.toLocaleString()} colaboradores · ${mes}`, 'ok');
+      adminAddHistory('horasextrasfolha', file.name);
+      input.value = '';
+    } catch(err) {
+      adminSetFileStatus('horasextrasfolha', 'Erro: ' + err.message, 'err');
+      console.error('[adminLoadHorasExtrasFolha]', err);
+    }
+  };
+  r.readAsArrayBuffer(file);
+}
+
+// ── Absenteísmo (HRCL107 — afastamentos) ───────────────
+// Atenção: mesmo nome de arquivo "HRCL107" já usado pra Férias no
+// ADM_BATCH_PATTERNS — esse aqui é um relatório diferente (afastamentos,
+// não férias), então não entra no upload em lote automático por nome;
+// precisa subir pelo botão manual aqui.
+// Colunas (índice 0-based): 0 Cadastro, 1 Nome, 4 Cargo, 7 C.Horária
+// (código bruto, ex.: 8.75 = 210h), 8 Filial, 9 Admissão, 10 Afastam.
+// (data do evento), 11 Situação Afastamento (código), 12 Dias,
+// 13 Término (na verdade é o motivo/descrição, ex.: "Atestado Medico"),
+// 14 CID.
+const ADM_CH_MAP = [
+  [2.5, 60], [3.75, 90], [4.1666667, 100], [5, 120],
+  [6.25, 150], [7.5, 180], [8.75, 210], [9.1666667, 220],
+];
+function adminChFromCodigo(v) {
+  const n = parseFloat(v);
+  if (isNaN(n)) return null;
+  for (const [codigo, horas] of ADM_CH_MAP) {
+    if (Math.abs(codigo - n) < 0.001) return horas;
+  }
+  return Math.round(n * 24); // fallback — não deveria acontecer com os códigos conhecidos
+}
+
+async function adminLoadAbsenteismo(input) {
+  const file = input.files[0];
+  if (!file) return;
+  adminSetFileStatus('absenteismo', 'Lendo arquivo...', 'load');
+
+  const r = new FileReader();
+  r.onload = async e => {
+    try {
+      const wb   = XLSX.read(e.target.result, { type:'array' });
+      const ws   = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:true });
+
+      const records = [];
+      rows.forEach(row => {
+        if (!row || row[0] == null) return;
+        const matRaw = String(row[0]).trim();
+        if (!matRaw || isNaN(parseInt(matRaw))) return; // pula cabeçalho/marcador de seção
+        const mat = matRaw.padStart(6, '0');
+        const data_afastamento = adminXlsToISODate(row[10]);
+        if (!data_afastamento) return;
+        const diasRaw = row[12];
+        const dias = (diasRaw != null && diasRaw !== '-') ? (parseInt(diasRaw) || 1) : 1;
+        records.push({
+          matricula: mat,
+          nome: String(row[1]||'').trim(),
+          cargo: String(row[4]||'').trim(),
+          ch: adminChFromCodigo(row[7]),
+          filial: String(row[8]||'').trim().toUpperCase(),
+          data_admissao: adminXlsToISODate(row[9]),
+          data_afastamento,
+          situacao_codigo: String(row[11]||'').trim(),
+          motivo: String(row[13]||'').trim(),
+          dias,
+          cid: row[14] != null ? String(row[14]).trim() : null,
+          updated_at: new Date(),
+        });
+      });
+
+      const total = records.length;
+      adminSetFileStatus('absenteismo', `Gravando ${total.toLocaleString()} no banco...`, 'load');
+
+      const BATCH = 500;
+      let saved = 0;
+      for (let i = 0; i < records.length; i += BATCH) {
+        const batch = records.slice(i, i + BATCH);
+        const { error } = await db.from('colaboradores_absenteismo')
+          .upsert(batch, { onConflict: 'matricula,data_afastamento,situacao_codigo' });
+        if (error) throw new Error(error.message);
+        saved += batch.length;
+        adminSetFileStatus('absenteismo', `Gravando... ${saved}/${total}`, 'load');
+      }
+
+      adminFiles.absenteismo = { count: total, date: new Date().toLocaleDateString('pt-BR') };
+      adminSetFileStatus('absenteismo', `✓ ${total.toLocaleString()} eventos históricos`, 'ok');
+      adminAddHistory('absenteismo', file.name);
+      input.value = '';
+    } catch(err) {
+      adminSetFileStatus('absenteismo', 'Erro: ' + err.message, 'err');
+      console.error('[adminLoadAbsenteismo]', err);
     }
   };
   r.readAsArrayBuffer(file);
