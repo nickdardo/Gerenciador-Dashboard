@@ -531,19 +531,19 @@ function hcRenderMain(el) {
         ]},
         { key:'red', icon:'ti-beach', title:'Férias', rows: [
           { label:'Ativas agora', sub:'colaboradores de férias hoje', value: stats.feriasAtivas.toLocaleString('pt-BR') },
-          { label:'Programadas', sub:'últimos 12 meses · clique para ver o mês atual', value: (stats.feriasProgramadas12m||0).toLocaleString('pt-BR'), color:'#b56666', onclick:'hcOpenFeriasMesAtual()' },
-          { label:'Previsto', sub:`início em ${stats.proxMesLabel} · clique para ver a lista`, value: (stats.feriasPrevistoProxMes||0).toLocaleString('pt-BR'), color:'#f6ad55', onclick:'hcOpenFeriasProxMes()' },
+          { label:'Programadas', sub:'últimos 12 meses · clique para ver o mês atual', value: (stats.feriasProgramadas12m||0).toLocaleString('pt-BR'), onclick:'hcOpenFeriasMesAtual()' },
+          { label:'Previsto', sub:`início em ${stats.proxMesLabel} · clique para ver a lista`, value: (stats.feriasPrevistoProxMes||0).toLocaleString('pt-BR'), onclick:'hcOpenFeriasProxMes()' },
         ]},
         { key:'purple', icon:'ti-transfer', title:'Movimentação', rows: [
           { label:'Admissões', sub:'últimos 12 meses · clique para ver a lista', value: stats.admissoes12m.toLocaleString('pt-BR'), color:'#5fa87a', onclick:'hcOpenAdmissoes()' },
           { label:'Desligados', sub:'últimos 12 meses · clique para ver a lista', value: stats.desligados12m.toLocaleString('pt-BR'), color:'#b56666', onclick:'hcOpenDesligados()' },
-          { label:'Relatório completo', sub:'admissões + desligados juntos, com gráfico e exportar Excel', value: '', onclick:'hcOpenMovimentacao()' },
+          { label:'Relatório completo', sub:'admissões + desligados juntos, com gráfico e exportar Excel', value: 'Abrir', onclick:'hcOpenMovimentacao()' },
         ]},
         { key:'red', icon:'ti-calendar-off', title:'Absenteísmo', rows: [
           { label:'Eventos no mês', sub:'todos os motivos · clique para ver a lista', value: (stats.absenteismoEventosMes||0).toLocaleString('pt-BR'), onclick:'hcOpenAbsenteismoMesAtual()' },
           ...stats.absenteismoTop3.map(([motivo,n]) => ({
             label: motivo, sub: 'no mês atual · clique para ver quem', value: n.toLocaleString('pt-BR'),
-            color:'#f6ad55', onclick:`hcOpenAbsenteismoMotivo('${motivo.replace(/'/g,"\\'")}')`,
+            onclick:`hcOpenAbsenteismoMotivo('${motivo.replace(/'/g,"\\'")}')`,
           })),
         ]},
       ], true)}
