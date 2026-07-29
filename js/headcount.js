@@ -831,9 +831,10 @@ function hcDeslTogglePcd() {
   hcRenderDesligados(window._hcCurrentEl);
 }
 
-function hcDeslAllForBase() {
+function hcDeslAllForBase(pcdOnly) {
   return (window.eoDesligadosAll || []).filter(r => {
     if (!hcBaseSelected(r.filial)) return false;
+    if (pcdOnly && !window.eoPcd?.has(r.matricula)) return false;
     return !!r.data_demissao;
   });
 }
@@ -844,7 +845,7 @@ function hcDeslFilteredRows() {
   const hoje = new Date();
   const ha12m = new Date(hoje.getFullYear(), hoje.getMonth()-12, hoje.getDate());
 
-  let rows = hcDeslAllForBase();
+  let rows = hcDeslAllForBase(window._hcDeslPcdOnly);
   if (period === '12m') {
     rows = rows.filter(r => { const d = new Date(r.data_demissao); return d >= ha12m && d <= hoje; });
   } else if (period === 'custom') {
@@ -859,7 +860,6 @@ function hcDeslFilteredRows() {
   } else if (period !== 'todos') {
     rows = rows.filter(r => String(r.data_demissao).slice(0,7) === period);
   }
-  if (window._hcDeslPcdOnly) rows = rows.filter(r => window.eoPcd?.has(r.matricula));
   if (term) {
     rows = rows.filter(r =>
       (r.nome||'').toUpperCase().includes(term) ||
@@ -977,7 +977,7 @@ function hcRenderDesligados(el) {
         </div>
       </div>
 
-      ${hcExemploChartHTML(hcDeslAllForBase(), 'data_demissao', window._hcDeslPeriod, '#b56666', 'hcSetDeslPeriod')}
+      ${hcExemploChartHTML(hcDeslAllForBase(window._hcDeslPcdOnly), 'data_demissao', window._hcDeslPeriod, '#b56666', 'hcSetDeslPeriod')}
 
       <div class="hc-panel">
         <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
@@ -1407,9 +1407,9 @@ function hcMovTogglePcd() {
   hcRenderMovimentacao(window._hcCurrentEl);
 }
 
-function hcMovAllForBase() {
-  const admissoes = hcAdmissoesAllForBase().map(r => ({ ...r, tipo: 'Admissão', data: r.admissao }));
-  const desligados = hcDeslAllForBase().map(r => ({ ...r, tipo: 'Desligamento', data: r.data_demissao }));
+function hcMovAllForBase(pcdOnly) {
+  const admissoes = hcAdmissoesAllForBase(pcdOnly).map(r => ({ ...r, tipo: 'Admissão', data: r.admissao }));
+  const desligados = hcDeslAllForBase(pcdOnly).map(r => ({ ...r, tipo: 'Desligamento', data: r.data_demissao }));
   return [...admissoes, ...desligados];
 }
 
@@ -1417,7 +1417,6 @@ function hcMovAllForBase() {
 // nos gráficos em si, só afeta a lista de colaboradores embaixo.
 function hcMovTabelaFiltrada() {
   let rows = hcMovFilteredRows();
-  if (window._hcMovPcdOnly) rows = rows.filter(r => window.eoPcd?.has(r.matricula));
   const extra = window._hcMovFiltroExtra;
   if (extra) {
     if (extra.tipo === 'mes')   rows = rows.filter(r => String(r.data).slice(0,7) === extra.valor);
@@ -1465,7 +1464,7 @@ function hcMovFilteredRows() {
   const hoje = new Date();
   const ha12m = new Date(hoje.getFullYear(), hoje.getMonth()-12, hoje.getDate());
 
-  let rows = hcMovAllForBase();
+  let rows = hcMovAllForBase(window._hcMovPcdOnly);
   if (period === '12m') {
     rows = rows.filter(r => { const d = new Date(r.data); return d >= ha12m && d <= hoje; });
   } else if (period === 'custom') {
@@ -1930,11 +1929,12 @@ function hcAdmTogglePcd() {
   hcRenderAdmissoes(window._hcCurrentEl);
 }
 
-function hcAdmissoesAllForBase() {
+function hcAdmissoesAllForBase(pcdOnly) {
   const out = [];
   if (window.eoColabs) {
     for (const [mat, r] of window.eoColabs) {
       if (!hcBaseSelected(r.station)) continue;
+      if (pcdOnly && !window.eoPcd?.has(mat)) continue;
       if (!r.admissao) continue;
       out.push({ matricula: mat, filial: r.station, nome: r.nome, cargo: r.funcao, ch: r.ch, admissao: r.admissao });
     }
@@ -1948,7 +1948,7 @@ function hcAdmissoesFilteredRows() {
   const hoje = new Date();
   const ha12m = new Date(hoje.getFullYear(), hoje.getMonth()-12, hoje.getDate());
 
-  let rows = hcAdmissoesAllForBase();
+  let rows = hcAdmissoesAllForBase(window._hcAdmPcdOnly);
   if (period === '12m') {
     rows = rows.filter(r => { const d = new Date(r.admissao); return d >= ha12m && d <= hoje; });
   } else if (period === 'custom') {
@@ -1963,7 +1963,6 @@ function hcAdmissoesFilteredRows() {
   } else if (period !== 'todos') {
     rows = rows.filter(r => String(r.admissao).slice(0,7) === period);
   }
-  if (window._hcAdmPcdOnly) rows = rows.filter(r => window.eoPcd?.has(r.matricula));
   if (term) {
     rows = rows.filter(r =>
       (r.nome||'').toUpperCase().includes(term) ||
@@ -2077,7 +2076,7 @@ function hcRenderAdmissoes(el) {
         </div>
       </div>
 
-      ${hcExemploChartHTML(hcAdmissoesAllForBase(), 'admissao', window._hcAdmPeriod, '#5fa87a', 'hcSetAdmPeriod')}
+      ${hcExemploChartHTML(hcAdmissoesAllForBase(window._hcAdmPcdOnly), 'admissao', window._hcAdmPeriod, '#5fa87a', 'hcSetAdmPeriod')}
 
       <div class="hc-panel">
         <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
