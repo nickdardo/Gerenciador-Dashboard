@@ -826,6 +826,11 @@ function hcOpenDesligados() {
   hcRenderDesligados(window._hcCurrentEl);
 }
 
+function hcDeslTogglePcd() {
+  window._hcDeslPcdOnly = !window._hcDeslPcdOnly;
+  hcRenderDesligados(window._hcCurrentEl);
+}
+
 function hcDeslAllForBase() {
   return (window.eoDesligadosAll || []).filter(r => {
     if (!hcBaseSelected(r.filial)) return false;
@@ -854,6 +859,7 @@ function hcDeslFilteredRows() {
   } else if (period !== 'todos') {
     rows = rows.filter(r => String(r.data_demissao).slice(0,7) === period);
   }
+  if (window._hcDeslPcdOnly) rows = rows.filter(r => window.eoPcd?.has(r.matricula));
   if (term) {
     rows = rows.filter(r =>
       (r.nome||'').toUpperCase().includes(term) ||
@@ -960,6 +966,9 @@ function hcRenderDesligados(el) {
               ${hcBaseSelectorHTML('hcRenderDesligados')}
               <button class="hc-desl-filter-trigger" onclick="hcToggleDeslFilter()">
                 <i class="ti ti-filter" aria-hidden="true"></i> ${hcDeslPeriodLabel()} <i class="ti ti-chevron-down" aria-hidden="true"></i>
+              </button>
+              <button class="hc-desl-filter-trigger${window._hcDeslPcdOnly?' active':''}" onclick="hcDeslTogglePcd()" title="Mostrar só desligamentos de colaboradores PCD">
+                <i class="ti ${window._hcDeslPcdOnly?'ti-square-rounded-check-filled':'ti-accessible'}" aria-hidden="true"></i> Só PCD
               </button>
               <span class="page-sub" style="margin:0"><span id="hc-desl-count">${rows.length.toLocaleString('pt-BR')} registro${rows.length===1?'':'s'}</span></span>
             </div>
@@ -1916,6 +1925,11 @@ function hcOpenAdmissoes() {
   hcRenderAdmissoes(window._hcCurrentEl);
 }
 
+function hcAdmTogglePcd() {
+  window._hcAdmPcdOnly = !window._hcAdmPcdOnly;
+  hcRenderAdmissoes(window._hcCurrentEl);
+}
+
 function hcAdmissoesAllForBase() {
   const out = [];
   if (window.eoColabs) {
@@ -1949,6 +1963,7 @@ function hcAdmissoesFilteredRows() {
   } else if (period !== 'todos') {
     rows = rows.filter(r => String(r.admissao).slice(0,7) === period);
   }
+  if (window._hcAdmPcdOnly) rows = rows.filter(r => window.eoPcd?.has(r.matricula));
   if (term) {
     rows = rows.filter(r =>
       (r.nome||'').toUpperCase().includes(term) ||
@@ -2051,6 +2066,9 @@ function hcRenderAdmissoes(el) {
               ${hcBaseSelectorHTML('hcRenderAdmissoes')}
               <button class="hc-desl-filter-trigger" onclick="hcToggleAdmFilter()">
                 <i class="ti ti-filter" aria-hidden="true"></i> ${hcAdmPeriodLabel()} <i class="ti ti-chevron-down" aria-hidden="true"></i>
+              </button>
+              <button class="hc-desl-filter-trigger${window._hcAdmPcdOnly?' active':''}" onclick="hcAdmTogglePcd()" title="Mostrar só admissões de colaboradores PCD">
+                <i class="ti ${window._hcAdmPcdOnly?'ti-square-rounded-check-filled':'ti-accessible'}" aria-hidden="true"></i> Só PCD
               </button>
               <span class="page-sub" style="margin:0"><span id="hc-adm-count">${rows.length.toLocaleString('pt-BR')} registro${rows.length===1?'':'s'}</span></span>
             </div>
