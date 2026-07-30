@@ -753,6 +753,17 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   }
   html += `</tr></thead><tbody>`;
 
+  // Linha pra adicionar por matrícula direto na tabela — digita e aperta
+  // Enter, o nome aparece sozinho (mesma busca do campo de cima). Fica no
+  // topo, sempre visível, em vez de escondida lá embaixo da lista.
+  html += `<tr>
+    <td style="border:${BORDA};padding:2px;position:sticky;left:0;background:var(--adh-surface)">
+      <input type="text" id="escala-add-inline" placeholder="+ matrícula" onkeydown="if(event.key==='Enter') escalaAdicionarPorMatriculaInline(this.value)"
+        style="width:100%;box-sizing:border-box;background:transparent;border:1px dashed var(--border-strong);border-radius:4px;color:var(--text-secondary);font-family:monospace;font-size:11px;padding:6px 8px">
+    </td>
+    <td colspan="${NCOLS-1}" style="border:${BORDA};padding:8px 10px;color:var(--text-muted);font-size:11px">digite a matrícula e aperte Enter — o nome aparece sozinho</td>
+  </tr>`;
+
   if (!colabs.length) {
     html += `<tr><td colspan="${NCOLS}" style="padding:24px;text-align:center;color:var(--text-muted);font-size:12.5px;border:${BORDA}">Nenhum colaborador ativo encontrado pra essa base+mês — busque por matrícula ou nome acima.</td></tr>`;
   }
@@ -772,7 +783,7 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     const conteudo = escalaConteudoDoMes(c, ano, mesNum, diasNoMes);
 
     html += `<tr style="background:${zebra}">`;
-    html += `<td style="padding:8px 10px;color:var(--text-muted);font-family:monospace;font-size:11px;position:sticky;left:0;background:inherit;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:${BORDA}">${c.matricula}</td>`;
+    html += `<td style="padding:2px 10px;position:sticky;left:0;background:inherit;border:${BORDA}"><input type="text" value="${c.matricula}" onchange="escalaEditarMatricula('${c.matricula}',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-primary);font-weight:500;text-overflow:ellipsis;padding:6px 0" title="Editar matrícula"></td>`;
     html += `<td style="padding:8px 10px;color:var(--text-primary);font-weight:500;position:sticky;left:${leftNome}px;background:inherit;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:${BORDA}" title="${c.nome||''}">${c.nome||''}
       <span onclick="escalaRemoverColab('${c.matricula}')" style="cursor:pointer;color:#fc8181;margin-left:4px" title="Remover da escala">✕</span></td>`;
     html += `<td style="padding:8px 10px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;border:${BORDA}">${setor}</td>`;
@@ -792,16 +803,6 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     });
     html += `</tr>`;
   });
-
-  // Linha extra pra adicionar por matrícula direto na tabela — digita e
-  // aperta Enter, o nome aparece sozinho (mesma busca do campo de cima).
-  html += `<tr>
-    <td style="border:${BORDA};padding:2px">
-      <input type="text" id="escala-add-inline" placeholder="+ matrícula" onkeydown="if(event.key==='Enter') escalaAdicionarPorMatriculaInline(this.value)"
-        style="width:100%;box-sizing:border-box;background:transparent;border:1px dashed var(--border-strong);border-radius:4px;color:var(--text-secondary);font-family:monospace;font-size:11px;padding:6px 8px">
-    </td>
-    <td colspan="${NCOLS-1}" style="border:${BORDA};padding:8px 10px;color:var(--text-muted);font-size:11px">digite a matrícula e aperte Enter — o nome aparece sozinho</td>
-  </tr>`;
 
   return html + `</tbody></table>`;
 }
@@ -841,14 +842,23 @@ async function escalaAdicionarColab(matricula) {
   const resultados = document.getElementById('escala-busca-resultados');
   if (resultados) resultados.style.display = 'none';
 
+  // Trava de segurança: nunca deixa entrar colaborador de outra base sem
+  // avisar — antes disso, digitar/colar uma matrícula de outra base entrava
+  // direto, sem nenhum aviso.
+  if (r && (r.station||'').toUpperCase() !== String(window._escalaBase||'').toUpperCase()) {
+    escalaMsg(`⚠ ${nome || 'Colaborador'} (matrícula ${matricula}) é da base ${r.station||'?'}, não de ${window._escalaBase} — não foi adicionado.`, true);
+    return false;
+  }
+
   const payload = {
     base: window._escalaBase, mes: window._escalaMes, matricula, nome,
     created_by: currentUserProfile?.id || currentUser?.id || null,
   };
   const { data, error } = await db.from('escala_colaborador').upsert(payload, { onConflict: 'base,mes,matricula' }).select().single();
-  if (error) { alert('Erro ao adicionar: ' + error.message); return; }
+  if (error) { alert('Erro ao adicionar: ' + error.message); return false; }
   window._escalaColabs = [...(window._escalaColabs||[]), data];
   escalaGradeAtualiza();
+  return true;
 }
 
 // Digitar a matrícula direto na última linha da tabela e apertar Enter —
@@ -864,8 +874,48 @@ async function escalaAdicionarPorMatriculaInline(matricula) {
     escalaMsg('Esse colaborador já está nessa escala.', true);
     return;
   }
-  await escalaAdicionarColab(matricula);
-  escalaMsg(`✓ ${window.eoColabs.get(matricula).nome} adicionado.`);
+  const ok = await escalaAdicionarColab(matricula);
+  if (ok) escalaMsg(`✓ ${window.eoColabs.get(matricula).nome} adicionado.`);
+}
+
+// Corrigir a matrícula de uma linha já existente na escala — troca o
+// colaborador daquela linha (remove o antigo, adiciona o novo), com a
+// mesma trava de base e de duplicidade dos outros caminhos de adicionar.
+async function escalaEditarMatricula(matriculaAntiga, novaMatriculaRaw) {
+  const novaMatricula = String(novaMatriculaRaw||'').trim();
+  if (!novaMatricula || novaMatricula === matriculaAntiga) { escalaGradeAtualiza(); return; }
+
+  const info = window.eoColabs?.get(novaMatricula);
+  if (!info) {
+    escalaMsg(`Matrícula "${novaMatricula}" não encontrada no cadastro.`, true);
+    escalaGradeAtualiza();
+    return;
+  }
+  if ((info.station||'').toUpperCase() !== String(window._escalaBase||'').toUpperCase()) {
+    escalaMsg(`⚠ ${info.nome} (matrícula ${novaMatricula}) é da base ${info.station||'?'}, não de ${window._escalaBase} — a matrícula não foi trocada.`, true);
+    escalaGradeAtualiza();
+    return;
+  }
+  if ((window._escalaColabs||[]).some(c => c.matricula === novaMatricula)) {
+    escalaMsg(`${info.nome} já está nessa escala.`, true);
+    escalaGradeAtualiza();
+    return;
+  }
+
+  const payload = {
+    base: window._escalaBase, mes: window._escalaMes, matricula: novaMatricula, nome: info.nome,
+    created_by: currentUserProfile?.id || currentUser?.id || null,
+  };
+  const { data, error } = await db.from('escala_colaborador').upsert(payload, { onConflict: 'base,mes,matricula' }).select().single();
+  if (error) { escalaMsg('Erro ao trocar matrícula: ' + error.message, true); escalaGradeAtualiza(); return; }
+
+  await db.from('escala_colaborador').delete().eq('base', window._escalaBase).eq('mes', window._escalaMes).eq('matricula', matriculaAntiga);
+  await db.from('escala_dia').delete().eq('base', window._escalaBase).eq('mes', window._escalaMes).eq('matricula', matriculaAntiga);
+
+  window._escalaColabs = (window._escalaColabs||[]).filter(c => c.matricula !== matriculaAntiga);
+  window._escalaColabs.push(data);
+  escalaGradeAtualiza();
+  escalaMsg(`✓ Matrícula corrigida — agora é ${info.nome} (${novaMatricula}).`);
 }
 
 async function escalaEditarHorario(matricula, campo, valor) {
