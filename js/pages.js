@@ -1054,6 +1054,30 @@ async function escalaTeveFAMesPassado(base, matricula, mesAtual) {
   return false;
 }
 
+// A sequência de dias trabalhados não zera na virada do mês — se a pessoa
+// já vinha trabalhando sem folga nos últimos dias de julho, o dia 1 de
+// agosto já entra "puxando" essa contagem. Olha o mês anterior só pra
+// referência (nunca mexe nele), contando pra trás a partir do último dia
+// até achar uma folga/férias/afastamento — isso vira o ponto de partida da
+// simulação do mês novo, em vez de sempre começar do zero no dia 1.
+async function escalaDiasSeguidosNoFimDoMesAnterior(base, matricula, mesAtual) {
+  const mesAnterior = escalaMesAnterior(mesAtual);
+  const [anoAnt, mesNumAnt] = mesAnterior.split('-').map(Number);
+  const diasNoMesAnterior = new Date(anoAnt, mesNumAnt, 0).getDate();
+
+  const { data } = await db.from('escala_dia').select('dia,status').eq('base', base).eq('matricula', matricula).eq('mes', mesAnterior);
+  const statusPorDia = new Map((data||[]).map(r => [r.dia, r.status]));
+
+  let seq = 0;
+  for (let d = diasNoMesAnterior; d >= 1; d--) {
+    const st = statusPorDia.get(d);
+    const folga = st === 'F' || st === 'FA' || st === 'J' || st === 'CH' || escalaEstaDeFerias(matricula, anoAnt, mesNumAnt, d);
+    if (folga) break;
+    seq++;
+  }
+  return seq;
+}
+
 async function escalaGerarFolgasAuto() {
   const colabs = window._escalaColabs || [];
   if (!colabs.length) { escalaMsg('Adicione pelo menos um colaborador antes.', true); return; }
@@ -1082,15 +1106,19 @@ async function escalaGerarFolgasAuto() {
     };
 
     // Passo 1 — regra obrigatória: nunca deixar passar de 6 dias seguidos
-    // trabalhados. Simula dia a dia; toda vez que a sequência chegaria no
-    // 7º dia sem folga, força uma folga no dia de MENOR demanda de voos
-    // dentro da janela em aberto (evita cair sempre no mesmo dia da semana).
+    // trabalhados. A sequência não começa do zero — puxa quantos dias
+    // seguidos a pessoa já vinha trabalhando no fim do mês anterior, pra
+    // não deixar passar de 6 logo nos primeiros dias do mês novo. Simula
+    // dia a dia; toda vez que a sequência chegaria no 7º dia sem folga,
+    // força uma folga no dia de MENOR demanda de voos dentro da janela em
+    // aberto (evita cair sempre no mesmo dia da semana).
     const folgasForcadas = new Set();
-    let seq = 0, inicioJanela = 1;
+    let seq = await escalaDiasSeguidosNoFimDoMesAnterior(window._escalaBase, c.matricula, window._escalaMes);
+    let inicioJanela = 1;
     for (let d = 1; d <= diasNoMes; d++) {
       if (jaFolga(d) || folgasForcadas.has(d)) { seq = 0; inicioJanela = d + 1; continue; }
       seq++;
-      if (seq === 7) {
+      if (seq >= 7) {
         // Percorre de trás pra frente (do dia mais recente pro mais antigo
         // da janela) — em empate de demanda, fica com o dia mais tarde
         // possível, maximizando o espaço até a próxima folga obrigatória
