@@ -380,6 +380,21 @@ function escalaSetMes(mes) {
 // carrega sozinho todo mundo que tem horário planejado ali naquele mês —
 // cruzando com o pontoHorarios (Horarios.xlsx já carregado). Assim o gestor
 // só precisa fazer o ajuste fino (F/FA/CH), não montar a equipe do zero.
+// Cargos que têm folga fixa de fim de semana (não entram na escala
+// revezada automaticamente) — confirmado com o cliente. Continuam podendo
+// ser adicionados manualmente pela busca, se precisar.
+function escalaCargoForaDaEscalaRevezada(cargo) {
+  const c = String(cargo||'').toUpperCase().trim();
+  if (!c) return false;
+  if (c.includes('GERENTE'))        return true;
+  if (c.includes('COORDENADOR'))    return true;
+  if (c.includes('ADMINISTRATIV'))  return true; // cobre "Administrativo", "Auxiliar Administrativo" etc.
+  if (c.includes('ESPECIALISTA'))   return true;
+  if (c.includes('ANALISTA'))       return true;
+  if (/\bADM\b/.test(c))            return true; // sigla "ADM" isolada
+  return false;
+}
+
 async function escalaPopularAutomaticamente(base, mes) {
   if (typeof pontoHorarios === 'undefined' || !pontoHorarios.size) return [];
 
@@ -394,6 +409,8 @@ async function escalaPopularAutomaticamente(base, mes) {
     const mesDoRegistro = `${dataPartes[2]}-${dataPartes[1]}`;
     if (mesDoRegistro !== mes) continue;
     if (typeof hcIsDesligado === 'function' && hcIsDesligado(mat)) continue; // não inclui inativos
+    const cargo = window.eoColabs?.get(mat)?.funcao;
+    if (escalaCargoForaDaEscalaRevezada(cargo)) continue; // função fixa de fim de semana — só manual
     if (!matriculas.has(mat)) matriculas.set(mat, h.nome || window.eoColabs?.get(mat)?.nome || '');
   }
   if (!matriculas.size) return [];
@@ -607,9 +624,17 @@ function escalaConteudoDoMes(c, ano, mesNum, diasNoMes) {
   }
   return brutos.map((s, i) => {
     if (s === 'F') {
-      const antes  = brutos[i-1] === 'F';
-      const depois = brutos[i+1] === 'F';
-      return { status: 'F', exibido: (antes||depois) ? 'FA' : 'F', editavel: true };
+      const dia = i + 1;
+      const diaSemana = new Date(ano, mesNum-1, dia).getDay(); // 0=dom ... 6=sáb
+      // Domingo é sempre a "âncora" da folga agrupada — nunca aparece como
+      // FA, mesmo com folga do lado (é o lado que vira FA). Sábado só vira
+      // FA se domingo (dia seguinte) também for folga; segunda só vira FA
+      // se domingo (dia anterior) também for folga. Qualquer outro par de
+      // F adjacentes (fora desse padrão) continua aparecendo como F comum.
+      let exibido = 'F';
+      if (diaSemana === 6 && brutos[i+1] === 'F')      exibido = 'FA'; // sábado + domingo de folga
+      else if (diaSemana === 1 && brutos[i-1] === 'F') exibido = 'FA'; // domingo de folga + segunda
+      return { status: 'F', exibido, editavel: true };
     }
     if (s === 'K')  return { status: 'K',  exibido: 'K',  editavel: true };
     if (s === 'CH') return { status: 'CH', exibido: 'CH', editavel: true };
@@ -685,10 +710,18 @@ function escalaFeriadosNacionais(ano) {
 }
 
 function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
+  // Mesma lógica de "entrada" usada na renderização de cada linha (entrada
+  // manual, senão o horário mais frequente do mês) — pra ordenar exatamente
+  // como aparece na tela: função, depois horário de entrada (menor pro maior).
+  const entradaDoColab = (c) => {
+    const horarioFixo = escalaHorarioFixoDoColab(c.matricula, ano, mesNum, diasNoMes);
+    const [entradaCalc] = horarioFixo ? horarioFixo.split('-') : [null];
+    return c.entrada_manual || entradaCalc || '';
+  };
   const colabs = [...(window._escalaColabs || [])].sort((a, b) => {
     const fa = window.eoColabs?.get(a.matricula)?.funcao || '';
     const fb = window.eoColabs?.get(b.matricula)?.funcao || '';
-    return fa.localeCompare(fb) || String(a.nome||'').localeCompare(String(b.nome||''));
+    return fa.localeCompare(fb) || entradaDoColab(a).localeCompare(entradaDoColab(b)) || String(a.nome||'').localeCompare(String(b.nome||''));
   });
   const NCOLS_FIXAS = 8; // Matrícula, Nome, Setor, Função, Entrada, Saída, Horário, CH
   const NCOLS = NCOLS_FIXAS + diasNoMes;
