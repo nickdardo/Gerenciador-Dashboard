@@ -972,16 +972,33 @@ if (!window._escalaKeydownRegistrado) {
 // folga suficiente no mês — não mexe em dias já ocupados (F/K manuais ou
 // férias). Simples de propósito na v1: mesma quantidade de folga-alvo pra
 // todo mundo, sem levar em conta função/carga horária ainda.
-// Meta de folgas por mês, de acordo com a carga horária (CH) do colaborador
-// e a quantidade de dias do mês — confirmado com o cliente:
-//   180h → precisa trabalhar 150h/mês → 6 folgas
-//   90h  → precisa trabalhar 72h/mês  → 6 folgas em mês de 30 dias, 7 em mês de 31 dias
-// (100h/120h/210h ainda não confirmados — usam 6 como padrão até confirmar)
+// Regras de jornada por carga horária — teto mensal de horas trabalhadas
+// (nunca pode passar disso, pode ficar abaixo) e jornada diária de cada
+// faixa. Confirmado com o cliente — substitui a regra antiga de "N folgas
+// fixas por CH" (que só valia mesmo pra 90h, e olha lá — pro 180h o certo
+// é 5 folgas, não 6 como estava antes).
+const ESCALA_CH_REGRAS = {
+  60:  { jornadaDiaria: 2, teto30: 48,  teto31: 48  },
+  90:  { jornadaDiaria: 3, teto30: 72,  teto31: 72  },
+  100: { jornadaDiaria: 4, teto30: 100, teto31: 100 },
+  120: { jornadaDiaria: 4, teto30: 120, teto31: 120 },
+  180: { jornadaDiaria: 6, teto30: 150, teto31: 150 },
+  210: { jornadaDiaria: 7, teto30: 171, teto31: 177 },
+};
+
+// Meta de folgas no mês = dias do mês menos os dias de trabalho necessários
+// pra bater (sem ultrapassar) o teto mensal de horas daquela carga horária.
+// Não é mais uma tabela fixa — é calculado, porque quem manda é o teto.
+// A distribuição continua respeitando o máximo de 6 dias seguidos
+// trabalhando antes de uma folga (podendo ser menos: 3x1, 4x1, 5x1 também
+// valem), isso fica a cargo de quem monta a sequência (escalaGerarFolgasAuto).
 function escalaMetaFolgasDoColab(ch, diasNoMes) {
   const chNum = parseInt(String(ch||'').replace(/\D/g,''), 10);
-  if (chNum === 180) return 6;
-  if (chNum === 90)  return diasNoMes >= 31 ? 7 : 6;
-  return 6; // padrão — 100h/120h/210h ainda precisam de confirmação
+  const regra = ESCALA_CH_REGRAS[chNum];
+  if (!regra) return 6; // CH fora da tabela conhecida — fallback conservador
+  const teto = diasNoMes >= 31 ? regra.teto31 : regra.teto30;
+  const diasTrabalho = Math.ceil(teto / regra.jornadaDiaria);
+  return Math.max(0, diasNoMes - diasTrabalho);
 }
 
 function escalaMesAnterior(mes) {
@@ -1015,21 +1032,75 @@ async function escalaGerarFolgasAuto() {
 
   const inserts = [];
   const metasUsadas = new Set();
+  let colabsComQuebraForcada = 0;
+
   for (const c of colabs) {
     const chColab = window.eoColabs?.get(c.matricula)?.ch;
     const meta = escalaMetaFolgasDoColab(chColab, diasNoMes);
     metasUsadas.add(meta);
 
-    let folgasAtuais = 0;
+    // Um dia conta como "folga" (quebra a sequência de dias trabalhados)
+    // se for férias, ou já tiver F/FA/J/CH manual. Curso (K) não quebra —
+    // continua sendo dia de trabalho remunerado, só muda a atividade.
+    const jaFolga = (dia) => {
+      if (escalaEstaDeFerias(c.matricula, ano, mesNum, dia)) return true;
+      const st = window._escalaDias.get(`${c.matricula}|${dia}`)?.status;
+      return st === 'F' || st === 'FA' || st === 'J' || st === 'CH';
+    };
+
+    // Passo 1 — regra obrigatória: nunca deixar passar de 6 dias seguidos
+    // trabalhados. Simula dia a dia; toda vez que a sequência chegaria no
+    // 7º dia sem folga, força uma folga no dia de MENOR demanda de voos
+    // dentro da janela em aberto (evita cair sempre no mesmo dia da semana).
+    const folgasForcadas = new Set();
+    let seq = 0, inicioJanela = 1;
     for (let d = 1; d <= diasNoMes; d++) {
+      if (jaFolga(d) || folgasForcadas.has(d)) { seq = 0; inicioJanela = d + 1; continue; }
+      seq++;
+      if (seq === 7) {
+        // Percorre de trás pra frente (do dia mais recente pro mais antigo
+        // da janela) — em empate de demanda, fica com o dia mais tarde
+        // possível, maximizando o espaço até a próxima folga obrigatória
+        // (senão cai numa cascata de folgas forçadas muito seguidas).
+        let melhorDia = null, melhorDemanda = Infinity;
+        for (let j = d; j >= inicioJanela; j--) {
+          if (jaFolga(j) || folgasForcadas.has(j)) continue;
+          const demanda = voosPorDia[j-1] || 0;
+          if (demanda < melhorDemanda) { melhorDemanda = demanda; melhorDia = j; }
+        }
+        if (melhorDia == null) melhorDia = d; // segurança — não deveria acontecer
+        folgasForcadas.add(melhorDia);
+        colabsComQuebraForcada++;
+        seq = d - melhorDia; // dias já trabalhados depois da folga forçada, até hoje
+        inicioJanela = melhorDia + 1;
+      }
+    }
+    for (const dia of folgasForcadas) {
+      const key = `${c.matricula}|${dia}`;
+      if (window._escalaDias.has(key)) continue;
+      inserts.push({
+        base: window._escalaBase, mes: window._escalaMes, matricula: c.matricula, dia, status: 'F', origem: 'auto',
+        updated_at: new Date(), updated_by: currentUserProfile?.id || currentUser?.id || null,
+      });
+      window._escalaDias.set(key, inserts[inserts.length-1]);
+    }
+
+    // Passo 2 — quantas folgas já existem no mês (manuais 'F' + férias +
+    // as forçadas do passo 1), pra saber quanto ainda falta pra bater a meta.
+    let folgasAtuais = folgasForcadas.size;
+    for (let d = 1; d <= diasNoMes; d++) {
+      if (folgasForcadas.has(d)) continue; // já contada acima
       const manual = window._escalaDias.get(`${c.matricula}|${d}`);
       if (manual?.status === 'F') folgasAtuais++;
-      if (escalaEstaDeFerias(c.matricula, ano, mesNum, d)) folgasAtuais++; // já afastado, conta como "resolvido" no mês
+      if (escalaEstaDeFerias(c.matricula, ano, mesNum, d)) folgasAtuais++;
     }
     let faltam = meta - folgasAtuais;
     if (faltam <= 0) continue;
     const teveFA = await escalaTeveFAMesPassado(window._escalaBase, c.matricula, window._escalaMes);
 
+    // Passo 3 — completa o restante da meta nos dias de menor demanda
+    // (como já era antes), evitando reformar folga agrupada pra quem já
+    // teve isso no mês passado.
     for (const { dia } of diasOrdenados) {
       if (faltam <= 0) break;
       const key = `${c.matricula}|${dia}`;
@@ -1054,7 +1125,10 @@ async function escalaGerarFolgasAuto() {
   const { error } = await db.from('escala_dia').upsert(inserts, { onConflict: 'base,mes,matricula,dia' });
   if (error) { escalaMsg('Erro ao gerar: ' + error.message, true); return; }
   escalaGradeAtualiza();
-  escalaMsg(`✓ ${inserts.length} folga(s) geradas nos dias de menor demanda de voos (meta por CH: ${[...metasUsadas].sort((a,b)=>a-b).join('/')} folgas/mês).`);
+  const avisoForcado = colabsComQuebraForcada > 0
+    ? ` · ${colabsComQuebraForcada} folga(s) extra forçada(s) pra não passar de 6 dias seguidos trabalhando`
+    : '';
+  escalaMsg(`✓ ${inserts.length} folga(s) geradas nos dias de menor demanda de voos (meta por CH: ${[...metasUsadas].sort((a,b)=>a-b).join('/')} folgas/mês)${avisoForcado}.`);
 }
 
 // ── Painel "Voos & demanda" — toggle no cabeçalho ──────
