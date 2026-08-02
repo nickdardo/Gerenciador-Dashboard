@@ -545,6 +545,7 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
             oninput="escalaBuscarColab(this.value)" placeholder="Buscar por matrícula ou nome pra adicionar...">
           <div id="escala-busca-resultados" style="position:absolute;top:calc(100% + 4px);left:0;right:0;background:#141b2c;border:1px solid var(--border-strong);border-radius:8px;z-index:20;display:none;max-height:220px;overflow-y:auto;box-shadow:var(--adh-shadow-card)"></div>
         </div>
+        <button class="adh-refresh-btn" style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600" onclick="escalaPreencherTodoStaff()">👥 Preencher com Staff</button>
         <button class="adh-refresh-btn" style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600" onclick="escalaGerarFolgasAuto()">⚡ Gerar folgas automáticas</button>
         <button class="adh-refresh-btn" onclick="escalaAdicionarFeriado()">📅 + Feriado dessa base</button>
         <button class="adh-refresh-btn" style="color:#fc8181" onclick="escalaLimparStatus()">🗑 Limpar folgas/status</button>
@@ -926,6 +927,46 @@ async function escalaEditarHorario(matricula, campo, valor) {
   const c = (window._escalaColabs||[]).find(x => x.matricula === matricula);
   if (c) c[coluna] = valor || null;
   escalaMsg('✓ Horário atualizado.');
+}
+
+// Puxa todo o staff ativo da base pro mês atual, direto do cadastro (sem
+// depender do arquivo de Horários já ter sido subido pra esse mês) — usa o
+// mesmo filtro de "escala revezada" já combinado (fora Gerente/Coordenador/
+// Administrativo/Especialista/Analista/ADM, que continuam podendo ser
+// adicionados manualmente). Não duplica quem já está na lista.
+async function escalaPreencherTodoStaff() {
+  const base = window._escalaBase;
+  if (!window.eoColabs?.size) { escalaMsg('Cadastro de colaboradores ainda não carregado.', true); return; }
+
+  const candidatos = [];
+  for (const [matricula, r] of window.eoColabs) {
+    if ((r.station||'').toUpperCase() !== String(base||'').toUpperCase()) continue;
+    if (typeof hcIsDesligado === 'function' && hcIsDesligado(matricula)) continue;
+    if (escalaCargoForaDaEscalaRevezada(r.funcao)) continue;
+    candidatos.push({ matricula, nome: r.nome });
+  }
+  if (!candidatos.length) { escalaMsg('Nenhum colaborador ativo (fora das funções administrativas) encontrado pra essa base.', true); return; }
+
+  const jaNaLista = new Set((window._escalaColabs||[]).map(c => c.matricula));
+  const novos = candidatos.filter(c => !jaNaLista.has(c.matricula));
+  if (!novos.length) { escalaMsg('Todo mundo elegível já está nessa escala.'); return; }
+
+  if (!confirm(`Preencher a escala de ${base} com todo o staff ativo (${novos.length} colaborador${novos.length===1?'':'es'}, fora funções administrativas)? Você poderá remover quem não for necessário depois.`)) return;
+
+  const linhas = novos.map(c => ({
+    base, mes: window._escalaMes, matricula: c.matricula, nome: c.nome,
+    created_by: currentUserProfile?.id || currentUser?.id || null,
+  }));
+  const BATCH = 200;
+  for (let i = 0; i < linhas.length; i += BATCH) {
+    const { error } = await db.from('escala_colaborador').upsert(linhas.slice(i, i+BATCH), { onConflict: 'base,mes,matricula' });
+    if (error) { escalaMsg('Erro ao preencher: ' + error.message, true); return; }
+  }
+
+  const { data } = await db.from('escala_colaborador').select('*').eq('base', base).eq('mes', window._escalaMes);
+  window._escalaColabs = data || [];
+  escalaGradeAtualiza();
+  escalaMsg(`✓ ${novos.length} colaborador${novos.length===1?'':'es'} adicionado${novos.length===1?'':'s'} — organizados por função e horário de entrada.`);
 }
 
 async function escalaLimparColaboradores() {
