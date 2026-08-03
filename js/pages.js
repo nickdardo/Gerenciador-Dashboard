@@ -15,6 +15,7 @@ function escalaIcone(nome) {
     calclock: `<path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/>`,
     download: `<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>`,
     upload: `<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>`,
+    layers: `<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>`,
   };
   return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px" aria-hidden="true">${icones[nome]||''}</svg>`;
 }
@@ -52,10 +53,15 @@ async function pageEscala(el) {
   }
 
   if (window._escalaBase === undefined || !bases.includes(window._escalaBase)) {
-    window._escalaBase = (window._genBase && bases.includes(window._genBase)) ? window._genBase : bases[0];
+    // Prioridade: última base que esse usuário estava vendo (gravada no
+    // perfil) > base vinda de outro módulo (Gerador) > primeira base
+    // disponível. Resolve o bug de F5 sempre voltar pra primeira base.
+    const baseSalva = currentUserProfile?.escala_ultima_base;
+    window._escalaBase = (baseSalva && bases.includes(baseSalva)) ? baseSalva
+      : (window._genBase && bases.includes(window._genBase)) ? window._genBase : bases[0];
   }
   if (!window._escalaMes) {
-    window._escalaMes = window._genMes || (typeof adhCurrentMonth === 'function' ? adhCurrentMonth() : null);
+    window._escalaMes = currentUserProfile?.escala_ultimo_mes || window._genMes || (typeof adhCurrentMonth === 'function' ? adhCurrentMonth() : null);
   }
   if (!window._escalaDiaSelecionado) window._escalaDiaSelecionado = 1;
 
@@ -391,13 +397,28 @@ function escalaSelecionarDia(dia, elCel) {
 function escalaSetBase(base) {
   window._escalaBase = base;
   window._escalaDiaSelecionado = 1;
+  escalaSalvarUltimaTela(base, window._escalaMes);
   escalaRenderGrade(document.getElementById('page-content'));
 }
 
 function escalaSetMes(mes) {
   window._escalaMes = mes;
   window._escalaDiaSelecionado = 1;
+  escalaSalvarUltimaTela(window._escalaBase, mes);
   escalaRenderGrade(document.getElementById('page-content'));
+}
+
+// Grava em profiles qual base/mês esse usuário estava vendo por último, pra
+// um F5 (ou entrar de novo depois) voltar exatamente onde ele parou, em vez
+// de sempre cair na primeira base da lista. Silencioso (não trava a troca de
+// tela por causa disso) — se falhar, só não lembra da próxima vez.
+async function escalaSalvarUltimaTela(base, mes) {
+  const uid = currentUserProfile?.id || currentUser?.id;
+  if (!uid) return;
+  if (currentUserProfile) { currentUserProfile.escala_ultima_base = base; currentUserProfile.escala_ultimo_mes = mes; }
+  try {
+    await db.from('profiles').update({ escala_ultima_base: base, escala_ultimo_mes: mes }).eq('id', uid);
+  } catch (_) { /* silencioso — não é crítico */ }
 }
 
 // ══════════════════════════════════════════════════════
@@ -587,6 +608,7 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
         <button class="adh-refresh-btn" style="color:#fc8181" onclick="escalaLimparColaboradores()">${escalaIcone('trash')}Limpar colaboradores</button>
         <button id="escala-btn-remover-sel" class="adh-refresh-btn" style="color:#fc8181;display:none" onclick="escalaRemoverSelecionados()">${escalaIcone('trash')}Remover selecionados (0)</button>
         <button class="adh-refresh-btn" onclick="escalaLimparOrdemManual()" title="Volta a ordenar sozinho por função + horário de entrada">${escalaIcone('sort')}Ordenar automático</button>
+        <button class="adh-refresh-btn" style="${window._escalaAgruparPorTurno?'background:var(--blue);color:#0b0f1a;border:none;font-weight:600':''}" onclick="escalaToggleAgruparTurno()" title="Agrupa a lista por função e depois por turno, com subtotal por bloco">${escalaIcone('layers')}Agrupar por função/turno</button>
       </div>
       <div id="escala-status-msg" style="font-size:11px;color:var(--text-muted);margin-top:8px;min-height:14px"></div>
     </div>
@@ -786,6 +808,141 @@ function escalaFeriadosNacionais(ano) {
   return feriados;
 }
 
+// ── Agrupamento por Função + Turno ─────────────────────
+// Função (bloco maior) reaproveita a mesma categorização já usada no Staff
+// (hcCargoGrupo, em headcount.js) a partir do texto livre de função do
+// cadastro — não precisa recadastrar nada. Turno (bloco menor, dentro de
+// cada função) é um campo novo e manual por colaborador (coluna 'turno' em
+// escala_colaborador), porque o nome do turno varia por função (Turno D/A
+// pra Líder, Noite/Madrugada pra Operador etc.) — não dá pra calcular
+// sozinho, o gestor que decide e digita.
+const ESCALA_FUNCAO_GRUPO_LABEL = {
+  RAMP: 'Rampa', CLEANING: 'Limpeza', GSE: 'GSE', PAX: 'Passageiros',
+  SUPERVISION: 'Supervisão', SECURITY: 'Segurança', LEADERSHIP: 'Liderança',
+  OPERATOR: 'Operador', OTHERS: 'Outros',
+};
+function escalaFuncaoGrupoDoColab(c) {
+  const funcao = window.eoColabs?.get(c.matricula)?.funcao || '';
+  const codigo = typeof hcCargoGrupo === 'function' ? hcCargoGrupo(funcao) : 'OTHERS';
+  return { codigo, label: ESCALA_FUNCAO_GRUPO_LABEL[codigo] || 'Outros' };
+}
+function escalaEscapeAttr(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function escalaToggleAgruparTurno() {
+  window._escalaAgruparPorTurno = !window._escalaAgruparPorTurno;
+  escalaGradeAtualiza();
+}
+
+// Salva o turno digitado/selecionado pro colaborador — igual qualquer outro
+// campo manual da escala (update simples, nunca upsert, pra não sobrescrever
+// o resto da linha que já existe).
+async function escalaEditarTurno(matricula, valorSelecionado) {
+  let turno = valorSelecionado;
+  if (turno === '__novo__') {
+    const novo = prompt('Nome do novo turno (ex: Turno D, Operadores Noite):');
+    if (!novo || !novo.trim()) { escalaGradeAtualiza(); return; } // cancelou — desfaz a seleção
+    turno = novo.trim();
+  }
+  turno = turno || null;
+
+  const { error } = await db.from('escala_colaborador').update({ turno })
+    .eq('base', window._escalaBase).eq('mes', window._escalaMes).eq('matricula', matricula);
+  if (error) { escalaMsg('Erro ao salvar turno: ' + error.message, true); return; }
+
+  const c = (window._escalaColabs||[]).find(x => x.matricula === matricula);
+  if (c) c.turno = turno;
+  escalaGradeAtualiza();
+  escalaMsg(turno ? `✓ Turno definido: ${turno}.` : '✓ Turno removido.');
+}
+
+// Linha de um colaborador — extraída pra função própria porque é usada tanto
+// na lista simples quanto dentro de cada bloco de função/turno agrupado.
+function escalaLinhaColabHTML(c, ci, ctx) {
+  const { ano, mesNum, diasNoMes, leftMat, leftNome, BORDA, turnosExistentes } = ctx;
+  const info = window.eoColabs?.get(c.matricula);
+  const funcao = info?.funcao || '—';
+  const ch = info?.ch || '—';
+  const horarioFixo = escalaHorarioFixoDoColab(c.matricula, ano, mesNum, diasNoMes);
+  const [entradaCalc, saidaCalc] = horarioFixo ? horarioFixo.split('-') : [null, null];
+  const entrada = c.entrada_manual || entradaCalc || '';
+  const saida = c.saida_manual || saidaCalc || '';
+  const intInicio = c.intervalo_inicio_manual || '';
+  const intFim = c.intervalo_fim_manual || '';
+  const setor = escalaSetorDoTurno(entrada);
+  const zebra = ci % 2 === 0 ? 'rgba(255,255,255,.02)' : 'transparent';
+
+  const conteudo = escalaConteudoDoMes(c, ano, mesNum, diasNoMes);
+
+  let html = `<tr style="background:${zebra}" ondragover="event.preventDefault()" ondrop="escalaDrop(event,'${c.matricula}')">`;
+  html += `<td style="text-align:center;position:sticky;left:0;background:inherit;border:${BORDA};padding:0">
+    <div style="display:flex;align-items:center;justify-content:center;gap:3px">
+      <span draggable="true" ondragstart="escalaDragStart(event,'${c.matricula}')" style="cursor:grab;color:var(--text-muted);font-size:12px;user-select:none" title="Arrastar pra reordenar">⠿</span>
+      <input type="checkbox" data-escala-check="${c.matricula}" ${window._escalaSelecionados?.has(c.matricula)?'checked':''} onchange="escalaToggleSelecao('${c.matricula}',this.checked)" title="Selecionar" style="margin:0">
+    </div>
+  </td>`;
+  html += `<td style="padding:2px 10px;position:sticky;left:${leftMat}px;background:inherit;border:${BORDA}"><input type="text" value="${c.matricula}" onchange="escalaEditarMatricula('${c.matricula}',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-primary);font-weight:500;text-overflow:ellipsis;padding:6px 0" title="Editar matrícula"></td>`;
+  html += `<td style="padding:8px 10px;color:var(--text-primary);font-weight:500;position:sticky;left:${leftNome}px;background:inherit;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:${BORDA}" title="${c.nome||''}">${c.nome||''}</td>`;
+  html += `<td style="padding:8px 10px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;border:${BORDA}">${setor}</td>`;
+  html += `<td style="padding:2px 6px;border:${BORDA}">
+    <select onchange="escalaEditarTurno('${c.matricula}', this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-secondary);font-size:11px;padding:4px 0;cursor:pointer">
+      <option value="">—</option>
+      ${turnosExistentes.map(t => `<option value="${escalaEscapeAttr(t)}" ${c.turno===t?'selected':''}>${escalaEscapeAttr(t)}</option>`).join('')}
+      <option value="__novo__">+ novo turno...</option>
+    </select>
+  </td>`;
+  html += `<td style="padding:8px 10px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:${BORDA}" title="${funcao}">${funcao}</td>`;
+  html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" value="${entrada}" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" onchange="escalaEditarHorario('${c.matricula}','entrada',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-secondary);text-align:center;font-size:12px;padding:4px"></td>`;
+  html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" value="${intInicio}" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" onchange="escalaEditarHorario('${c.matricula}','intervalo_inicio',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-muted);text-align:center;font-size:12px;padding:4px" title="Início do intervalo"></td>`;
+  html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" value="${intFim}" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" onchange="escalaEditarHorario('${c.matricula}','intervalo_fim',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-muted);text-align:center;font-size:12px;padding:4px" title="Fim do intervalo"></td>`;
+  html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" value="${saida}" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" onchange="escalaEditarHorario('${c.matricula}','saida',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-secondary);text-align:center;font-size:12px;padding:4px"></td>`;
+  html += `<td style="text-align:center;color:var(--text-secondary);border:${BORDA}">${ch}</td>`;
+  conteudo.forEach((item, i) => {
+    const dia = i+1;
+    const dow = new Date(ano, mesNum-1, dia).getDay();
+    const dataISO = `${ano}-${String(mesNum).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
+    const feriado = window._escalaFeriados?.get(dataISO);
+    const fimDeSemana = dow === 0 || dow === 6;
+    const bgCel = feriado ? 'rgba(252,129,129,.08)' : fimDeSemana ? 'rgba(255,255,255,.03)' : 'transparent';
+    html += `<td data-mat="${c.matricula}" data-dia="${dia}" onclick="${item.editavel?`escalaSelecionarCelula('${c.matricula}',${dia},this)`:''}" style="padding:2px;height:32px;cursor:${item.editavel?'pointer':'default'};background:${bgCel};border:${BORDA}" title="${feriado?feriado.nome:(item.detalhe||'')}">${escalaCelHTML(item)}</td>`;
+  });
+  html += `</tr>`;
+  return html;
+}
+
+// Linha de cabeçalho de bloco (função ou turno) + linha de subtotal de
+// folgas por dia daquele bloco — mesma definição de "folga" usada no
+// restante do módulo (F/FA/J/CH conta, K não conta porque continua sendo
+// dia de trabalho).
+function escalaBlocoHeaderHTML(label, contagem, nivel, NCOLS) {
+  const bg = nivel === 'funcao' ? 'var(--bg-surface)' : nivel === 'turno-a' ? 'rgba(0,160,210,.12)' : 'rgba(159,122,234,.12)';
+  const cor = nivel === 'funcao' ? 'var(--text-primary)' : nivel === 'turno-a' ? 'var(--blue)' : 'var(--purple)';
+  const paddingLeft = nivel === 'funcao' ? '10px' : '26px';
+  return `<tr><td colspan="${NCOLS}" style="padding:6px ${paddingLeft};background:${bg}">
+    <span style="font-weight:600;color:${cor};font-size:${nivel==='funcao'?'12.5px':'11.5px'}">${label}</span>
+    <span style="color:${cor};opacity:.75;font-size:11px;margin-left:8px">${contagem} pessoa${contagem===1?'':'s'}</span>
+  </td></tr>`;
+}
+function escalaBlocoFolgasPorDia(colabsDoBloco, ano, mesNum, diasNoMes) {
+  const porDia = new Array(diasNoMes).fill(0);
+  colabsDoBloco.forEach(c => {
+    escalaConteudoDoMes(c, ano, mesNum, diasNoMes).forEach((item, i) => {
+      if (['F','FA','J','CH','L'].includes(item.status)) porDia[i]++;
+    });
+  });
+  return porDia;
+}
+function escalaBlocoSubtotalHTML(label, colabsDoBloco, ano, mesNum, diasNoMes, NCOLS_FIXAS, forte, BORDA) {
+  const porDia = escalaBlocoFolgasPorDia(colabsDoBloco, ano, mesNum, diasNoMes);
+  const bg = forte ? 'var(--bg-surface)' : 'rgba(255,255,255,.03)';
+  const peso = forte ? '600' : '500';
+  return `<tr style="background:${bg}">
+    <td colspan="${NCOLS_FIXAS}" style="padding:4px 10px;color:var(--text-secondary);font-size:11px;text-align:right;font-weight:${peso};border:${BORDA}">${label} — folgas no dia →</td>
+    ${porDia.map(n => `<td style="text-align:center;border:${BORDA};color:var(--text-secondary);font-weight:${peso};font-size:11px">${n}</td>`).join('')}
+  </tr>`;
+}
+
 function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   // Mesma lógica de "entrada" usada na renderização de cada linha (entrada
   // manual, senão o horário mais frequente do mês) — pra ordenar exatamente
@@ -809,11 +966,12 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     return fa.localeCompare(fb) || entradaDoColab(a).localeCompare(entradaDoColab(b)) || String(a.nome||'').localeCompare(String(b.nome||''));
   });
   const temOrdemManual = colabs.some(c => c.ordem_manual != null);
-  const NCOLS_FIXAS = 10; // Remover, Matrícula, Nome, Setor, Função, Entrada, Intervalo início, Intervalo fim, Saída, CH
+  const NCOLS_FIXAS = 11; // Remover, Matrícula, Nome, Setor, Turno, Função, Entrada, Intervalo início, Intervalo fim, Saída, CH
   const NCOLS = NCOLS_FIXAS + diasNoMes;
   const BORDA = '1px solid rgba(255,255,255,.08)';
+  const turnosExistentes = [...new Set(colabs.map(c => c.turno).filter(Boolean))].sort((a,b) => a.localeCompare(b));
 
-  const LARG = { remover:36, mat:80, nome:210, setor:100, funcao:190, entrada:60, intInicio:60, intFim:60, saida:60, ch:46, dia:30 };
+  const LARG = { remover:36, mat:80, nome:210, setor:100, turno:110, funcao:190, entrada:60, intInicio:60, intFim:60, saida:60, ch:46, dia:30 };
   const leftMat  = LARG.remover;
   const leftNome = LARG.remover + LARG.mat;
   // Largura total exata (colunas fixas + dias, todos com pixel fixo — nada
@@ -822,11 +980,11 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   // espaço disponível (table-layout:fixed distribui esse espaço extra
   // proporcionalmente entre todas as colunas); em telas estreitas, mantém a
   // largura mínima exata e rola horizontalmente.
-  const larguraFixas = LARG.remover + LARG.mat + LARG.nome + LARG.setor + LARG.funcao + LARG.entrada + LARG.intInicio + LARG.intFim + LARG.saida + LARG.ch;
+  const larguraFixas = LARG.remover + LARG.mat + LARG.nome + LARG.setor + LARG.turno + LARG.funcao + LARG.entrada + LARG.intInicio + LARG.intFim + LARG.saida + LARG.ch;
   const larguraTotal = larguraFixas + LARG.dia * diasNoMes;
 
   let html = `<table style="border-collapse:collapse;font-size:13px;width:max(100%, ${larguraTotal}px);table-layout:fixed"><colgroup>
-    <col style="width:${LARG.remover}px"><col style="width:${LARG.mat}px"><col style="width:${LARG.nome}px"><col style="width:${LARG.setor}px"><col style="width:${LARG.funcao}px">
+    <col style="width:${LARG.remover}px"><col style="width:${LARG.mat}px"><col style="width:${LARG.nome}px"><col style="width:${LARG.setor}px"><col style="width:${LARG.turno}px"><col style="width:${LARG.funcao}px">
     <col style="width:${LARG.entrada}px"><col style="width:${LARG.intInicio}px"><col style="width:${LARG.intFim}px"><col style="width:${LARG.saida}px"><col style="width:${LARG.ch}px">
     ${Array(diasNoMes).fill(`<col style="width:${LARG.dia}px">`).join('')}
   </colgroup><thead><tr>`;
@@ -834,6 +992,7 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;left:${leftMat}px;background:var(--bg-surface);z-index:2;border:${BORDA}">Matrícula</th>`;
   html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;left:${leftNome}px;background:var(--bg-surface);z-index:2;border:${BORDA}">Nome</th>`;
   html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;border:${BORDA}">Setor</th>`;
+  html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;border:${BORDA}" title="Grupo manual — usado no Agrupar por função/turno">Turno</th>`;
   html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;border:${BORDA}">Função</th>`;
   html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:11px;text-transform:uppercase;border:${BORDA}">Entrada</th>`;
   html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:10px;text-transform:uppercase;border:${BORDA}" title="Início do intervalo">Interv. ↓</th>`;
@@ -879,48 +1038,60 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     html += `<tr><td colspan="${NCOLS}" style="padding:24px;text-align:center;color:var(--text-muted);font-size:12.5px;border:${BORDA}">Nenhum colaborador ativo encontrado pra essa base+mês — busque por matrícula ou nome acima.</td></tr>`;
   }
 
-  colabs.forEach((c, ci) => {
-    const info = window.eoColabs?.get(c.matricula);
-    const funcao = info?.funcao || '—';
-    const ch = info?.ch || '—';
-    const horarioFixo = escalaHorarioFixoDoColab(c.matricula, ano, mesNum, diasNoMes);
-    const [entradaCalc, saidaCalc] = horarioFixo ? horarioFixo.split('-') : [null, null];
-    const entrada = c.entrada_manual || entradaCalc || '';
-    const saida = c.saida_manual || saidaCalc || '';
-    const intInicio = c.intervalo_inicio_manual || '';
-    const intFim = c.intervalo_fim_manual || '';
-    const setor = escalaSetorDoTurno(entrada);
-    const zebra = ci % 2 === 0 ? 'rgba(255,255,255,.02)' : 'transparent';
+  const ctxLinha = { ano, mesNum, diasNoMes, leftMat, leftNome, BORDA, turnosExistentes };
 
-    const conteudo = escalaConteudoDoMes(c, ano, mesNum, diasNoMes);
+  if (!window._escalaAgruparPorTurno) {
+    // Lista simples (comportamento de sempre) — ordem manual de arrastar
+    // continua valendo aqui.
+    colabs.forEach((c, ci) => { html += escalaLinhaColabHTML(c, ci, ctxLinha); });
+  } else {
+    // Agrupado: Função (bloco maior, reaproveitando hcCargoGrupo) → Turno
+    // (subgrupo manual) → colaboradores. A ordem manual de arrastar não se
+    // aplica aqui (não tem um sentido único quando a lista está partida em
+    // vários blocos) — ordena por horário de entrada + nome dentro de cada
+    // turno, igual o critério automático da lista simples.
+    const entradaDoColabOrdenacao = (c) => {
+      const horarioFixo = escalaHorarioFixoDoColab(c.matricula, ano, mesNum, diasNoMes);
+      const [entradaCalc] = horarioFixo ? horarioFixo.split('-') : [null];
+      return c.entrada_manual || entradaCalc || '';
+    };
 
-    html += `<tr style="background:${zebra}" ondragover="event.preventDefault()" ondrop="escalaDrop(event,'${c.matricula}')">`;
-    html += `<td style="text-align:center;position:sticky;left:0;background:inherit;border:${BORDA};padding:0">
-      <div style="display:flex;align-items:center;justify-content:center;gap:3px">
-        <span draggable="true" ondragstart="escalaDragStart(event,'${c.matricula}')" style="cursor:grab;color:var(--text-muted);font-size:12px;user-select:none" title="Arrastar pra reordenar">⠿</span>
-        <input type="checkbox" data-escala-check="${c.matricula}" ${window._escalaSelecionados?.has(c.matricula)?'checked':''} onchange="escalaToggleSelecao('${c.matricula}',this.checked)" title="Selecionar" style="margin:0">
-      </div>
-    </td>`;
-    html += `<td style="padding:2px 10px;position:sticky;left:${leftMat}px;background:inherit;border:${BORDA}"><input type="text" value="${c.matricula}" onchange="escalaEditarMatricula('${c.matricula}',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-primary);font-weight:500;text-overflow:ellipsis;padding:6px 0" title="Editar matrícula"></td>`;
-    html += `<td style="padding:8px 10px;color:var(--text-primary);font-weight:500;position:sticky;left:${leftNome}px;background:inherit;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:${BORDA}" title="${c.nome||''}">${c.nome||''}</td>`;
-    html += `<td style="padding:8px 10px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;border:${BORDA}">${setor}</td>`;
-    html += `<td style="padding:8px 10px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:${BORDA}" title="${funcao}">${funcao}</td>`;
-    html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" value="${entrada}" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" onchange="escalaEditarHorario('${c.matricula}','entrada',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-secondary);text-align:center;font-size:12px;padding:4px"></td>`;
-    html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" value="${intInicio}" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" onchange="escalaEditarHorario('${c.matricula}','intervalo_inicio',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-muted);text-align:center;font-size:12px;padding:4px" title="Início do intervalo"></td>`;
-    html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" value="${intFim}" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" onchange="escalaEditarHorario('${c.matricula}','intervalo_fim',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-muted);text-align:center;font-size:12px;padding:4px" title="Fim do intervalo"></td>`;
-    html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" value="${saida}" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" onchange="escalaEditarHorario('${c.matricula}','saida',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-secondary);text-align:center;font-size:12px;padding:4px"></td>`;
-    html += `<td style="text-align:center;color:var(--text-secondary);border:${BORDA}">${ch}</td>`;
-    conteudo.forEach((item, i) => {
-      const dia = i+1;
-      const dow = new Date(ano, mesNum-1, dia).getDay();
-      const dataISO = `${ano}-${String(mesNum).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
-      const feriado = window._escalaFeriados?.get(dataISO);
-      const fimDeSemana = dow === 0 || dow === 6;
-      const bgCel = feriado ? 'rgba(252,129,129,.08)' : fimDeSemana ? 'rgba(255,255,255,.03)' : 'transparent';
-      html += `<td data-mat="${c.matricula}" data-dia="${dia}" onclick="${item.editavel?`escalaSelecionarCelula('${c.matricula}',${dia},this)`:''}" style="padding:2px;height:32px;cursor:${item.editavel?'pointer':'default'};background:${bgCel};border:${BORDA}" title="${feriado?feriado.nome:(item.detalhe||'')}">${escalaCelHTML(item)}</td>`;
+    const gruposFuncao = new Map(); // codigo -> { label, turnos: Map(turnoLabel -> colabs[]) }
+    colabs.forEach(c => {
+      const { codigo, label } = escalaFuncaoGrupoDoColab(c);
+      if (!gruposFuncao.has(codigo)) gruposFuncao.set(codigo, { label, turnos: new Map() });
+      const grupo = gruposFuncao.get(codigo);
+      const turnoLabel = c.turno || '(sem turno)';
+      if (!grupo.turnos.has(turnoLabel)) grupo.turnos.set(turnoLabel, []);
+      grupo.turnos.get(turnoLabel).push(c);
     });
-    html += `</tr>`;
-  });
+
+    const funcoesOrdenadas = [...gruposFuncao.entries()].sort((a, b) => a[1].label.localeCompare(b[1].label));
+
+    funcoesOrdenadas.forEach(([, grupo]) => {
+      const todosDaFuncao = [...grupo.turnos.values()].flat();
+      html += escalaBlocoHeaderHTML(grupo.label, todosDaFuncao.length, 'funcao', NCOLS);
+
+      const turnosOrdenados = [...grupo.turnos.entries()].sort((a, b) => {
+        if (a[0] === '(sem turno)') return 1;
+        if (b[0] === '(sem turno)') return -1;
+        return a[0].localeCompare(b[0]);
+      });
+
+      turnosOrdenados.forEach(([turnoLabel, colabsDoTurno], ti) => {
+        html += escalaBlocoHeaderHTML(turnoLabel, colabsDoTurno.length, ti % 2 === 0 ? 'turno-a' : 'turno-b', NCOLS);
+        colabsDoTurno
+          .sort((a, b) => entradaDoColabOrdenacao(a).localeCompare(entradaDoColabOrdenacao(b)) || String(a.nome||'').localeCompare(String(b.nome||'')))
+          .forEach((c, ci) => { html += escalaLinhaColabHTML(c, ci, ctxLinha); });
+        html += escalaBlocoSubtotalHTML(turnoLabel, colabsDoTurno, ano, mesNum, diasNoMes, NCOLS_FIXAS, false, BORDA);
+      });
+
+      if (grupo.turnos.size > 1) {
+        html += escalaBlocoSubtotalHTML(`Total ${grupo.label}`, todosDaFuncao, ano, mesNum, diasNoMes, NCOLS_FIXAS, true, BORDA);
+      }
+      html += `<tr><td colspan="${NCOLS}" style="height:8px;border:none"></td></tr>`;
+    });
+  }
 
   return html + `</tbody></table>`;
 }
@@ -1663,10 +1834,19 @@ async function escalaGerarFolgasAuto() {
   // pra escolher onde colocar cada folga (equilibrar os dias); a demanda de
   // voos entra só como desempate. Sem isso, o gerador empilhava tudo no(s)
   // dia(s) de menor demanda isolado, esvaziando o efetivo só ali.
+  // Mapa de trabalho separado do mapa real (window._escalaDias): o cálculo
+  // precisa "enxergar" as folgas que ele mesmo vai colocando (pra equilibrar
+  // e não repetir domingo/colar folga), mas só o que for de fato confirmado
+  // no banco deve entrar no mapa que alimenta a tela. Antes o código escrevia
+  // direto em window._escalaDias durante o cálculo, então a grade já mostrava
+  // as folgas geradas mesmo se o upsert final falhasse — só um F5 revelava
+  // que nada tinha sido salvo de verdade.
+  const escalaDiasCalc = new Map(window._escalaDias);
+
   const folgasPorDia = new Array(diasNoMes).fill(0);
   for (const c of colabs) {
     for (let d = 1; d <= diasNoMes; d++) {
-      const manual = window._escalaDias.get(`${c.matricula}|${d}`);
+      const manual = escalaDiasCalc.get(`${c.matricula}|${d}`);
       const off = (manual && ['F','FA','J','CH'].includes(manual.status)) || escalaEstaDeFerias(c.matricula, ano, mesNum, d);
       if (off) folgasPorDia[d-1]++;
     }
@@ -1704,7 +1884,7 @@ async function escalaGerarFolgasAuto() {
     // continua sendo dia de trabalho remunerado, só muda a atividade.
     const jaFolga = (dia) => {
       if (escalaEstaDeFerias(c.matricula, ano, mesNum, dia)) return true;
-      const st = window._escalaDias.get(`${c.matricula}|${dia}`)?.status;
+      const st = escalaDiasCalc.get(`${c.matricula}|${dia}`)?.status;
       return st === 'F' || st === 'FA' || st === 'J' || st === 'CH';
     };
     const ehDomingo = (dia) => new Date(ano, mesNum-1, dia).getDay() === 0;
@@ -1730,8 +1910,8 @@ async function escalaGerarFolgasAuto() {
         // ficar colado se não sobrar nenhuma opção livre na janela (aí o
         // limite de 6 dias seguidos — que é lei — vence).
         const naoColados = todosCandidatos.filter(j => {
-          const antes  = window._escalaDias.get(`${c.matricula}|${j-1}`)?.status === 'F' || folgasForcadas.has(j-1);
-          const depois = window._escalaDias.get(`${c.matricula}|${j+1}`)?.status === 'F' || folgasForcadas.has(j+1);
+          const antes  = escalaDiasCalc.get(`${c.matricula}|${j-1}`)?.status === 'F' || folgasForcadas.has(j-1);
+          const depois = escalaDiasCalc.get(`${c.matricula}|${j+1}`)?.status === 'F' || folgasForcadas.has(j+1);
           return !antes && !depois;
         });
         let candidatos = naoColados.length ? naoColados : todosCandidatos;
@@ -1741,7 +1921,7 @@ async function escalaGerarFolgasAuto() {
         // obrigatório, então sem essa checagem aqui a regra do domingo não
         // valia na prática pra quase ninguém.
         const jaTemDomingo = [...folgasForcadas].some(ehDomingo) ||
-          [...window._escalaDias.entries()].some(([k,v]) => k.startsWith(c.matricula+'|') && v.status==='F' && ehDomingo(parseInt(k.split('|')[1],10)));
+          [...escalaDiasCalc.entries()].some(([k,v]) => k.startsWith(c.matricula+'|') && v.status==='F' && ehDomingo(parseInt(k.split('|')[1],10)));
         if (jaTemDomingo) {
           const semDomingo = candidatos.filter(j => !ehDomingo(j));
           if (semDomingo.length) candidatos = semDomingo;
@@ -1757,12 +1937,13 @@ async function escalaGerarFolgasAuto() {
     }
     for (const dia of folgasForcadas) {
       const key = `${c.matricula}|${dia}`;
-      if (window._escalaDias.has(key)) continue;
-      inserts.push({
+      if (escalaDiasCalc.has(key)) continue;
+      const registro = {
         base: window._escalaBase, mes: window._escalaMes, matricula: c.matricula, dia, status: 'F', origem: 'auto',
         updated_at: new Date(), updated_by: currentUserProfile?.id || currentUser?.id || null,
-      });
-      window._escalaDias.set(key, inserts[inserts.length-1]);
+      };
+      inserts.push(registro);
+      escalaDiasCalc.set(key, registro);
     }
 
     // Passo 2 — quantas folgas já existem no mês (manuais 'F' + férias +
@@ -1770,7 +1951,7 @@ async function escalaGerarFolgasAuto() {
     let folgasAtuais = folgasForcadas.size;
     for (let d = 1; d <= diasNoMes; d++) {
       if (folgasForcadas.has(d)) continue; // já contada acima
-      const manual = window._escalaDias.get(`${c.matricula}|${d}`);
+      const manual = escalaDiasCalc.get(`${c.matricula}|${d}`);
       if (manual?.status === 'F') folgasAtuais++;
       if (escalaEstaDeFerias(c.matricula, ano, mesNum, d)) folgasAtuais++;
     }
@@ -1791,10 +1972,10 @@ async function escalaGerarFolgasAuto() {
       const candidatos = [];
       for (let d = 1; d <= diasNoMes; d++) {
         const key = `${c.matricula}|${d}`;
-        if (window._escalaDias.has(key)) continue;
+        if (escalaDiasCalc.has(key)) continue;
         if (escalaEstaDeFerias(c.matricula, ano, mesNum, d)) continue;
-        const antesOcupado = window._escalaDias.get(`${c.matricula}|${d-1}`)?.status === 'F';
-        const depoisOcupado = window._escalaDias.get(`${c.matricula}|${d+1}`)?.status === 'F';
+        const antesOcupado = escalaDiasCalc.get(`${c.matricula}|${d-1}`)?.status === 'F';
+        const depoisOcupado = escalaDiasCalc.get(`${c.matricula}|${d+1}`)?.status === 'F';
         if (antesOcupado || depoisOcupado) continue; // nunca 2 folgas coladas
         candidatos.push(d);
       }
@@ -1803,7 +1984,7 @@ async function escalaGerarFolgasAuto() {
       let temDomingo = false;
       for (let d = 1; d <= diasNoMes; d++) {
         if (new Date(ano, mesNum-1, d).getDay() !== 0) continue;
-        if (window._escalaDias.get(`${c.matricula}|${d}`)?.status === 'F') { temDomingo = true; break; }
+        if (escalaDiasCalc.get(`${c.matricula}|${d}`)?.status === 'F') { temDomingo = true; break; }
       }
 
       let listaFinal;
@@ -1819,11 +2000,12 @@ async function escalaGerarFolgasAuto() {
       }
 
       const escolhido = melhorDia(listaFinal);
-      inserts.push({
+      const registro = {
         base: window._escalaBase, mes: window._escalaMes, matricula: c.matricula, dia: escolhido, status: 'F', origem: 'auto',
         updated_at: new Date(), updated_by: currentUserProfile?.id || currentUser?.id || null,
-      });
-      window._escalaDias.set(`${c.matricula}|${escolhido}`, inserts[inserts.length-1]);
+      };
+      inserts.push(registro);
+      escalaDiasCalc.set(`${c.matricula}|${escolhido}`, registro);
       folgasPorDia[escolhido-1]++;
       faltam--;
     }
@@ -1833,8 +2015,32 @@ async function escalaGerarFolgasAuto() {
 
   if (!inserts.length) { escalaGradeAtualiza(); escalaMsg('Ninguém precisava de mais folgas — todo mundo já está na meta do mês.'); return; }
 
-  const { error } = await db.from('escala_dia').upsert(inserts, { onConflict: 'base,mes,matricula,dia' });
-  if (error) { escalaGradeAtualiza(); escalaMsg('Erro ao gerar: ' + error.message, true); return; }
+  // Salva em lotes de 200 (mesmo padrão do resto do arquivo). Um upsert único
+  // com centenas de linhas de uma vez era a causa raiz do bug "aparece na
+  // tela mas some no F5": em bases grandes o insert podia estourar limite/
+  // timeout e falhar (ou falhar no meio), e ninguém percebia porque a tela já
+  // tinha sido redesenhada a partir do cálculo em memória antes de confirmar
+  // que o banco realmente gravou. Agora só entra no mapa real (e na tela) o
+  // que cada lote confirmar como salvo.
+  const BATCH = 200;
+  const loadLabel = document.getElementById('escala-load-label');
+  if (loadLabel) loadLabel.textContent = `Salvando ${inserts.length} folga(s)...`;
+  escalaLoadingAtualiza(0, inserts.length);
+
+  let salvos = 0;
+  for (let i = 0; i < inserts.length; i += BATCH) {
+    const lote = inserts.slice(i, i + BATCH);
+    const { error } = await db.from('escala_dia').upsert(lote, { onConflict: 'base,mes,matricula,dia' });
+    if (error) {
+      escalaGradeAtualiza();
+      escalaMsg(`⚠ Salvou ${salvos} de ${inserts.length} folga(s) — parou num lote com erro: ${error.message}. Rode "Gerar folgas automáticas" de novo pra completar o restante.`, true);
+      return;
+    }
+    for (const registro of lote) window._escalaDias.set(`${registro.matricula}|${registro.dia}`, registro);
+    salvos += lote.length;
+    escalaLoadingAtualiza(salvos, inserts.length);
+  }
+
   escalaGradeAtualiza();
   const avisoForcado = colabsComQuebraForcada > 0
     ? ` · ${colabsComQuebraForcada} folga(s) extra forçada(s) pra não passar de 6 dias seguidos trabalhando`

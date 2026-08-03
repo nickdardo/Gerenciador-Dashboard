@@ -9,7 +9,11 @@ const HC_EXCLUDE_BASES = new Set(['HQ2', 'SEDE', 'GSE']); // mesma exclusão da 
 // Agrupa cargos em categorias amplas (mesma ideia da Aderência, mas com os
 // nomes de grupo do modelo de referência).
 function hcCargoGrupo(funcao) {
-  const f = String(funcao || '').toUpperCase();
+  // Remove acentos antes de comparar — sem isso, "Líder", "Mecânico" e
+  // "Elétrico" (com acento) nunca batiam com 'LIDER'/'MECANIC'/'ELETRIC'
+  // (sem acento) e caíam sempre em OTHERS. Bug pré-existente, achado ao
+  // reaproveitar essa função pro agrupamento por função da Escala Online.
+  const f = String(funcao || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   if (!f) return 'OTHERS';
   if (f.includes('RAMPA'))                                 return 'RAMP';
   if (f.includes('LIMPEZA'))                                return 'CLEANING';
