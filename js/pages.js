@@ -3,6 +3,19 @@
 // ══════════════════════════════════════════════════════
 
 // ── Escala Online ─────────────────────────────────────
+// Ícones dos botões da Escala Online, no mesmo estilo (linha, stroke) dos
+// ícones da barra lateral — evita ícones de emoji, que ficam menos sérios.
+function escalaIcone(nome) {
+  const icones = {
+    users:  `<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>`,
+    zap:    `<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>`,
+    calendarPlus: `<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="12" y1="14" x2="12" y2="18"/><line x1="10" y1="16" x2="14" y2="16"/>`,
+    trash:  `<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>`,
+    sort:   `<path d="M8 9l4-4 4 4"/><path d="M16 15l-4 4-4-4"/>`,
+  };
+  return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px" aria-hidden="true">${icones[nome]||''}</svg>`;
+}
+
 async function pageEscala(el) {
   el.innerHTML = `
     <div class="page-header"><div>
@@ -545,13 +558,13 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
             oninput="escalaBuscarColab(this.value)" placeholder="Buscar por matrícula ou nome pra adicionar...">
           <div id="escala-busca-resultados" style="position:absolute;top:calc(100% + 4px);left:0;right:0;background:#141b2c;border:1px solid var(--border-strong);border-radius:8px;z-index:20;display:none;max-height:220px;overflow-y:auto;box-shadow:var(--adh-shadow-card)"></div>
         </div>
-        <button class="adh-refresh-btn" style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600" onclick="escalaPreencherTodoStaff()">👥 Preencher com Staff</button>
-        <button class="adh-refresh-btn" style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600" onclick="escalaGerarFolgasAuto()">⚡ Gerar folgas automáticas</button>
-        <button class="adh-refresh-btn" onclick="escalaAdicionarFeriado()">📅 + Feriado dessa base</button>
-        <button class="adh-refresh-btn" style="color:#fc8181" onclick="escalaLimparStatus()">🗑 Limpar folgas/status</button>
-        <button class="adh-refresh-btn" style="color:#fc8181" onclick="escalaLimparColaboradores()">🗑 Limpar colaboradores</button>
-        <button id="escala-btn-remover-sel" class="adh-refresh-btn" style="color:#fc8181;display:none" onclick="escalaRemoverSelecionados()">🗑 Remover selecionados (0)</button>
-        <button class="adh-refresh-btn" onclick="escalaLimparOrdemManual()" title="Volta a ordenar sozinho por função + horário de entrada">↕ Ordenar automático</button>
+        <button class="adh-refresh-btn" style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600" onclick="escalaPreencherTodoStaff()">${escalaIcone('users')}Preencher com Staff</button>
+        <button class="adh-refresh-btn" style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600" onclick="escalaGerarFolgasAuto()">${escalaIcone('zap')}Gerar folgas automáticas</button>
+        <button class="adh-refresh-btn" onclick="escalaAdicionarFeriado()">${escalaIcone('calendarPlus')}+ Feriado dessa base</button>
+        <button class="adh-refresh-btn" style="color:#fc8181" onclick="escalaLimparStatus()">${escalaIcone('trash')}Limpar folgas/status</button>
+        <button class="adh-refresh-btn" style="color:#fc8181" onclick="escalaLimparColaboradores()">${escalaIcone('trash')}Limpar colaboradores</button>
+        <button id="escala-btn-remover-sel" class="adh-refresh-btn" style="color:#fc8181;display:none" onclick="escalaRemoverSelecionados()">${escalaIcone('trash')}Remover selecionados (0)</button>
+        <button class="adh-refresh-btn" onclick="escalaLimparOrdemManual()" title="Volta a ordenar sozinho por função + horário de entrada">${escalaIcone('sort')}Ordenar automático</button>
       </div>
       <div id="escala-status-msg" style="font-size:11px;color:var(--text-muted);margin-top:8px;min-height:14px"></div>
     </div>
@@ -749,7 +762,7 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   const larguraFixas = LARG.remover + LARG.mat + LARG.nome + LARG.setor + LARG.funcao + LARG.entrada + LARG.intInicio + LARG.intFim + LARG.saida + LARG.ch;
   const larguraTotal = larguraFixas + LARG.dia * diasNoMes;
 
-  let html = `<table style="border-collapse:collapse;font-size:13px;width:${larguraTotal}px;min-width:100%;table-layout:fixed"><colgroup>
+  let html = `<table style="border-collapse:collapse;font-size:13px;width:${larguraTotal}px;table-layout:fixed"><colgroup>
     <col style="width:${LARG.remover}px"><col style="width:${LARG.mat}px"><col style="width:${LARG.nome}px"><col style="width:${LARG.setor}px"><col style="width:${LARG.funcao}px">
     <col style="width:${LARG.entrada}px"><col style="width:${LARG.intInicio}px"><col style="width:${LARG.intFim}px"><col style="width:${LARG.saida}px"><col style="width:${LARG.ch}px">
     ${Array(diasNoMes).fill(`<col style="width:${LARG.dia}px">`).join('')}
@@ -1102,7 +1115,7 @@ function escalaAtualizarBotaoRemoverSelecionados() {
   const btn = document.getElementById('escala-btn-remover-sel');
   if (!btn) return;
   btn.style.display = n > 0 ? 'inline-flex' : 'none';
-  btn.textContent = `🗑 Remover selecionados (${n})`;
+  btn.innerHTML = `${escalaIcone('trash')}Remover selecionados (${n})`;
 }
 
 async function escalaRemoverSelecionados() {
@@ -1208,19 +1221,39 @@ function escalaRestaurarSelecaoVisual() {
   }
 }
 
+// Verifica se, com o estado atual da grade (incluindo o que já vinha
+// carregado do fim do mês anterior), esse colaborador tem algum trecho de
+// mais de 6 dias seguidos trabalhando no mês — sinaliza sem bloquear a
+// edição, já que às vezes a gestão precisa mesmo fazer exceção.
+async function escalaVerificarSequencia(matricula, ano, mesNum, diasNoMes) {
+  let seq = await escalaDiasSeguidosNoFimDoMesAnterior(window._escalaBase, matricula, window._escalaMes);
+  let maxSeq = seq;
+  for (let d = 1; d <= diasNoMes; d++) {
+    const manual = window._escalaDias.get(`${matricula}|${d}`);
+    const folga = (manual && ['F','FA','J','CH'].includes(manual.status)) || escalaEstaDeFerias(matricula, ano, mesNum, d);
+    if (folga) { seq = 0; } else { seq++; maxSeq = Math.max(maxSeq, seq); }
+  }
+  return maxSeq > 6 ? maxSeq : null;
+}
+
 async function escalaAplicarTeclaNaCelula(tecla) {
   const sel = window._escalaCelulaSelecionada;
   if (!sel) return;
   const { matricula, dia } = sel;
   const base = window._escalaBase, mes = window._escalaMes;
   const key = `${matricula}|${dia}`;
+  const [ano, mesNum] = mes.split('-').map(Number);
+  const diasNoMes = new Date(ano, mesNum, 0).getDate();
 
   if (tecla === 'BACKSPACE' || tecla === 'DELETE') {
     await db.from('escala_dia').delete().eq('base', base).eq('mes', mes).eq('matricula', matricula).eq('dia', dia);
     window._escalaDias.delete(key);
     escalaGradeAtualiza();
     escalaRestaurarSelecaoVisual();
-    escalaMsg('Célula limpa.');
+    const violacao = await escalaVerificarSequencia(matricula, ano, mesNum, diasNoMes);
+    escalaMsg(violacao
+      ? `⚠ Célula limpa — atenção: esse colaborador ficou com ${violacao} dias seguidos trabalhando em algum trecho do mês (o máximo é 6, regra 6x1).`
+      : 'Célula limpa.', !!violacao);
     return;
   }
 
@@ -1249,7 +1282,10 @@ async function escalaAplicarTeclaNaCelula(tecla) {
   window._escalaDias.set(key, payload);
   escalaGradeAtualiza();
   escalaRestaurarSelecaoVisual();
-  escalaMsg(`✓ Marcado como ${tecla}.`);
+  const violacao = await escalaVerificarSequencia(matricula, ano, mesNum, diasNoMes);
+  escalaMsg(violacao
+    ? `⚠ Marcado como ${tecla} — mas esse colaborador ficou com ${violacao} dias seguidos trabalhando em algum trecho do mês (o máximo é 6, regra 6x1). Confira se precisa de uma folga a mais em algum ponto.`
+    : `✓ Marcado como ${tecla}.`, !!violacao);
 }
 
 function escalaKeydownHandler(e) {
@@ -1351,7 +1387,38 @@ async function escalaGerarFolgasAuto() {
   const [ano, mesNum] = window._escalaMes.split('-').map(Number);
   const diasNoMes = new Date(ano, mesNum, 0).getDate();
   const voosPorDia = window._escalaVoosPorDia || new Array(diasNoMes).fill(0);
-  const diasOrdenados = voosPorDia.map((v,i) => ({ dia: i+1, v })).sort((a,b) => a.v-b.v);
+
+  // Quantas pessoas já ficam de folga em cada dia (F/FA/J/CH/férias) — conta
+  // o que já existe antes de rodar o gerador, e cresce conforme o próprio
+  // gerador vai distribuindo folgas nesse run. Esse é o critério PRINCIPAL
+  // pra escolher onde colocar cada folga (equilibrar os dias); a demanda de
+  // voos entra só como desempate. Sem isso, o gerador empilhava tudo no(s)
+  // dia(s) de menor demanda isolado, esvaziando o efetivo só ali.
+  const folgasPorDia = new Array(diasNoMes).fill(0);
+  for (const c of colabs) {
+    for (let d = 1; d <= diasNoMes; d++) {
+      const manual = window._escalaDias.get(`${c.matricula}|${d}`);
+      const off = (manual && ['F','FA','J','CH'].includes(manual.status)) || escalaEstaDeFerias(c.matricula, ano, mesNum, d);
+      if (off) folgasPorDia[d-1]++;
+    }
+  }
+
+  // Escolhe o melhor dia dentro de uma lista de candidatos (já filtrada de
+  // quem não serve): menos folgas já colocadas primeiro (equilíbrio); em
+  // empate, menor demanda de voos; em empate total, fica com o PRIMEIRO
+  // candidato da lista — por isso quem chama decide a ordem de entrada
+  // (o passo 1 passa em ordem reversa, pra não cair na cascata de folgas).
+  function melhorDia(candidatos) {
+    let melhor = null, melhorFolgas = Infinity, melhorDemanda = Infinity;
+    for (const d of candidatos) {
+      const folgas = folgasPorDia[d-1];
+      const demanda = voosPorDia[d-1] || 0;
+      if (folgas < melhorFolgas || (folgas === melhorFolgas && demanda < melhorDemanda)) {
+        melhor = d; melhorFolgas = folgas; melhorDemanda = demanda;
+      }
+    }
+    return melhor;
+  }
 
   const inserts = [];
   const metasUsadas = new Set();
@@ -1373,11 +1440,11 @@ async function escalaGerarFolgasAuto() {
 
     // Passo 1 — regra obrigatória: nunca deixar passar de 6 dias seguidos
     // trabalhados. A sequência não começa do zero — puxa quantos dias
-    // seguidos a pessoa já vinha trabalhando no fim do mês anterior, pra
-    // não deixar passar de 6 logo nos primeiros dias do mês novo. Simula
+    // seguidos a pessoa já vinha trabalhando no fim do mês anterior. Simula
     // dia a dia; toda vez que a sequência chegaria no 7º dia sem folga,
-    // força uma folga no dia de MENOR demanda de voos dentro da janela em
-    // aberto (evita cair sempre no mesmo dia da semana).
+    // escolhe o melhor dia (equilíbrio, depois demanda) dentro da janela em
+    // aberto — percorrendo de trás pra frente, pra empate ficar com o dia
+    // mais tarde possível (evita cascata de folgas forçadas muito seguidas).
     const folgasForcadas = new Set();
     let seq = await escalaDiasSeguidosNoFimDoMesAnterior(window._escalaBase, c.matricula, window._escalaMes);
     let inicioJanela = 1;
@@ -1385,21 +1452,14 @@ async function escalaGerarFolgasAuto() {
       if (jaFolga(d) || folgasForcadas.has(d)) { seq = 0; inicioJanela = d + 1; continue; }
       seq++;
       if (seq >= 7) {
-        // Percorre de trás pra frente (do dia mais recente pro mais antigo
-        // da janela) — em empate de demanda, fica com o dia mais tarde
-        // possível, maximizando o espaço até a próxima folga obrigatória
-        // (senão cai numa cascata de folgas forçadas muito seguidas).
-        let melhorDia = null, melhorDemanda = Infinity;
-        for (let j = d; j >= inicioJanela; j--) {
-          if (jaFolga(j) || folgasForcadas.has(j)) continue;
-          const demanda = voosPorDia[j-1] || 0;
-          if (demanda < melhorDemanda) { melhorDemanda = demanda; melhorDia = j; }
-        }
-        if (melhorDia == null) melhorDia = d; // segurança — não deveria acontecer
-        folgasForcadas.add(melhorDia);
+        const candidatos = [];
+        for (let j = d; j >= inicioJanela; j--) { if (!jaFolga(j) && !folgasForcadas.has(j)) candidatos.push(j); }
+        const escolhido = melhorDia(candidatos) ?? d; // segurança — não deveria acontecer
+        folgasForcadas.add(escolhido);
+        folgasPorDia[escolhido-1]++;
         colabsComQuebraForcada++;
-        seq = d - melhorDia; // dias já trabalhados depois da folga forçada, até hoje
-        inicioJanela = melhorDia + 1;
+        seq = d - escolhido; // dias já trabalhados depois da folga forçada, até hoje
+        inicioJanela = escolhido + 1;
       }
     }
     for (const dia of folgasForcadas) {
@@ -1425,24 +1485,31 @@ async function escalaGerarFolgasAuto() {
     if (faltam <= 0) continue;
     const teveFA = await escalaTeveFAMesPassado(window._escalaBase, c.matricula, window._escalaMes);
 
-    // Passo 3 — completa o restante da meta nos dias de menor demanda
-    // (como já era antes), evitando reformar folga agrupada pra quem já
-    // teve isso no mês passado.
-    for (const { dia } of diasOrdenados) {
-      if (faltam <= 0) break;
-      const key = `${c.matricula}|${dia}`;
-      if (window._escalaDias.has(key)) continue;
-      if (escalaEstaDeFerias(c.matricula, ano, mesNum, dia)) continue;
-      if (teveFA) {
-        const antesOcupado = window._escalaDias.get(`${c.matricula}|${dia-1}`)?.status === 'F';
-        const depoisOcupado = window._escalaDias.get(`${c.matricula}|${dia+1}`)?.status === 'F';
-        if (antesOcupado || depoisOcupado) continue; // evita gerar FA de novo pra quem já teve mês passado
+    // Passo 3 — completa o restante da meta sempre escolhendo o dia mais
+    // equilibrado disponível (menos folgas já colocadas, depois menor
+    // demanda) — recalcula a cada folga colocada, em vez de uma lista fixa
+    // ordenada só por demanda (que empilhava tudo no mesmo dia isolado).
+    while (faltam > 0) {
+      const candidatos = [];
+      for (let d = 1; d <= diasNoMes; d++) {
+        const key = `${c.matricula}|${d}`;
+        if (window._escalaDias.has(key)) continue;
+        if (escalaEstaDeFerias(c.matricula, ano, mesNum, d)) continue;
+        if (teveFA) {
+          const antesOcupado = window._escalaDias.get(`${c.matricula}|${d-1}`)?.status === 'F';
+          const depoisOcupado = window._escalaDias.get(`${c.matricula}|${d+1}`)?.status === 'F';
+          if (antesOcupado || depoisOcupado) continue; // evita gerar FA de novo pra quem já teve mês passado
+        }
+        candidatos.push(d);
       }
+      if (!candidatos.length) break; // não sobrou nenhum dia disponível (raro)
+      const escolhido = melhorDia(candidatos);
       inserts.push({
-        base: window._escalaBase, mes: window._escalaMes, matricula: c.matricula, dia, status: 'F', origem: 'auto',
+        base: window._escalaBase, mes: window._escalaMes, matricula: c.matricula, dia: escolhido, status: 'F', origem: 'auto',
         updated_at: new Date(), updated_by: currentUserProfile?.id || currentUser?.id || null,
       });
-      window._escalaDias.set(key, inserts[inserts.length-1]);
+      window._escalaDias.set(`${c.matricula}|${escolhido}`, inserts[inserts.length-1]);
+      folgasPorDia[escolhido-1]++;
       faltam--;
     }
   }
@@ -1455,7 +1522,7 @@ async function escalaGerarFolgasAuto() {
   const avisoForcado = colabsComQuebraForcada > 0
     ? ` · ${colabsComQuebraForcada} folga(s) extra forçada(s) pra não passar de 6 dias seguidos trabalhando`
     : '';
-  escalaMsg(`✓ ${inserts.length} folga(s) geradas nos dias de menor demanda de voos (meta por CH: ${[...metasUsadas].sort((a,b)=>a-b).join('/')} folgas/mês)${avisoForcado}.`);
+  escalaMsg(`✓ ${inserts.length} folga(s) geradas, equilibrando a quantidade de gente por dia (meta por CH: ${[...metasUsadas].sort((a,b)=>a-b).join('/')} folgas/mês)${avisoForcado}.`);
 }
 
 // ── Painel "Voos & demanda" — toggle no cabeçalho ──────
