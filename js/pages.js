@@ -758,7 +758,7 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   const NCOLS = NCOLS_FIXAS + diasNoMes;
   const BORDA = '1px solid rgba(255,255,255,.08)';
 
-  const LARG = { remover:46, mat:80, nome:210, setor:100, funcao:190, entrada:60, intInicio:60, intFim:60, saida:60, ch:46, dia:30 };
+  const LARG = { remover:36, mat:80, nome:210, setor:100, funcao:190, entrada:60, intInicio:60, intFim:60, saida:60, ch:46, dia:30 };
   const leftMat  = LARG.remover;
   const leftNome = LARG.remover + LARG.mat;
   // Largura total exata (colunas fixas + dias, todos com pixel fixo — nada
@@ -775,7 +775,7 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     <col style="width:${LARG.entrada}px"><col style="width:${LARG.intInicio}px"><col style="width:${LARG.intFim}px"><col style="width:${LARG.saida}px"><col style="width:${LARG.ch}px">
     ${Array(diasNoMes).fill(`<col style="width:${LARG.dia}px">`).join('')}
   </colgroup><thead><tr>`;
-  html += `<th style="text-align:center;padding:8px 4px;position:sticky;left:0;background:var(--bg-surface);z-index:2;border:${BORDA}"><input type="checkbox" onchange="escalaSelecionarTodos(this.checked)" title="Selecionar todos"></th>`;
+  html += `<th style="text-align:center;padding:8px 2px;position:sticky;left:0;background:var(--bg-surface);z-index:2;border:${BORDA}"><input type="checkbox" onchange="escalaSelecionarTodos(this.checked)" title="Selecionar todos" style="margin:0"></th>`;
   html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;left:${leftMat}px;background:var(--bg-surface);z-index:2;border:${BORDA}">Matrícula</th>`;
   html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;left:${leftNome}px;background:var(--bg-surface);z-index:2;border:${BORDA}">Nome</th>`;
   html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;border:${BORDA}">Setor</th>`;
@@ -840,10 +840,10 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     const conteudo = escalaConteudoDoMes(c, ano, mesNum, diasNoMes);
 
     html += `<tr style="background:${zebra}" ondragover="event.preventDefault()" ondrop="escalaDrop(event,'${c.matricula}')">`;
-    html += `<td style="text-align:center;position:sticky;left:0;background:inherit;border:${BORDA}">
-      <div style="display:flex;align-items:center;justify-content:center;gap:5px">
-        <span draggable="true" ondragstart="escalaDragStart(event,'${c.matricula}')" style="cursor:grab;color:var(--text-muted);font-size:13px;user-select:none" title="Arrastar pra reordenar">⠿</span>
-        <input type="checkbox" data-escala-check="${c.matricula}" ${window._escalaSelecionados?.has(c.matricula)?'checked':''} onchange="escalaToggleSelecao('${c.matricula}',this.checked)" title="Selecionar">
+    html += `<td style="text-align:center;position:sticky;left:0;background:inherit;border:${BORDA};padding:0">
+      <div style="display:flex;align-items:center;justify-content:center;gap:3px">
+        <span draggable="true" ondragstart="escalaDragStart(event,'${c.matricula}')" style="cursor:grab;color:var(--text-muted);font-size:12px;user-select:none" title="Arrastar pra reordenar">⠿</span>
+        <input type="checkbox" data-escala-check="${c.matricula}" ${window._escalaSelecionados?.has(c.matricula)?'checked':''} onchange="escalaToggleSelecao('${c.matricula}',this.checked)" title="Selecionar" style="margin:0">
       </div>
     </td>`;
     html += `<td style="padding:2px 10px;position:sticky;left:${leftMat}px;background:inherit;border:${BORDA}"><input type="text" value="${c.matricula}" onchange="escalaEditarMatricula('${c.matricula}',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-primary);font-weight:500;text-overflow:ellipsis;padding:6px 0" title="Editar matrícula"></td>`;
@@ -1533,8 +1533,14 @@ async function escalaDiasSeguidosNoFimDoMesAnterior(base, matricula, mesAtual) {
   const diasNoMesAnterior = new Date(anoAnt, mesNumAnt, 0).getDate();
 
   const { data } = await db.from('escala_dia').select('dia,status').eq('base', base).eq('matricula', matricula).eq('mes', mesAnterior);
-  const statusPorDia = new Map((data||[]).map(r => [r.dia, r.status]));
+  // Sem NENHUM registro no mês anterior pra essa matrícula (mês nunca foi
+  // preenchido, por exemplo), não temos como saber se ela trabalhou ou não
+  // — o seguro é assumir sequência zero, não o mês inteiro trabalhado. Sem
+  // esse corte, todo mundo entrava no mês novo já "estourado" no limite de
+  // 6 dias, forçando folga em todo mundo logo no dia 1.
+  if (!data || !data.length) return 0;
 
+  const statusPorDia = new Map(data.map(r => [r.dia, r.status]));
   let seq = 0;
   for (let d = diasNoMesAnterior; d >= 1; d--) {
     const st = statusPorDia.get(d);
@@ -1664,7 +1670,9 @@ async function escalaGerarFolgasAuto() {
     // demanda) — recalcula a cada folga colocada, em vez de uma lista fixa
     // ordenada só por demanda (que empilhava tudo no mesmo dia isolado).
     // Nunca coloca 2 folgas coladas uma na outra — regra confirmada com o
-    // cliente, sem exceção (é só 1 folga por vez, nunca um par).
+    // cliente, sem exceção (é só 1 folga por vez, nunca um par). Também
+    // garante pelo menos 1 domingo de folga no mês pra cada colaborador,
+    // se der — domingo tem prioridade até a pessoa conseguir o primeiro.
     while (faltam > 0) {
       const candidatos = [];
       for (let d = 1; d <= diasNoMes; d++) {
@@ -1677,7 +1685,16 @@ async function escalaGerarFolgasAuto() {
         candidatos.push(d);
       }
       if (!candidatos.length) break; // não sobrou nenhum dia disponível (raro)
-      const escolhido = melhorDia(candidatos);
+
+      let temDomingo = false;
+      for (let d = 1; d <= diasNoMes; d++) {
+        if (new Date(ano, mesNum-1, d).getDay() !== 0) continue;
+        if (window._escalaDias.get(`${c.matricula}|${d}`)?.status === 'F') { temDomingo = true; break; }
+      }
+      const domingosDisponiveis = temDomingo ? [] : candidatos.filter(d => new Date(ano, mesNum-1, d).getDay() === 0);
+      const listaFinal = domingosDisponiveis.length ? domingosDisponiveis : candidatos;
+
+      const escolhido = melhorDia(listaFinal);
       inserts.push({
         base: window._escalaBase, mes: window._escalaMes, matricula: c.matricula, dia: escolhido, status: 'F', origem: 'auto',
         updated_at: new Date(), updated_by: currentUserProfile?.id || currentUser?.id || null,
