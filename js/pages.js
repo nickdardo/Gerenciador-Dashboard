@@ -656,6 +656,46 @@ function escalaHorarioFixoDoColab(matricula, ano, mesNum, diasNoMes) {
   return melhor;
 }
 
+// Mesma lógica da entrada/saída fixa (moda do mês), mas usando o segundo
+// par de batida (sai1 → ent2 = saída pro almoço → volta do almoço) — assim
+// descobrimos o intervalo de verdade que a pessoa já vinha batendo, em vez
+// de chutar. Retorna algo como "12:00-13:00", ou null se o ponto batido
+// desse mês não tiver segunda batida (mat sem intervalo registrado).
+function escalaIntervaloFixoDoColab(matricula, ano, mesNum, diasNoMes) {
+  const base = window._escalaBase;
+  if (typeof pontoHorarios === 'undefined') return null;
+  const contagem = new Map();
+  for (let d = 1; d <= diasNoMes; d++) {
+    const dstr = `${String(d).padStart(2,'0')}/${String(mesNum).padStart(2,'0')}/${ano}`;
+    const h = pontoHorarios.get(`${base}|${matricula}|${dstr}`);
+    if (!h || !h.sai1 || !h.ent2) continue;
+    const par = `${h.sai1}-${h.ent2}`;
+    contagem.set(par, (contagem.get(par)||0) + 1);
+  }
+  let melhor = null, melhorN = 0;
+  for (const [par, n] of contagem) { if (n > melhorN) { melhor = par; melhorN = n; } }
+  return melhor;
+}
+
+// Sem ponto batido nenhum pra se basear, cai pra uma duração padrão por
+// carga horária — confirmado com o cliente: CH 210h = 1h de intervalo;
+// CH 180h = 15min. As demais faixas (jornadas mais curtas, tipicamente sem
+// intervalo obrigatório) não têm regra definida ainda, então ficam de fora
+// desse preenchimento automático. Posiciona no meio da jornada.
+function escalaIntervaloPadraoPorCH(ch, entrada) {
+  const chNum = parseInt(String(ch||'').replace(/\D/g,''), 10);
+  const minutosIntervalo = chNum >= 210 ? 60 : chNum === 180 ? 15 : null;
+  const regra = ESCALA_CH_REGRAS[chNum];
+  if (!minutosIntervalo || !regra || !entrada) return null;
+  const m = entrada.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const minEntrada = parseInt(m[1],10)*60 + parseInt(m[2],10);
+  const minMeio = (minEntrada + Math.floor(regra.jornadaDiaria*60/2)) % (24*60);
+  const minFim  = (minMeio + minutosIntervalo) % (24*60);
+  const fmt = (min) => `${String(Math.floor(min/60)).padStart(2,'0')}:${String(min%60).padStart(2,'0')}`;
+  return `${fmt(minMeio)}-${fmt(minFim)}`;
+}
+
 function escalaConteudoDoMes(c, ano, mesNum, diasNoMes) {
   const brutos = [];
   const detalhes = [];
@@ -1527,12 +1567,25 @@ async function escalaPreencherHorarioMesAnterior() {
     const saidaAnt   = anterior?.saida_manual   || saidaCalcAnt;
     if (!entradaAnt && !saidaAnt) continue; // não tinha horário nenhum no mês anterior também
 
+    // Intervalo: prioriza o que já estava manual no mês anterior; senão,
+    // descobre pelo ponto batido de verdade (sai1/ent2) daquele mês; senão,
+    // cai pro padrão por carga horária (210h=1h, 180h=15min).
+    const ch = window.eoColabs?.get(c.matricula)?.ch;
+    const intervaloPontoAnt = escalaIntervaloFixoDoColab(c.matricula, anoAnt, mesNumAnt, diasNoMesAnt);
+    const [intInicioCalcAnt, intFimCalcAnt] = intervaloPontoAnt ? intervaloPontoAnt.split('-') : [null, null];
+    let intInicioAnt = anterior?.intervalo_inicio_manual || intInicioCalcAnt;
+    let intFimAnt     = anterior?.intervalo_fim_manual    || intFimCalcAnt;
+    if (!intInicioAnt && !intFimAnt) {
+      const padrao = escalaIntervaloPadraoPorCH(ch, entradaAnt);
+      if (padrao) [intInicioAnt, intFimAnt] = padrao.split('-');
+    }
+
     updates.push({
       base: window._escalaBase, mes: window._escalaMes, matricula: c.matricula, nome: c.nome,
       entrada_manual: c.entrada_manual || entradaAnt || null,
       saida_manual: c.saida_manual || saidaAnt || null,
-      intervalo_inicio_manual: c.intervalo_inicio_manual || anterior?.intervalo_inicio_manual || null,
-      intervalo_fim_manual: c.intervalo_fim_manual || anterior?.intervalo_fim_manual || null,
+      intervalo_inicio_manual: c.intervalo_inicio_manual || intInicioAnt || null,
+      intervalo_fim_manual: c.intervalo_fim_manual || intFimAnt || null,
     });
   }
   if (!updates.length) { escalaMsg('Ninguém precisava — todo mundo já tem horário completo, ou não tinha horário nenhum no mês anterior.'); return; }
@@ -1654,6 +1707,7 @@ async function escalaGerarFolgasAuto() {
       const st = window._escalaDias.get(`${c.matricula}|${dia}`)?.status;
       return st === 'F' || st === 'FA' || st === 'J' || st === 'CH';
     };
+    const ehDomingo = (dia) => new Date(ano, mesNum-1, dia).getDay() === 0;
 
     // Passo 1 — regra obrigatória: nunca deixar passar de 6 dias seguidos
     // trabalhados. A sequência não começa do zero — puxa quantos dias
@@ -1680,7 +1734,19 @@ async function escalaGerarFolgasAuto() {
           const depois = window._escalaDias.get(`${c.matricula}|${j+1}`)?.status === 'F' || folgasForcadas.has(j+1);
           return !antes && !depois;
         });
-        const candidatos = naoColados.length ? naoColados : todosCandidatos;
+        let candidatos = naoColados.length ? naoColados : todosCandidatos;
+
+        // Mesma regra de "só 1 domingo" também vale aqui — a maioria das
+        // folgas de um colaborador costuma vir justamente desse passo
+        // obrigatório, então sem essa checagem aqui a regra do domingo não
+        // valia na prática pra quase ninguém.
+        const jaTemDomingo = [...folgasForcadas].some(ehDomingo) ||
+          [...window._escalaDias.entries()].some(([k,v]) => k.startsWith(c.matricula+'|') && v.status==='F' && ehDomingo(parseInt(k.split('|')[1],10)));
+        if (jaTemDomingo) {
+          const semDomingo = candidatos.filter(j => !ehDomingo(j));
+          if (semDomingo.length) candidatos = semDomingo;
+        }
+
         const escolhido = melhorDia(candidatos) ?? d; // segurança — não deveria acontecer
         folgasForcadas.add(escolhido);
         folgasPorDia[escolhido-1]++;
