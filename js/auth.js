@@ -17,24 +17,25 @@ function showApp(user) {
 // ── Render login form ─────────────────────────────────
 function renderLogin() {
   const container = document.getElementById('auth-card');
+  const idioma = idiomaAtual();
   container.innerHTML = `
     <div class="auth-tabs">
-      <button class="auth-tab active" onclick="renderLogin()">Entrar</button>
-      <button class="auth-tab" onclick="renderSignup()">Criar acesso</button>
+      <button class="auth-tab active" data-tab="login" onclick="renderLogin()">${t('auth.entrar')}</button>
+      <button class="auth-tab" data-tab="signup" onclick="renderSignup()">${t('auth.criarAcesso')}</button>
     </div>
 
     <div class="auth-idioma">
-      <div class="auth-idioma-label">Idioma</div>
+      <div class="auth-idioma-label">${t('auth.idioma')}</div>
       <div class="auth-idioma-btns">
-        <button class="auth-idioma-btn active">PT-BR</button>
-        <button class="auth-idioma-btn">English</button>
+        <button class="auth-idioma-btn${idioma==='pt'?' active':''}" onclick="setIdioma('pt')">PT-BR</button>
+        <button class="auth-idioma-btn${idioma==='en'?' active':''}" onclick="setIdioma('en')">English</button>
       </div>
     </div>
 
     <div class="auth-field-group">
       <label class="auth-label">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
-        Email corporativo
+        ${t('auth.emailCorporativo')}
       </label>
       <input id="auth-email" class="auth-input" type="email"
         placeholder="nome@dnata.com.br" autocomplete="email">
@@ -43,11 +44,11 @@ function renderLogin() {
     <div class="auth-field-group">
       <label class="auth-label">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-        Senha
+        ${t('auth.senha')}
       </label>
       <div class="auth-input-wrap">
         <input id="auth-pass" class="auth-input auth-input-pw" type="password"
-          placeholder="••••••••" autocomplete="current-password">
+          placeholder="${t('auth.senhaPlaceholder')}" autocomplete="current-password">
         <button type="button" class="auth-eye" onclick="togglePw('auth-pass',this)" tabindex="-1">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
         </button>
@@ -56,9 +57,9 @@ function renderLogin() {
 
     <div class="auth-error" id="auth-err" style="display:none"></div>
 
-    <button class="auth-submit" onclick="doLogin()">Entrar</button>
+    <button class="auth-submit" onclick="doLogin()">${t('auth.entrar')}</button>
 
-    <p class="auth-hint">Use seu email @dnata.com.br para acesso autorizado.</p>
+    <p class="auth-hint">${t('auth.hintLogin')}</p>
   `;
 
   document.getElementById('auth-pass').addEventListener('keydown', e => {
@@ -69,21 +70,30 @@ function renderLogin() {
 // ── Render signup form ────────────────────────────────
 function renderSignup() {
   const container = document.getElementById('auth-card');
+  const idioma = idiomaAtual();
   container.innerHTML = `
     <div class="auth-tabs">
-      <button class="auth-tab" onclick="renderLogin()">Entrar</button>
-      <button class="auth-tab active" onclick="renderSignup()">Criar acesso</button>
+      <button class="auth-tab" data-tab="login" onclick="renderLogin()">${t('auth.entrar')}</button>
+      <button class="auth-tab active" data-tab="signup" onclick="renderSignup()">${t('auth.criarAcesso')}</button>
+    </div>
+
+    <div class="auth-idioma">
+      <div class="auth-idioma-label">${t('auth.idioma')}</div>
+      <div class="auth-idioma-btns">
+        <button class="auth-idioma-btn${idioma==='pt'?' active':''}" onclick="setIdioma('pt')">PT-BR</button>
+        <button class="auth-idioma-btn${idioma==='en'?' active':''}" onclick="setIdioma('en')">English</button>
+      </div>
     </div>
 
     <div class="auth-field-group">
-      <label class="auth-label">Nome completo</label>
-      <input id="auth-nome" class="auth-input" type="text" placeholder="Seu nome">
+      <label class="auth-label">${t('auth.nomeCompleto')}</label>
+      <input id="auth-nome" class="auth-input" type="text" placeholder="${t('auth.seuNome')}">
     </div>
 
     <div class="auth-field-group">
       <label class="auth-label">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
-        Email corporativo
+        ${t('auth.emailCorporativo')}
       </label>
       <input id="auth-email" class="auth-input" type="email"
         placeholder="nome@dnata.com.br">
@@ -92,11 +102,11 @@ function renderSignup() {
     <div class="auth-field-group">
       <label class="auth-label">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-        Senha
+        ${t('auth.senha')}
       </label>
       <div class="auth-input-wrap">
         <input id="auth-pass" class="auth-input auth-input-pw" type="password"
-          placeholder="Mínimo 8 caracteres">
+          placeholder="${t('auth.minimo8')}">
         <button type="button" class="auth-eye" onclick="togglePw('auth-pass',this)" tabindex="-1">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
         </button>
@@ -106,11 +116,11 @@ function renderSignup() {
     <div class="auth-field-group">
       <label class="auth-label">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-        Confirmar senha
+        ${t('auth.confirmarSenha')}
       </label>
       <div class="auth-input-wrap">
         <input id="auth-pass2" class="auth-input auth-input-pw" type="password"
-          placeholder="Repita a senha">
+          placeholder="${t('auth.repitaSenha')}">
         <button type="button" class="auth-eye" onclick="togglePw('auth-pass2',this)" tabindex="-1">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
         </button>
@@ -119,9 +129,9 @@ function renderSignup() {
 
     <div class="auth-error" id="auth-err" style="display:none"></div>
 
-    <button class="auth-submit" onclick="doSignup()">Criar conta</button>
+    <button class="auth-submit" onclick="doSignup()">${t('auth.criarConta')}</button>
 
-    <p class="auth-hint">Apenas emails @dnata.com.br são autorizados.</p>
+    <p class="auth-hint">${t('auth.hintSignup')}</p>
   `;
 }
 
@@ -132,15 +142,15 @@ async function doLogin() {
   const errEl = document.getElementById('auth-err');
   const btn   = document.querySelector('.auth-submit');
 
-  if (!email || !pass) { showAuthErr('Preencha todos os campos.'); return; }
+  if (!email || !pass) { showAuthErr(t('auth.erroCampos')); return; }
 
-  btn.textContent = 'Entrando...';
+  btn.textContent = t('auth.entrando');
   btn.disabled    = true;
 
   const { error } = await authSignIn(email, pass);
 
   if (error) {
-    btn.textContent = 'Entrar';
+    btn.textContent = t('auth.entrar');
     btn.disabled    = false;
     showAuthErr(friendlyError(error.message));
   }
@@ -154,23 +164,23 @@ async function doSignup() {
   const btn   = document.querySelector('.auth-submit');
 
   const pass2 = document.getElementById('auth-pass2')?.value;
-  if (!nome || !email || !pass || !pass2) { showAuthErr('Preencha todos os campos.'); return; }
-  if (!email.endsWith('@dnata.com.br')) { showAuthErr('Use um email @dnata.com.br.'); return; }
-  if (pass.length < 8) { showAuthErr('Senha deve ter no mínimo 8 caracteres.'); return; }
-  if (pass !== pass2) { showAuthErr('As senhas não coincidem.'); return; }
+  if (!nome || !email || !pass || !pass2) { showAuthErr(t('auth.erroCampos')); return; }
+  if (!email.endsWith('@dnata.com.br')) { showAuthErr(t('auth.erroDominio')); return; }
+  if (pass.length < 8) { showAuthErr(t('auth.erroSenhaCurta')); return; }
+  if (pass !== pass2) { showAuthErr(t('auth.erroSenhaDiferente')); return; }
 
-  btn.textContent = 'Criando...';
+  btn.textContent = t('auth.criando');
   btn.disabled    = true;
 
   const { error } = await authSignUp(email, pass, nome);
 
   if (error) {
-    btn.textContent = 'Criar conta';
+    btn.textContent = t('auth.criarConta');
     btn.disabled    = false;
     showAuthErr(friendlyError(error.message));
   } else {
-    showAuthErr('Conta criada! Verifique seu email para confirmar.', 'ok');
-    btn.textContent = 'Criar conta';
+    showAuthErr(t('auth.contaCriada'), 'ok');
+    btn.textContent = t('auth.criarConta');
     btn.disabled    = false;
   }
 }
@@ -184,9 +194,9 @@ function showAuthErr(msg, type = 'err') {
 }
 
 function friendlyError(msg) {
-  if (msg.includes('Invalid login'))      return 'Email ou senha incorretos.';
-  if (msg.includes('Email not confirmed')) return 'Confirme seu email antes de entrar.';
-  if (msg.includes('already registered')) return 'Este email já está cadastrado.';
+  if (msg.includes('Invalid login'))      return t('auth.erroLoginInvalido');
+  if (msg.includes('Email not confirmed')) return t('auth.erroEmailNaoConfirmado');
+  if (msg.includes('already registered')) return t('auth.erroJaCadastrado');
   return msg;
 }
 

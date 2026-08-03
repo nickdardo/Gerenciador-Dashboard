@@ -8,12 +8,12 @@ let currentPage = 'escala';
 const ALL_ROLES = ['admin','gerente','coordenador','supervisor','lideranca','operador'];
 
 const NAV_ITEMS = [
-  { id: 'escala',     icon: 'calendar',   label: 'Escala Online',  roles: ALL_ROLES },
-  { id: 'aderencia',  icon: 'clock',      label: 'Aderência',      roles: ['admin','gerente','coordenador','supervisor','lideranca'] },
-  { id: 'headcount',  icon: 'users',      label: 'Staff',      roles: ['admin','gerente','coordenador','supervisor','lideranca'] },
-  { id: 'gerador',    icon: 'settings',   label: 'Gerador',        roles: ['admin','gerente','coordenador','supervisor','lideranca'] },
-  { id: 'comparador', icon: 'bar-chart',  label: 'Comparador',     roles: ['admin','gerente','coordenador','supervisor'] },
-  { id: 'admin',      icon: 'shield',     label: 'Admin',          roles: ['admin'] },
+  { id: 'escala',     icon: 'calendar',   label: 'Escala Online',  i18nKey: 'nav.escala',     roles: ALL_ROLES },
+  { id: 'aderencia',  icon: 'clock',      label: 'Aderência',      i18nKey: 'nav.aderencia',  roles: ['admin','gerente','coordenador','supervisor','lideranca'] },
+  { id: 'headcount',  icon: 'users',      label: 'Staff',      i18nKey: 'nav.staff',      roles: ['admin','gerente','coordenador','supervisor','lideranca'] },
+  { id: 'gerador',    icon: 'settings',   label: 'Gerador',        i18nKey: 'nav.gerador',    roles: ['admin','gerente','coordenador','supervisor','lideranca'] },
+  { id: 'comparador', icon: 'bar-chart',  label: 'Comparador',     i18nKey: 'nav.comparador', roles: ['admin','gerente','coordenador','supervisor'] },
+  { id: 'admin',      icon: 'shield',     label: 'Admin',          i18nKey: 'nav.admin',      roles: ['admin'] },
 ];
 
 let currentUserProfile = null;
@@ -65,13 +65,8 @@ async function appInit(user) {
 
 // ── Sidebar ───────────────────────────────────────────
 function renderSidebar() {
-  const nome  = currentUserProfile?.nome || currentUser?.user_metadata?.nome || currentUser?.email?.split('@')[0] || 'Usuário';
   const email = currentUser?.email || '';
-  const role  = currentUserProfile?.role || 'operador';
-  const ROLE_LABELS = { admin:'Admin Master', gerente:'Gerente', coordenador:'Coordenador', supervisor:'Supervisor', lideranca:'Liderança', operador:'Operador' };
-  const ROLE_COLORS = { admin:'#ef4444', gerente:'#f59e0b', coordenador:'#a78bfa', supervisor:'#34d399', lideranca:'#60a5fa', operador:'#94a3b8' };
-  const roleLabel = ROLE_LABELS[role] || role;
-  const roleColor = ROLE_COLORS[role] || '#94a3b8';
+  const modoClaroAtivo = temaAtual() === 'light';
 
   document.getElementById('sidebar').innerHTML = `
     <!-- Brand -->
@@ -100,24 +95,28 @@ function renderSidebar() {
             onclick="navigateTo('${item.id}')"
           >
             ${sbIcon(item.icon)}
-            <span class="sb-label">${item.label}</span>
+            <span class="sb-label">${t(item.i18nKey)}</span>
           </button>
         `).join('')}
     </nav>
 
     <!-- Footer -->
     <div class="sb-footer">
-      <div class="sb-user">
-        <div class="sb-avatar">${nome.charAt(0).toUpperCase()}</div>
-        <div class="sb-user-info">
-          <div class="sb-user-name">${nome}</div>
-          <div class="sb-user-role" style="color:${roleColor}">${roleLabel}</div>
-          <div class="sb-user-email">${email}</div>
-        </div>
-      </div>
-      <button class="sb-signout" onclick="authSignOut()" title="Sair">
+      <button class="sb-menu-item" onclick="location.reload()" title="${t('sb.atualizarDados')}">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        <span class="sb-label">${t('sb.atualizarDados')}</span>
+      </button>
+      <div class="sb-footer-divider"></div>
+      <button class="sb-menu-item" onclick="alternarTema()" title="${modoClaroAtivo ? t('sb.modoEscuro') : t('sb.modoClaro')}">
+        ${modoClaroAtivo
+          ? `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>`
+          : `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>`}
+        <span class="sb-label">${modoClaroAtivo ? t('sb.modoEscuro') : t('sb.modoClaro')}</span>
+      </button>
+      <div class="sb-footer-email" title="${email}">${email}</div>
+      <button class="sb-menu-item sb-signout" onclick="authSignOut()" title="${t('sb.sair')}">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-        <span class="sb-label">Sair</span>
+        <span class="sb-label">${t('sb.sair')}</span>
       </button>
     </div>
   `;
@@ -130,7 +129,7 @@ function renderTopbar() {
       <button class="tb-menu-btn" onclick="toggleSidebar()">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
       </button>
-      <span class="tb-page-title" id="tb-title">Escala Online</span>
+      <span class="tb-page-title" id="tb-title">${t(NAV_ITEMS.find(n => n.id === currentPage)?.i18nKey || 'nav.escala')}</span>
     </div>
     <div class="tb-right">
       <span class="tb-base-badge" id="tb-base" style="display:none"></span>
@@ -160,7 +159,7 @@ function navigateTo(pageId) {
   // Update topbar title
   const item = NAV_ITEMS.find(n => n.id === pageId);
   const titleEl = document.getElementById('tb-title');
-  if (titleEl && item) titleEl.textContent = item.label;
+  if (titleEl && item) titleEl.textContent = t(item.i18nKey);
 
   // Render page
   const content = document.getElementById('page-content');
