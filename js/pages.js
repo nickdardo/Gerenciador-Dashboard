@@ -1617,8 +1617,18 @@ async function escalaGerarFolgasAuto() {
       if (jaFolga(d) || folgasForcadas.has(d)) { seq = 0; inicioJanela = d + 1; continue; }
       seq++;
       if (seq >= 7) {
-        const candidatos = [];
-        for (let j = d; j >= inicioJanela; j--) { if (!jaFolga(j) && !folgasForcadas.has(j)) candidatos.push(j); }
+        const todosCandidatos = [];
+        for (let j = d; j >= inicioJanela; j--) { if (!jaFolga(j) && !folgasForcadas.has(j)) todosCandidatos.push(j); }
+        // Prefere um dia que não fique colado em outra folga já existente —
+        // regra confirmada com o cliente: nunca 2 folgas juntas. Só aceita
+        // ficar colado se não sobrar nenhuma opção livre na janela (aí o
+        // limite de 6 dias seguidos — que é lei — vence).
+        const naoColados = todosCandidatos.filter(j => {
+          const antes  = window._escalaDias.get(`${c.matricula}|${j-1}`)?.status === 'F' || folgasForcadas.has(j-1);
+          const depois = window._escalaDias.get(`${c.matricula}|${j+1}`)?.status === 'F' || folgasForcadas.has(j+1);
+          return !antes && !depois;
+        });
+        const candidatos = naoColados.length ? naoColados : todosCandidatos;
         const escolhido = melhorDia(candidatos) ?? d; // segurança — não deveria acontecer
         folgasForcadas.add(escolhido);
         folgasPorDia[escolhido-1]++;
@@ -1648,23 +1658,22 @@ async function escalaGerarFolgasAuto() {
     }
     let faltam = meta - folgasAtuais;
     if (faltam <= 0) continue;
-    const teveFA = await escalaTeveFAMesPassado(window._escalaBase, c.matricula, window._escalaMes);
 
     // Passo 3 — completa o restante da meta sempre escolhendo o dia mais
     // equilibrado disponível (menos folgas já colocadas, depois menor
     // demanda) — recalcula a cada folga colocada, em vez de uma lista fixa
     // ordenada só por demanda (que empilhava tudo no mesmo dia isolado).
+    // Nunca coloca 2 folgas coladas uma na outra — regra confirmada com o
+    // cliente, sem exceção (é só 1 folga por vez, nunca um par).
     while (faltam > 0) {
       const candidatos = [];
       for (let d = 1; d <= diasNoMes; d++) {
         const key = `${c.matricula}|${d}`;
         if (window._escalaDias.has(key)) continue;
         if (escalaEstaDeFerias(c.matricula, ano, mesNum, d)) continue;
-        if (teveFA) {
-          const antesOcupado = window._escalaDias.get(`${c.matricula}|${d-1}`)?.status === 'F';
-          const depoisOcupado = window._escalaDias.get(`${c.matricula}|${d+1}`)?.status === 'F';
-          if (antesOcupado || depoisOcupado) continue; // evita gerar FA de novo pra quem já teve mês passado
-        }
+        const antesOcupado = window._escalaDias.get(`${c.matricula}|${d-1}`)?.status === 'F';
+        const depoisOcupado = window._escalaDias.get(`${c.matricula}|${d+1}`)?.status === 'F';
+        if (antesOcupado || depoisOcupado) continue; // nunca 2 folgas coladas
         candidatos.push(d);
       }
       if (!candidatos.length) break; // não sobrou nenhum dia disponível (raro)
