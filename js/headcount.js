@@ -739,7 +739,7 @@ function hcExemploChartHTML(allRows, dataField, periodoAtual, cor, setPeriodFn) 
           const clique = setPeriodFn ? ` onclick="${setPeriodFn}('${m}')" style="cursor:pointer" title="${hcMesAbrev(m)}: ${v} · clique para filtrar só esse mês"` : ` title="${hcMesAbrev(m)}: ${v}"`;
           return `<div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;align-items:center"${clique}>
             <div style="font-size:10px;color:${destacado?'var(--text-primary)':'var(--text-secondary)'};font-weight:600;margin-bottom:2px">${v}</div>
-            <div style="width:100%;height:${Math.round(v/max*54)}px;background:${destacado?cor:'rgba(255,255,255,.1)'};border-radius:3px 3px 0 0"></div>
+            <div style="width:100%;height:${Math.round(v/max*54)}px;background:${destacado?cor:'var(--border-strong)'};border-radius:3px 3px 0 0"></div>
           </div>`;
         }).join('')}
       </div>
@@ -1593,7 +1593,7 @@ function hcAbsenteismoMotivosHTML() {
       ${motivos.slice(0,10).map(([motivo,n]) => { const ativo = window._hcAbsMotivoFiltro === motivo; return `
         <div onclick="hcAbsenteismoFiltrarPorMotivo('${motivo.replace(/'/g,"\\'")}')" style="display:flex;align-items:center;gap:10px;margin-bottom:8px;cursor:pointer;border-radius:6px;background:${ativo?'rgba(0,160,210,.1)':'transparent'};padding:3px 6px;margin-left:-6px" title="Clique pra ver quem teve esse motivo">
           <div style="width:220px;font-size:12px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${motivo}">${motivo}</div>
-          <div style="flex:1;height:16px;border-radius:3px;overflow:hidden;background:rgba(255,255,255,.05)">
+          <div style="flex:1;height:16px;border-radius:3px;overflow:hidden;background:var(--weekend-tint)">
             <div style="width:${Math.round(n/max*100)}%;height:100%;background:#fc8181"></div>
           </div>
           <div style="width:50px;text-align:right;font-size:11px;color:var(--text-secondary)">${Math.round(n/total*1000)/10}%</div>
@@ -1966,7 +1966,7 @@ function hcMovPorBaseHTML() {
       ${bases.map(b => `
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
           <div style="width:48px;font-size:12.5px;color:var(--text-primary);font-weight:600">${b.base}</div>
-          <div style="flex:1;display:flex;height:16px;border-radius:3px;overflow:hidden;background:rgba(255,255,255,.05)">
+          <div style="flex:1;display:flex;height:16px;border-radius:3px;overflow:hidden;background:var(--weekend-tint)">
             <div style="width:${Math.round(b.admissoes/max*100)}%;background:#5fa87a" title="${b.admissoes} admissões"></div>
             <div style="width:${Math.round(b.desligados/max*100)}%;background:#b56666" title="${b.desligados} desligados"></div>
           </div>
@@ -2002,7 +2002,7 @@ function hcMovPorCargoHTML() {
       ${cargos.map(c => { const ativo = window._hcMovFiltroExtra?.tipo === 'cargo' && window._hcMovFiltroExtra?.valor === c.cargo; return `
         <div onclick="hcMovFiltrarPor('cargo','${c.cargo.replace(/'/g,"\\'")}')" style="display:flex;align-items:center;gap:10px;margin-bottom:8px;cursor:pointer;border-radius:6px;background:${ativo?'rgba(0,160,210,.1)':'transparent'};padding:3px 6px;margin-left:-6px" title="Clique pra ver quem é desse cargo">
           <div style="width:220px;font-size:12px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${c.cargo}">${c.cargo}</div>
-          <div style="flex:1;display:flex;height:16px;border-radius:3px;overflow:hidden;background:rgba(255,255,255,.05)">
+          <div style="flex:1;display:flex;height:16px;border-radius:3px;overflow:hidden;background:var(--weekend-tint)">
             <div style="width:${Math.round(c.admissoes/max*100)}%;background:#5fa87a" title="${c.admissoes} admissões"></div>
             <div style="width:${Math.round(c.desligados/max*100)}%;background:#b56666" title="${c.desligados} desligados"></div>
           </div>
@@ -2033,7 +2033,7 @@ function hcMovCausaHTML() {
       ${causas.slice(0,8).map(([causa,n]) => { const ativo = window._hcMovFiltroExtra?.tipo === 'causa' && window._hcMovFiltroExtra?.valor === causa; return `
         <div onclick="hcMovFiltrarPor('causa','${causa.replace(/'/g,"\\'")}')" style="display:flex;align-items:center;gap:10px;margin-bottom:8px;cursor:pointer;border-radius:6px;background:${ativo?'rgba(0,160,210,.1)':'transparent'};padding:3px 6px;margin-left:-6px" title="Clique pra ver quem saiu por esse motivo">
           <div style="width:220px;font-size:12px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${causa}">${causa}</div>
-          <div style="flex:1;height:16px;border-radius:3px;overflow:hidden;background:rgba(255,255,255,.05)">
+          <div style="flex:1;height:16px;border-radius:3px;overflow:hidden;background:var(--weekend-tint)">
             <div style="width:${Math.round(n/max*100)}%;height:100%;background:#b56666"></div>
           </div>
           <div style="width:50px;text-align:right;font-size:11px;color:var(--text-secondary)">${Math.round(n/total*1000)/10}%</div>

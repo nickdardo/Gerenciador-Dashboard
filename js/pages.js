@@ -593,7 +593,7 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
     <div class="hc-panel" style="margin-bottom:16px">
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <div style="position:relative;flex:1;min-width:260px">
-          <input id="escala-busca" class="adh-search-input" style="width:100%;box-sizing:border-box;padding:9px 12px;background:rgba(255,255,255,.03);border:1px solid var(--border-strong);border-radius:8px;color:var(--text-primary)"
+          <input id="escala-busca" class="adh-search-input" style="width:100%;box-sizing:border-box;padding:9px 12px;background:var(--bg-hover);border:1px solid var(--border-strong);border-radius:8px;color:var(--text-primary)"
             oninput="escalaBuscarColab(this.value)" placeholder="Buscar por matrícula ou nome pra adicionar...">
           <div id="escala-busca-resultados" style="position:absolute;top:calc(100% + 4px);left:0;right:0;background:#141b2c;border:1px solid var(--border-strong);border-radius:8px;z-index:20;display:none;max-height:220px;overflow-y:auto;box-shadow:var(--adh-shadow-card)"></div>
         </div>
@@ -871,7 +871,7 @@ function escalaLinhaColabHTML(c, ci, ctx) {
   const intInicio = c.intervalo_inicio_manual || '';
   const intFim = c.intervalo_fim_manual || '';
   const setor = escalaSetorDoTurno(entrada);
-  const zebra = ci % 2 === 0 ? 'rgba(255,255,255,.02)' : 'transparent';
+  const zebra = ci % 2 === 0 ? 'var(--zebra)' : 'transparent';
 
   const conteudo = escalaConteudoDoMes(c, ano, mesNum, diasNoMes);
 
@@ -904,7 +904,7 @@ function escalaLinhaColabHTML(c, ci, ctx) {
     const dataISO = `${ano}-${String(mesNum).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
     const feriado = window._escalaFeriados?.get(dataISO);
     const fimDeSemana = dow === 0 || dow === 6;
-    const bgCel = feriado ? 'rgba(252,129,129,.08)' : fimDeSemana ? 'rgba(255,255,255,.03)' : 'transparent';
+    const bgCel = feriado ? 'rgba(252,129,129,.08)' : fimDeSemana ? 'var(--bg-hover)' : 'transparent';
     html += `<td data-mat="${c.matricula}" data-dia="${dia}" onclick="${item.editavel?`escalaSelecionarCelula('${c.matricula}',${dia},this)`:''}" style="padding:2px;height:32px;cursor:${item.editavel?'pointer':'default'};background:${bgCel};border:${BORDA}" title="${feriado?feriado.nome:(item.detalhe||'')}">${escalaCelHTML(item)}</td>`;
   });
   html += `</tr>`;
@@ -935,7 +935,7 @@ function escalaBlocoFolgasPorDia(colabsDoBloco, ano, mesNum, diasNoMes) {
 }
 function escalaBlocoSubtotalHTML(label, colabsDoBloco, ano, mesNum, diasNoMes, NCOLS_FIXAS, forte, BORDA) {
   const porDia = escalaBlocoFolgasPorDia(colabsDoBloco, ano, mesNum, diasNoMes);
-  const bg = forte ? 'var(--bg-surface)' : 'rgba(255,255,255,.03)';
+  const bg = forte ? 'var(--bg-surface)' : 'var(--bg-hover)';
   const peso = forte ? '600' : '500';
   return `<tr style="background:${bg}">
     <td colspan="${NCOLS_FIXAS}" style="padding:4px 10px;color:var(--text-secondary);font-size:11px;text-align:right;font-weight:${peso};border:${BORDA}">${label} — folgas no dia →</td>
@@ -968,7 +968,7 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   const temOrdemManual = colabs.some(c => c.ordem_manual != null);
   const NCOLS_FIXAS = 11; // Remover, Matrícula, Nome, Setor, Turno, Função, Entrada, Intervalo início, Intervalo fim, Saída, CH
   const NCOLS = NCOLS_FIXAS + diasNoMes;
-  const BORDA = '1px solid rgba(255,255,255,.08)';
+  const BORDA = '1px solid var(--border-strong)';
   const turnosExistentes = [...new Set(colabs.map(c => c.turno).filter(Boolean))].sort((a,b) => a.localeCompare(b));
 
   const LARG = { remover:36, mat:80, nome:210, setor:100, turno:110, funcao:190, entrada:60, intInicio:60, intFim:60, saida:60, ch:46, dia:30 };
@@ -1004,7 +1004,7 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     const dataISO = `${ano}-${String(mesNum).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const feriado = window._escalaFeriados?.get(dataISO);
     const fimDeSemana = dow === 0 || dow === 6;
-    const bg = feriado ? 'rgba(252,129,129,.14)' : fimDeSemana ? 'rgba(255,255,255,.05)' : 'transparent';
+    const bg = feriado ? 'rgba(252,129,129,.14)' : fimDeSemana ? 'var(--weekend-tint)' : 'transparent';
     html += `<th style="padding:5px 2px;color:${feriado?'#fc8181':'var(--text-muted)'};font-size:10.5px;font-weight:600;text-align:center;background:${bg};border:${BORDA}" title="${feriado?feriado.nome:''}">${ESCALA_DIAS_SEMANA[dow]}<br><span style="color:${feriado?'#fc8181':'var(--text-secondary)'};font-size:11px">${d}</span></th>`;
   }
   html += `</tr></thead><tbody>`;
@@ -1021,7 +1021,7 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     conteudo.forEach((item, i) => { if (!item.status) contagemPorDia[i]++; }); // sem status = trabalhando
   });
   html += `<tr style="background:rgba(0,160,210,.06)">
-    <td colspan="${NCOLS_FIXAS}" style="border:${BORDA};padding:6px 10px;color:var(--text-secondary);font-size:11px;text-align:right;font-weight:600;position:sticky;left:0;background:#111a2c;white-space:nowrap">Trabalhando no dia →</td>
+    <td colspan="${NCOLS_FIXAS}" style="border:${BORDA};padding:6px 10px;color:var(--text-secondary);font-size:11px;text-align:right;font-weight:600;position:sticky;left:0;background:var(--bg-surface);white-space:nowrap">Trabalhando no dia →</td>
     ${contagemPorDia.map(n => `<td style="text-align:center;border:${BORDA};color:var(--text-primary);font-weight:700;font-size:12px">${n}</td>`).join('')}
   </tr>`;
 

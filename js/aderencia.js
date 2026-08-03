@@ -1118,7 +1118,7 @@ function adhBuildEvolutionChart(hist) {
   const areaPts = `${x(0)},${H-24} ${pts} ${x(n-1)},${H-24}`;
   const dots = vals.map((v,i) => `<circle cx="${x(i)}" cy="${y(v)}" r="3.5" fill="#5fa87a"><title>${adhMonthLabel(meses[i])}: ${v}%</title></circle>`).join('');
   const labels = meses.map((m,i) => `<text x="${x(i)}" y="${H-6}" text-anchor="middle" font-size="9" fill="#6b7488">${adhMonthLabel(m)}</text>`).join('');
-  const gridY = [0,25,50,75,100].map(v => `<line x1="${PAD}" y1="${y(v)}" x2="${W-PAD}" y2="${y(v)}" stroke="rgba(255,255,255,.05)"/><text x="4" y="${y(v)+3}" font-size="8" fill="#6b7488">${v}</text>`).join('');
+  const gridY = [0,25,50,75,100].map(v => `<line x1="${PAD}" y1="${y(v)}" x2="${W-PAD}" y2="${y(v)}" stroke="var(--weekend-tint)"/><text x="4" y="${y(v)+3}" font-size="8" fill="#6b7488">${v}</text>`).join('');
   return `
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;font-size:10px;color:var(--text-muted)">
       <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#5fa87a;margin-right:4px"></span>Realizado (média da rede)</span>
@@ -2083,7 +2083,7 @@ function adhBuildPanelContent(mat, filial, nome, cargo, compact = false) {
   // Horizontal grid lines
   const grid = [0.25,0.5,0.75,1].map(v=>{
     const y=H-4-Math.round(v*(H-8));
-    return `<line x1="${PAD}" y1="${y}" x2="${W-PAD}" y2="${y}" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>`;
+    return `<line x1="${PAD}" y1="${y}" x2="${W-PAD}" y2="${y}" stroke="var(--weekend-tint)" stroke-width="1"/>`;
   }).join('');
 
   const chartBars = `<svg width="100%" viewBox="0 0 ${W} ${H+20}" xmlns="http://www.w3.org/2000/svg" style="overflow:visible">
