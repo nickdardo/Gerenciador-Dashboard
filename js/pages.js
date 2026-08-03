@@ -724,25 +724,28 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     const fb = window.eoColabs?.get(b.matricula)?.funcao || '';
     return fa.localeCompare(fb) || entradaDoColab(a).localeCompare(entradaDoColab(b)) || String(a.nome||'').localeCompare(String(b.nome||''));
   });
-  const NCOLS_FIXAS = 8; // Matrícula, Nome, Setor, Função, Entrada, Saída, Horário, CH
+  const NCOLS_FIXAS = 9; // Remover, Matrícula, Nome, Setor, Função, Entrada, Intervalo início, Intervalo fim, Saída, CH
   const NCOLS = NCOLS_FIXAS + diasNoMes;
   const BORDA = '1px solid rgba(255,255,255,.08)';
 
-  const LARG = { mat:80, nome:210, setor:100, funcao:190, entrada:60, saida:60, horario:90, ch:46, dia:30 };
-  const leftNome = LARG.mat;
+  const LARG = { remover:30, mat:80, nome:210, setor:100, funcao:190, entrada:60, intInicio:60, intFim:60, saida:60, ch:46, dia:30 };
+  const leftMat  = LARG.remover;
+  const leftNome = LARG.remover + LARG.mat;
 
   let html = `<table style="border-collapse:collapse;font-size:13px;width:100%;table-layout:fixed"><colgroup>
-    <col style="width:${LARG.mat}px"><col style="width:${LARG.nome}px"><col style="width:${LARG.setor}px"><col style="width:${LARG.funcao}px">
-    <col style="width:${LARG.entrada}px"><col style="width:${LARG.saida}px"><col style="width:${LARG.horario}px"><col style="width:${LARG.ch}px">
+    <col style="width:${LARG.remover}px"><col style="width:${LARG.mat}px"><col style="width:${LARG.nome}px"><col style="width:${LARG.setor}px"><col style="width:${LARG.funcao}px">
+    <col style="width:${LARG.entrada}px"><col style="width:${LARG.intInicio}px"><col style="width:${LARG.intFim}px"><col style="width:${LARG.saida}px"><col style="width:${LARG.ch}px">
     ${Array(diasNoMes).fill(`<col style="width:${LARG.dia}px">`).join('')}
   </colgroup><thead><tr>`;
-  html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;left:0;background:var(--bg-surface);z-index:2;border:${BORDA}">Matrícula</th>`;
+  html += `<th style="padding:8px 4px;position:sticky;left:0;background:var(--bg-surface);z-index:2;border:${BORDA}"></th>`;
+  html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;left:${leftMat}px;background:var(--bg-surface);z-index:2;border:${BORDA}">Matrícula</th>`;
   html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;left:${leftNome}px;background:var(--bg-surface);z-index:2;border:${BORDA}">Nome</th>`;
   html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;border:${BORDA}">Setor</th>`;
   html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;border:${BORDA}">Função</th>`;
   html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:11px;text-transform:uppercase;border:${BORDA}">Entrada</th>`;
+  html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:10px;text-transform:uppercase;border:${BORDA}" title="Início do intervalo">Interv. ↓</th>`;
+  html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:10px;text-transform:uppercase;border:${BORDA}" title="Fim do intervalo">Interv. ↑</th>`;
   html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:11px;text-transform:uppercase;border:${BORDA}">Saída</th>`;
-  html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:11px;text-transform:uppercase;border:${BORDA}">Horário</th>`;
   html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:11px;text-transform:uppercase;border:${BORDA}">CH</th>`;
   for (let d = 1; d <= diasNoMes; d++) {
     const dow = new Date(ano, mesNum-1, d).getDay();
@@ -758,11 +761,12 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   // Enter, o nome aparece sozinho (mesma busca do campo de cima). Fica no
   // topo, sempre visível, em vez de escondida lá embaixo da lista.
   html += `<tr>
-    <td style="border:${BORDA};padding:2px;position:sticky;left:0;background:var(--adh-surface)">
+    <td style="border:${BORDA};padding:2px;position:sticky;left:0;background:var(--adh-surface)"></td>
+    <td style="border:${BORDA};padding:2px;position:sticky;left:${leftMat}px;background:var(--adh-surface)">
       <input type="text" id="escala-add-inline" placeholder="+ matrícula" onkeydown="if(event.key==='Enter') escalaAdicionarPorMatriculaInline(this.value)"
         style="width:100%;box-sizing:border-box;background:transparent;border:1px dashed var(--border-strong);border-radius:4px;color:var(--text-secondary);font-family:monospace;font-size:11px;padding:6px 8px">
     </td>
-    <td colspan="${NCOLS-1}" style="border:${BORDA};padding:8px 10px;color:var(--text-muted);font-size:11px">digite a matrícula e aperte Enter — o nome aparece sozinho</td>
+    <td colspan="${NCOLS-2}" style="border:${BORDA};padding:8px 10px;color:var(--text-muted);font-size:11px">digite a matrícula e aperte Enter — o nome aparece sozinho</td>
   </tr>`;
 
   if (!colabs.length) {
@@ -777,21 +781,23 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     const [entradaCalc, saidaCalc] = horarioFixo ? horarioFixo.split('-') : [null, null];
     const entrada = c.entrada_manual || entradaCalc || '';
     const saida = c.saida_manual || saidaCalc || '';
-    const horarioExibido = (entrada && saida) ? `${entrada}-${saida}` : (horarioFixo || '—');
+    const intInicio = c.intervalo_inicio_manual || '';
+    const intFim = c.intervalo_fim_manual || '';
     const setor = escalaSetorDoTurno(entrada);
     const zebra = ci % 2 === 0 ? 'rgba(255,255,255,.02)' : 'transparent';
 
     const conteudo = escalaConteudoDoMes(c, ano, mesNum, diasNoMes);
 
     html += `<tr style="background:${zebra}">`;
-    html += `<td style="padding:2px 10px;position:sticky;left:0;background:inherit;border:${BORDA}"><input type="text" value="${c.matricula}" onchange="escalaEditarMatricula('${c.matricula}',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-primary);font-weight:500;text-overflow:ellipsis;padding:6px 0" title="Editar matrícula"></td>`;
-    html += `<td style="padding:8px 10px;color:var(--text-primary);font-weight:500;position:sticky;left:${leftNome}px;background:inherit;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:${BORDA}" title="${c.nome||''}">${c.nome||''}
-      <span onclick="escalaRemoverColab('${c.matricula}')" style="cursor:pointer;color:#fc8181;margin-left:4px" title="Remover da escala">✕</span></td>`;
+    html += `<td style="text-align:center;position:sticky;left:0;background:inherit;border:${BORDA}"><span onclick="escalaRemoverColab('${c.matricula}')" style="cursor:pointer;color:#fc8181;font-size:15px;font-weight:700" title="Remover da escala">✕</span></td>`;
+    html += `<td style="padding:2px 10px;position:sticky;left:${leftMat}px;background:inherit;border:${BORDA}"><input type="text" value="${c.matricula}" onchange="escalaEditarMatricula('${c.matricula}',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-primary);font-weight:500;text-overflow:ellipsis;padding:6px 0" title="Editar matrícula"></td>`;
+    html += `<td style="padding:8px 10px;color:var(--text-primary);font-weight:500;position:sticky;left:${leftNome}px;background:inherit;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:${BORDA}" title="${c.nome||''}">${c.nome||''}</td>`;
     html += `<td style="padding:8px 10px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;border:${BORDA}">${setor}</td>`;
     html += `<td style="padding:8px 10px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:${BORDA}" title="${funcao}">${funcao}</td>`;
     html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" value="${entrada}" placeholder="--:--" onchange="escalaEditarHorario('${c.matricula}','entrada',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-secondary);text-align:center;font-size:12px;padding:4px"></td>`;
+    html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" value="${intInicio}" placeholder="--:--" onchange="escalaEditarHorario('${c.matricula}','intervalo_inicio',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-muted);text-align:center;font-size:12px;padding:4px" title="Início do intervalo"></td>`;
+    html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" value="${intFim}" placeholder="--:--" onchange="escalaEditarHorario('${c.matricula}','intervalo_fim',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-muted);text-align:center;font-size:12px;padding:4px" title="Fim do intervalo"></td>`;
     html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" value="${saida}" placeholder="--:--" onchange="escalaEditarHorario('${c.matricula}','saida',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-secondary);text-align:center;font-size:12px;padding:4px"></td>`;
-    html += `<td style="text-align:center;color:var(--text-secondary);font-size:11.5px;white-space:nowrap;border:${BORDA}">${horarioExibido}</td>`;
     html += `<td style="text-align:center;color:var(--text-secondary);border:${BORDA}">${ch}</td>`;
     conteudo.forEach((item, i) => {
       const dia = i+1;
@@ -920,13 +926,47 @@ async function escalaEditarMatricula(matriculaAntiga, novaMatriculaRaw) {
 }
 
 async function escalaEditarHorario(matricula, campo, valor) {
-  const coluna = campo === 'entrada' ? 'entrada_manual' : 'saida_manual';
-  const { error } = await db.from('escala_colaborador').update({ [coluna]: valor || null })
+  const COLUNAS = {
+    entrada: 'entrada_manual',
+    intervalo_inicio: 'intervalo_inicio_manual',
+    intervalo_fim: 'intervalo_fim_manual',
+    saida: 'saida_manual',
+  };
+  const coluna = COLUNAS[campo];
+  if (!coluna) return;
+
+  const updates = { [coluna]: valor || null };
+
+  // Ao preencher a Entrada, se a Saída ainda estiver vazia, calcula
+  // automaticamente somando a jornada diária da carga horária (CH) do
+  // colaborador — poupa ter que digitar a Saída na mão toda vez. Não
+  // considera o intervalo (são campos separados, editáveis à parte).
+  const c = (window._escalaColabs||[]).find(x => x.matricula === matricula);
+  let saidaAutoCalculada = null;
+  if (campo === 'entrada' && valor && !c?.saida_manual) {
+    const horaMatch = valor.match(/^(\d{1,2}):(\d{2})$/);
+    const ch = window.eoColabs?.get(matricula)?.ch;
+    const chNum = parseInt(String(ch||'').replace(/\D/g,''), 10);
+    const regra = ESCALA_CH_REGRAS[chNum];
+    if (horaMatch && regra) {
+      const minutosEntrada = parseInt(horaMatch[1],10)*60 + parseInt(horaMatch[2],10);
+      const minutosSaida = (minutosEntrada + regra.jornadaDiaria*60) % (24*60);
+      saidaAutoCalculada = `${String(Math.floor(minutosSaida/60)).padStart(2,'0')}:${String(minutosSaida%60).padStart(2,'0')}`;
+      updates.saida_manual = saidaAutoCalculada;
+    }
+  }
+
+  const { error } = await db.from('escala_colaborador').update(updates)
     .eq('base', window._escalaBase).eq('mes', window._escalaMes).eq('matricula', matricula);
   if (error) { escalaMsg('Erro ao salvar horário: ' + error.message, true); return; }
-  const c = (window._escalaColabs||[]).find(x => x.matricula === matricula);
-  if (c) c[coluna] = valor || null;
-  escalaMsg('✓ Horário atualizado.');
+
+  if (c) Object.assign(c, updates);
+  if (saidaAutoCalculada) {
+    escalaGradeAtualiza(); // precisa re-renderizar pra mostrar a Saída preenchida sozinha
+    escalaMsg(`✓ Horário salvo — Saída calculada automaticamente (${saidaAutoCalculada}) pela carga horária.`);
+  } else {
+    escalaMsg('✓ Horário atualizado.');
+  }
 }
 
 // Puxa todo o staff ativo da base pro mês atual, direto do cadastro (sem
