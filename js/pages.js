@@ -16,6 +16,8 @@ function escalaIcone(nome) {
     download: `<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>`,
     upload: `<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>`,
     layers: `<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>`,
+    lock: `<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>`,
+    unlock: `<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/>`,
   };
   return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px" aria-hidden="true">${icones[nome]||''}</svg>`;
 }
@@ -504,10 +506,14 @@ async function escalaRenderGrade(el) {
   const base = window._escalaBase;
   const mes  = window._escalaMes;
 
-  const [{ data: colabsIniciais }, { data: dias }] = await Promise.all([
+  const [{ data: colabsIniciais }, { data: dias }, { data: travaRow }] = await Promise.all([
     db.from('escala_colaborador').select('*').eq('base', base).eq('mes', mes).order('created_at'),
     db.from('escala_dia').select('*').eq('base', base).eq('mes', mes),
+    db.from('escala_trava').select('*').eq('base', base).eq('mes', mes).maybeSingle(),
   ]);
+
+  window._escalaTravada = !!travaRow?.travada;
+  window._escalaTravaInfo = travaRow?.travada ? travaRow : null;
 
   let colabs = colabsIniciais || [];
   let autoPopulado = false;
@@ -560,6 +566,49 @@ async function escalaRenderGrade(el) {
   escalaGradeRenderShell(el, ano, mesNum, diasNoMes);
 }
 
+// ── Travar/destravar a escala ──────────────────────────
+// Só Gerente, Coordenador ou Admin podem travar/destravar — confirmado com
+// o cliente. Enquanto travada, bloqueia TUDO que edita (folgas, adicionar/
+// remover colaborador, horário) — quem tem permissão precisa destravar de
+// propósito antes de editar, não dá pra editar "sem querer" com a escala
+// fechada.
+function escalaPodeTravar() {
+  const role = currentUserProfile?.role;
+  return role === 'admin' || role === 'gerente' || role === 'coordenador';
+}
+
+function escalaVerificarTravada() {
+  if (window._escalaTravada) {
+    escalaMsg('🔒 Essa escala está travada — destrave pra poder editar.', true);
+    return true;
+  }
+  return false;
+}
+
+async function escalaAlternarTrava() {
+  if (!escalaPodeTravar()) { escalaMsg('Só Gerente, Coordenador ou Admin podem travar/destravar a escala.', true); return; }
+
+  const base = window._escalaBase, mes = window._escalaMes;
+  const travarAgora = !window._escalaTravada;
+
+  const confirmMsg = travarAgora
+    ? 'Travar essa escala? Ninguém vai poder editar folgas, adicionar/remover colaborador ou mudar horário até destravar.'
+    : 'Destravar essa escala pra edição?';
+  if (!confirm(confirmMsg)) return;
+
+  const payload = {
+    base, mes, travada: travarAgora,
+    travada_por: travarAgora ? (currentUserProfile?.id || currentUser?.id || null) : null,
+    travada_por_nome: travarAgora ? (currentUserProfile?.nome || currentUser?.email || null) : null,
+    travada_em: travarAgora ? new Date() : null,
+  };
+  const { error } = await db.from('escala_trava').upsert(payload, { onConflict: 'base,mes' });
+  if (error) { escalaMsg(`Erro ao ${travarAgora ? 'travar' : 'destravar'}: ` + error.message, true); return; }
+
+  escalaMsg(travarAgora ? '🔒 Escala travada.' : '🔓 Escala destravada — já pode editar.');
+  escalaRenderGrade(document.getElementById('page-content'));
+}
+
 function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
   const base = window._escalaBase;
   const mes  = window._escalaMes;
@@ -567,6 +616,14 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
   const myBases = (currentUserProfile?.bases || []).filter(b => b !== '*');
   const isAdmin = role === 'admin';
   const bases = isAdmin ? (typeof hcAllBases === 'function' ? hcAllBases() : []) : myBases;
+
+  const travada = !!window._escalaTravada;
+  const podeTravar = escalaPodeTravar();
+  const dis = travada ? 'disabled' : '';
+
+  const travaBtnHTML = podeTravar
+    ? `<button class="adh-refresh-btn" style="${travada?'background:#fc8181;color:#1a0b0b;border:none;font-weight:600':''}" onclick="escalaAlternarTrava()">${escalaIcone(travada?'lock':'unlock')}${travada?'Destravar escala':'Travar escala'}</button>`
+    : (travada ? `<span class="adh-base-badge" style="color:#fc8181;border-color:rgba(252,129,129,.35)">${escalaIcone('lock')}Escala travada</span>` : '');
 
   el.innerHTML = `
     <div class="page-header">
@@ -580,10 +637,16 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
           : `<span class="adh-base-badge">${base||'—'}</span>`}
         <select class="adh-month-select" onchange="escalaSetMes(this.value)">${escalaMesOptionsHTML(mes)}</select>
         <button class="adh-refresh-btn" style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600" onclick="escalaToggleVoosPanel()">✈ Voos &amp; demanda</button>
+        ${travaBtnHTML}
       </div>
     </div>
 
     <div id="escala-voos-panel" style="display:none;margin-bottom:16px"></div>
+
+    ${travada ? `
+    <div style="font-size:11.5px;color:#fc8181;background:rgba(252,129,129,.08);border:1px solid rgba(252,129,129,.25);border-radius:8px;padding:8px 14px;margin-bottom:14px">
+      🔒 Escala travada${window._escalaTravaInfo?.travada_por_nome ? ` por ${window._escalaTravaInfo.travada_por_nome}` : ''}${window._escalaTravaInfo?.travada_em ? ` em ${new Date(window._escalaTravaInfo.travada_em).toLocaleString('pt-BR')}` : ''} — ninguém pode editar folgas, colaboradores ou horário até destravar.
+    </div>` : ''}
 
     ${window._escalaAutoPopulado ? `
     <div style="font-size:11.5px;color:#5fa87a;background:rgba(95,168,122,.08);border:1px solid rgba(95,168,122,.25);border-radius:8px;padding:8px 14px;margin-bottom:14px">
@@ -593,21 +656,21 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
     <div class="hc-panel" style="margin-bottom:16px">
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <div style="position:relative;flex:1;min-width:260px">
-          <input id="escala-busca" class="adh-search-input" style="width:100%;box-sizing:border-box;padding:9px 12px;background:var(--bg-hover);border:1px solid var(--border-strong);border-radius:8px;color:var(--text-primary)"
+          <input id="escala-busca" class="adh-search-input" ${dis} style="width:100%;box-sizing:border-box;padding:9px 12px;background:var(--bg-hover);border:1px solid var(--border-strong);border-radius:8px;color:var(--text-primary)"
             oninput="escalaBuscarColab(this.value)" placeholder="Buscar por matrícula ou nome pra adicionar...">
           <div id="escala-busca-resultados" style="position:absolute;top:calc(100% + 4px);left:0;right:0;background:#141b2c;border:1px solid var(--border-strong);border-radius:8px;z-index:20;display:none;max-height:220px;overflow-y:auto;box-shadow:var(--adh-shadow-card)"></div>
         </div>
-        <button class="adh-refresh-btn" style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600" onclick="escalaPreencherTodoStaff()">${escalaIcone('users')}Preencher com Staff</button>
-        <button class="adh-refresh-btn" style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600" onclick="escalaGerarFolgasAuto()">${escalaIcone('zap')}Gerar folgas automáticas</button>
-        <button class="adh-refresh-btn" onclick="escalaAdicionarFeriado()">${escalaIcone('calendarPlus')}+ Feriado dessa base</button>
-        <button class="adh-refresh-btn" onclick="escalaPreencherHorarioMesAnterior()">${escalaIcone('calclock')}Horário do mês anterior</button>
+        <button class="adh-refresh-btn" ${dis} style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600" onclick="escalaPreencherTodoStaff()">${escalaIcone('users')}Preencher com Staff</button>
+        <button class="adh-refresh-btn" ${dis} style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600" onclick="escalaGerarFolgasAuto()">${escalaIcone('zap')}Gerar folgas automáticas</button>
+        <button class="adh-refresh-btn" ${dis} onclick="escalaAdicionarFeriado()">${escalaIcone('calendarPlus')}+ Feriado dessa base</button>
+        <button class="adh-refresh-btn" ${dis} onclick="escalaPreencherHorarioMesAnterior()">${escalaIcone('calclock')}Horário do mês anterior</button>
         <button class="adh-refresh-btn" onclick="escalaBaixarModeloCursos()">${escalaIcone('download')}Modelo de Cursos</button>
-        <button class="adh-refresh-btn" onclick="document.getElementById('escala-cursos-input').click()">${escalaIcone('upload')}Importar Cursos</button>
-        <input type="file" id="escala-cursos-input" accept=".xlsx,.xls" style="display:none" onchange="escalaImportarCursos(this)">
-        <button class="adh-refresh-btn" style="color:#fc8181" onclick="escalaLimparStatus()">${escalaIcone('trash')}Limpar folgas/status</button>
-        <button class="adh-refresh-btn" style="color:#fc8181" onclick="escalaLimparColaboradores()">${escalaIcone('trash')}Limpar colaboradores</button>
-        <button id="escala-btn-remover-sel" class="adh-refresh-btn" style="color:#fc8181;display:none" onclick="escalaRemoverSelecionados()">${escalaIcone('trash')}Remover selecionados (0)</button>
-        <button class="adh-refresh-btn" onclick="escalaLimparOrdemManual()" title="Volta a ordenar sozinho por função + horário de entrada">${escalaIcone('sort')}Ordenar automático</button>
+        <button class="adh-refresh-btn" ${dis} onclick="document.getElementById('escala-cursos-input').click()">${escalaIcone('upload')}Importar Cursos</button>
+        <input type="file" id="escala-cursos-input" ${dis} accept=".xlsx,.xls" style="display:none" onchange="escalaImportarCursos(this)">
+        <button class="adh-refresh-btn" ${dis} style="color:#fc8181" onclick="escalaLimparStatus()">${escalaIcone('trash')}Limpar folgas/status</button>
+        <button class="adh-refresh-btn" ${dis} style="color:#fc8181" onclick="escalaLimparColaboradores()">${escalaIcone('trash')}Limpar colaboradores</button>
+        <button id="escala-btn-remover-sel" class="adh-refresh-btn" ${dis} style="color:#fc8181;display:none" onclick="escalaRemoverSelecionados()">${escalaIcone('trash')}Remover selecionados (0)</button>
+        <button class="adh-refresh-btn" ${dis} onclick="escalaLimparOrdemManual()" title="Volta a ordenar sozinho por função + horário de entrada">${escalaIcone('sort')}Ordenar automático</button>
         <button class="adh-refresh-btn" style="${window._escalaAgruparPorTurno?'background:var(--blue);color:#0b0f1a;border:none;font-weight:600':''}" onclick="escalaToggleAgruparTurno()" title="Agrupa a lista por função e depois por turno, com subtotal por bloco">${escalaIcone('layers')}Agrupar por função/turno</button>
       </div>
       <div id="escala-status-msg" style="font-size:11px;color:var(--text-muted);margin-top:8px;min-height:14px"></div>
@@ -839,6 +902,7 @@ function escalaToggleAgruparTurno() {
 // campo manual da escala (update simples, nunca upsert, pra não sobrescrever
 // o resto da linha que já existe).
 async function escalaEditarTurno(matricula, valorSelecionado) {
+  if (escalaVerificarTravada()) { escalaGradeAtualiza(); return; }
   let turno = valorSelecionado;
   if (turno === '__novo__') {
     const novo = prompt('Nome do novo turno (ex: Turno D, Operadores Noite):');
@@ -861,6 +925,8 @@ async function escalaEditarTurno(matricula, valorSelecionado) {
 // na lista simples quanto dentro de cada bloco de função/turno agrupado.
 function escalaLinhaColabHTML(c, ci, ctx) {
   const { ano, mesNum, diasNoMes, leftMat, leftNome, BORDA, turnosExistentes } = ctx;
+  const travada = !!window._escalaTravada;
+  const dis = travada ? 'disabled' : '';
   const info = window.eoColabs?.get(c.matricula);
   const funcao = info?.funcao || '—';
   const ch = info?.ch || '—';
@@ -878,25 +944,25 @@ function escalaLinhaColabHTML(c, ci, ctx) {
   let html = `<tr style="background:${zebra}" ondragover="event.preventDefault()" ondrop="escalaDrop(event,'${c.matricula}')">`;
   html += `<td style="text-align:center;position:sticky;left:0;background:inherit;border:${BORDA};padding:0">
     <div style="display:flex;align-items:center;justify-content:center;gap:3px">
-      <span draggable="true" ondragstart="escalaDragStart(event,'${c.matricula}')" style="cursor:grab;color:var(--text-muted);font-size:12px;user-select:none" title="Arrastar pra reordenar">⠿</span>
+      <span draggable="${!travada}" ondragstart="escalaDragStart(event,'${c.matricula}')" style="cursor:${travada?'default':'grab'};color:var(--text-muted);font-size:12px;user-select:none;opacity:${travada?.4:1}" title="Arrastar pra reordenar">⠿</span>
       <input type="checkbox" data-escala-check="${c.matricula}" ${window._escalaSelecionados?.has(c.matricula)?'checked':''} onchange="escalaToggleSelecao('${c.matricula}',this.checked)" title="Selecionar" style="margin:0">
     </div>
   </td>`;
-  html += `<td style="padding:2px 10px;position:sticky;left:${leftMat}px;background:inherit;border:${BORDA}"><input type="text" value="${c.matricula}" onchange="escalaEditarMatricula('${c.matricula}',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-primary);font-weight:500;text-overflow:ellipsis;padding:6px 0" title="Editar matrícula"></td>`;
+  html += `<td style="padding:2px 10px;position:sticky;left:${leftMat}px;background:inherit;border:${BORDA}"><input type="text" ${dis} value="${c.matricula}" onchange="escalaEditarMatricula('${c.matricula}',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-primary);font-weight:500;text-overflow:ellipsis;padding:6px 0" title="Editar matrícula"></td>`;
   html += `<td style="padding:8px 10px;color:var(--text-primary);font-weight:500;position:sticky;left:${leftNome}px;background:inherit;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:${BORDA}" title="${c.nome||''}">${c.nome||''}</td>`;
   html += `<td style="padding:8px 10px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;border:${BORDA}">${setor}</td>`;
   html += `<td style="padding:2px 6px;border:${BORDA}">
-    <select onchange="escalaEditarTurno('${c.matricula}', this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-secondary);font-size:11px;padding:4px 0;cursor:pointer">
+    <select ${dis} onchange="escalaEditarTurno('${c.matricula}', this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-secondary);font-size:11px;padding:4px 0;cursor:pointer">
       <option value="">—</option>
       ${turnosExistentes.map(t => `<option value="${escalaEscapeAttr(t)}" ${c.turno===t?'selected':''}>${escalaEscapeAttr(t)}</option>`).join('')}
       <option value="__novo__">+ novo turno...</option>
     </select>
   </td>`;
   html += `<td style="padding:8px 10px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:${BORDA}" title="${funcao}">${funcao}</td>`;
-  html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" value="${entrada}" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" onchange="escalaEditarHorario('${c.matricula}','entrada',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-secondary);text-align:center;font-size:12px;padding:4px"></td>`;
-  html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" value="${intInicio}" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" onchange="escalaEditarHorario('${c.matricula}','intervalo_inicio',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-muted);text-align:center;font-size:12px;padding:4px" title="Início do intervalo"></td>`;
-  html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" value="${intFim}" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" onchange="escalaEditarHorario('${c.matricula}','intervalo_fim',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-muted);text-align:center;font-size:12px;padding:4px" title="Fim do intervalo"></td>`;
-  html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" value="${saida}" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" onchange="escalaEditarHorario('${c.matricula}','saida',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-secondary);text-align:center;font-size:12px;padding:4px"></td>`;
+  html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" ${dis} value="${entrada}" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" onchange="escalaEditarHorario('${c.matricula}','entrada',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-secondary);text-align:center;font-size:12px;padding:4px"></td>`;
+  html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" ${dis} value="${intInicio}" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" onchange="escalaEditarHorario('${c.matricula}','intervalo_inicio',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-muted);text-align:center;font-size:12px;padding:4px" title="Início do intervalo"></td>`;
+  html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" ${dis} value="${intFim}" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" onchange="escalaEditarHorario('${c.matricula}','intervalo_fim',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-muted);text-align:center;font-size:12px;padding:4px" title="Fim do intervalo"></td>`;
+  html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" ${dis} value="${saida}" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" onchange="escalaEditarHorario('${c.matricula}','saida',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-secondary);text-align:center;font-size:12px;padding:4px"></td>`;
   html += `<td style="text-align:center;color:var(--text-secondary);border:${BORDA}">${ch}</td>`;
   conteudo.forEach((item, i) => {
     const dia = i+1;
@@ -905,7 +971,8 @@ function escalaLinhaColabHTML(c, ci, ctx) {
     const feriado = window._escalaFeriados?.get(dataISO);
     const fimDeSemana = dow === 0 || dow === 6;
     const bgCel = feriado ? 'rgba(252,129,129,.08)' : fimDeSemana ? 'var(--bg-hover)' : 'transparent';
-    html += `<td data-mat="${c.matricula}" data-dia="${dia}" onclick="${item.editavel?`escalaSelecionarCelula('${c.matricula}',${dia},this)`:''}" style="padding:2px;height:32px;cursor:${item.editavel?'pointer':'default'};background:${bgCel};border:${BORDA}" title="${feriado?feriado.nome:(item.detalhe||'')}">${escalaCelHTML(item)}</td>`;
+    const editavel = item.editavel && !travada;
+    html += `<td data-mat="${c.matricula}" data-dia="${dia}" onclick="${editavel?`escalaSelecionarCelula('${c.matricula}',${dia},this)`:''}" style="padding:2px;height:32px;cursor:${editavel?'pointer':'default'};background:${bgCel};border:${BORDA}" title="${feriado?feriado.nome:(item.detalhe||'')}">${escalaCelHTML(item)}</td>`;
   });
   html += `</tr>`;
   return html;
@@ -1028,7 +1095,7 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   html += `<tr>
     <td style="border:${BORDA};padding:2px;position:sticky;left:0;background:var(--adh-surface)"></td>
     <td style="border:${BORDA};padding:2px;position:sticky;left:${leftMat}px;background:var(--adh-surface)">
-      <input type="text" id="escala-add-inline" placeholder="+ matrícula" onkeydown="if(event.key==='Enter') escalaAdicionarPorMatriculaInline(this.value)"
+      <input type="text" id="escala-add-inline" ${window._escalaTravada ? 'disabled' : ''} placeholder="+ matrícula" onkeydown="if(event.key==='Enter') escalaAdicionarPorMatriculaInline(this.value)"
         style="width:100%;box-sizing:border-box;background:transparent;border:1px dashed var(--border-strong);border-radius:4px;color:var(--text-secondary);font-family:monospace;font-size:11px;padding:6px 8px">
     </td>
     <td colspan="${NCOLS-2}" style="border:${BORDA};padding:8px 10px;color:var(--text-muted);font-size:11px">digite a matrícula e aperte Enter — o nome aparece sozinho</td>
@@ -1124,6 +1191,7 @@ function escalaBuscarColab(termo) {
 }
 
 async function escalaAdicionarColab(matricula) {
+  if (escalaVerificarTravada()) return false;
   const r = window.eoColabs?.get(matricula);
   const nome = r?.nome || '';
   const busca = document.getElementById('escala-busca');
@@ -1171,6 +1239,7 @@ async function escalaAdicionarPorMatriculaInline(matricula) {
 // colaborador daquela linha (remove o antigo, adiciona o novo), com a
 // mesma trava de base e de duplicidade dos outros caminhos de adicionar.
 async function escalaEditarMatricula(matriculaAntiga, novaMatriculaRaw) {
+  if (escalaVerificarTravada()) { escalaGradeAtualiza(); return; }
   const novaMatricula = String(novaMatriculaRaw||'').trim();
   if (!novaMatricula || novaMatricula === matriculaAntiga) { escalaGradeAtualiza(); return; }
 
@@ -1208,6 +1277,7 @@ async function escalaEditarMatricula(matriculaAntiga, novaMatriculaRaw) {
 }
 
 async function escalaEditarHorario(matricula, campo, valor) {
+  if (escalaVerificarTravada()) { escalaGradeAtualiza(); return; }
   const COLUNAS = {
     entrada: 'entrada_manual',
     intervalo_inicio: 'intervalo_inicio_manual',
@@ -1290,6 +1360,7 @@ function escalaParseDataExcel(v) {
 }
 
 async function escalaImportarCursos(input) {
+  if (escalaVerificarTravada()) { input.value = ''; return; }
   const file = input.files[0];
   if (!file) return;
   escalaMsg('Lendo arquivo de cursos...');
@@ -1382,6 +1453,7 @@ function escalaLoadingAtualiza(feito, total) {
 // Administrativo/Especialista/Analista/ADM, que continuam podendo ser
 // adicionados manualmente). Não duplica quem já está na lista.
 async function escalaPreencherTodoStaff() {
+  if (escalaVerificarTravada()) return;
   const base = window._escalaBase;
   if (!window.eoColabs?.size) { escalaMsg('Cadastro de colaboradores ainda não carregado.', true); return; }
 
@@ -1419,6 +1491,7 @@ async function escalaPreencherTodoStaff() {
 }
 
 async function escalaLimparColaboradores() {
+  if (escalaVerificarTravada()) return;
   if (!confirm('Remover TODOS os colaboradores dessa escala (base+mês)? Isso também apaga todas as marcações de F/K/CH/J deles. Não dá pra desfazer.')) return;
   const base = window._escalaBase, mes = window._escalaMes;
   await db.from('escala_dia').delete().eq('base', base).eq('mes', mes);
@@ -1431,6 +1504,7 @@ async function escalaLimparColaboradores() {
 }
 
 async function escalaLimparStatus() {
+  if (escalaVerificarTravada()) return;
   if (!confirm('Limpar todas as marcações de Folga/FA/Cursos/Afastado/Compensa dessa escala (base+mês)? Os colaboradores continuam na escala, só o preenchimento some. Não dá pra desfazer.')) return;
   const base = window._escalaBase, mes = window._escalaMes;
   const { error } = await db.from('escala_dia').delete().eq('base', base).eq('mes', mes);
@@ -1441,6 +1515,7 @@ async function escalaLimparStatus() {
 }
 
 async function escalaRemoverColab(matricula) {
+  if (escalaVerificarTravada()) return;
   if (!confirm('Remover esse colaborador dessa escala? Os F/K marcados pra ele nesse mês também somem.')) return;
   const base = window._escalaBase, mes = window._escalaMes;
   await db.from('escala_dia').delete().eq('base', base).eq('mes', mes).eq('matricula', matricula);
@@ -1481,6 +1556,7 @@ function escalaAtualizarBotaoRemoverSelecionados() {
 }
 
 async function escalaRemoverSelecionados() {
+  if (escalaVerificarTravada()) return;
   const selecionados = [...(window._escalaSelecionados || [])];
   if (!selecionados.length) return;
   if (!confirm(`Remover ${selecionados.length} colaborador${selecionados.length===1?'':'es'} dessa escala? As marcações de F/K/CH/J deles nesse mês também somem. Não dá pra desfazer.`)) return;
@@ -1514,6 +1590,7 @@ function escalaDragStart(e, matricula) {
 
 async function escalaDrop(e, matriculaAlvo) {
   e.preventDefault();
+  if (escalaVerificarTravada()) return;
   const matriculaArrastada = e.dataTransfer.getData('text/plain');
   if (!matriculaArrastada || matriculaArrastada === matriculaAlvo) return;
 
@@ -1539,6 +1616,7 @@ async function escalaDrop(e, matriculaAlvo) {
 }
 
 async function escalaLimparOrdemManual() {
+  if (escalaVerificarTravada()) return;
   const lista = window._escalaColabs || [];
   if (!lista.some(c => c.ordem_manual != null)) { escalaMsg('Essa escala já está na ordenação automática.'); return; }
   lista.forEach(c => { c.ordem_manual = null; });
@@ -1601,6 +1679,7 @@ async function escalaVerificarSequencia(matricula, ano, mesNum, diasNoMes) {
 async function escalaAplicarTeclaNaCelula(tecla) {
   const sel = window._escalaCelulaSelecionada;
   if (!sel) return;
+  if (escalaVerificarTravada()) return;
   const { matricula, dia } = sel;
   const base = window._escalaBase, mes = window._escalaMes;
   const key = `${matricula}|${dia}`;
@@ -1710,6 +1789,7 @@ function escalaMesAnterior(mes) {
 // arquivo de Horários daquele mês; nunca sobrescreve quem já tem horário
 // definido nesse mês (entrada + saída já preenchidos).
 async function escalaPreencherHorarioMesAnterior() {
+  if (escalaVerificarTravada()) return;
   const colabs = window._escalaColabs || [];
   if (!colabs.length) { escalaMsg('Adicione pelo menos um colaborador antes.', true); return; }
 
@@ -1819,6 +1899,7 @@ async function escalaDiasSeguidosNoFimDoMesAnterior(base, matricula, mesAtual) {
 }
 
 async function escalaGerarFolgasAuto() {
+  if (escalaVerificarTravada()) return;
   const colabs = window._escalaColabs || [];
   if (!colabs.length) { escalaMsg('Adicione pelo menos um colaborador antes.', true); return; }
 
@@ -2229,6 +2310,7 @@ function escalaMsg(texto, erro) {
 }
 
 async function escalaAdicionarFeriado() {
+  if (escalaVerificarTravada()) return;
   const base = window._escalaBase;
   const dataStr = prompt(`Data do feriado estadual/municipal de ${base} (formato DD/MM/AAAA):`);
   if (!dataStr) return;
