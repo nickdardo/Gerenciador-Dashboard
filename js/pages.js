@@ -1125,6 +1125,31 @@ async function escalaImportarCursos(input) {
   reader.readAsArrayBuffer(file);
 }
 
+// Barra de progresso (mesmo visual usado no carregamento de ponto) — pra
+// dar feedback visual em ações que demoram um pouco, tipo preencher staff
+// ou gerar folgas pra uma base grande.
+function escalaLoadingHTML(label) {
+  return `
+    <div class="adm-progress-wrap" style="padding:40px 20px">
+      <i class="ti ti-loader-2" style="font-size:24px;opacity:.5;animation:spin 1s linear infinite" aria-hidden="true"></i>
+      <div class="adm-progress-label" id="escala-load-label">${label}</div>
+      <div class="adm-progress-track"><div class="adm-progress-fill" id="escala-load-fill" style="width:0%"></div></div>
+      <div class="adm-progress-count" id="escala-load-count"></div>
+    </div>`;
+}
+function escalaMostrarLoading(label) {
+  const wrap = document.getElementById('escala-grade-wrap');
+  if (wrap) wrap.innerHTML = escalaLoadingHTML(label);
+}
+function escalaLoadingAtualiza(feito, total) {
+  const fill = document.getElementById('escala-load-fill');
+  const count = document.getElementById('escala-load-count');
+  if (!fill || !count) return;
+  const pct = total ? Math.round(feito / total * 100) : 0;
+  fill.style.width = `${pct}%`;
+  count.textContent = `${feito.toLocaleString('pt-BR')} / ${total.toLocaleString('pt-BR')} · ${pct}%`;
+}
+
 // Puxa todo o staff ativo da base pro mês atual, direto do cadastro (sem
 // depender do arquivo de Horários já ter sido subido pra esse mês) — usa o
 // mesmo filtro de "escala revezada" já combinado (fora Gerente/Coordenador/
@@ -1148,6 +1173,8 @@ async function escalaPreencherTodoStaff() {
 
   if (!confirm(`Preencher a escala de ${base} com todo o efetivo ativo (${novos.length} colaborador${novos.length===1?'':'es'})? Você poderá remover quem não for necessário depois.`)) return;
 
+  escalaMostrarLoading(`Preenchendo ${novos.length} colaborador${novos.length===1?'':'es'}...`);
+
   const linhas = novos.map(c => ({
     base, mes: window._escalaMes, matricula: c.matricula, nome: c.nome,
     created_by: currentUserProfile?.id || currentUser?.id || null,
@@ -1155,7 +1182,8 @@ async function escalaPreencherTodoStaff() {
   const BATCH = 200;
   for (let i = 0; i < linhas.length; i += BATCH) {
     const { error } = await db.from('escala_colaborador').upsert(linhas.slice(i, i+BATCH), { onConflict: 'base,mes,matricula' });
-    if (error) { escalaMsg('Erro ao preencher: ' + error.message, true); return; }
+    if (error) { escalaGradeAtualiza(); escalaMsg('Erro ao preencher: ' + error.message, true); return; }
+    escalaLoadingAtualiza(Math.min(i + BATCH, linhas.length), linhas.length);
   }
 
   const { data } = await db.from('escala_colaborador').select('*').eq('base', base).eq('mes', window._escalaMes);
@@ -1555,6 +1583,8 @@ async function escalaGerarFolgasAuto() {
   const colabs = window._escalaColabs || [];
   if (!colabs.length) { escalaMsg('Adicione pelo menos um colaborador antes.', true); return; }
 
+  escalaMostrarLoading(`Calculando folgas para ${colabs.length} colaborador${colabs.length===1?'':'es'}...`);
+
   const [ano, mesNum] = window._escalaMes.split('-').map(Number);
   const diasNoMes = new Date(ano, mesNum, 0).getDate();
   const voosPorDia = window._escalaVoosPorDia || new Array(diasNoMes).fill(0);
@@ -1594,6 +1624,7 @@ async function escalaGerarFolgasAuto() {
   const inserts = [];
   const metasUsadas = new Set();
   let colabsComQuebraForcada = 0;
+  let processados = 0;
 
   for (const c of colabs) {
     const chColab = window.eoColabs?.get(c.matricula)?.ch;
@@ -1671,8 +1702,10 @@ async function escalaGerarFolgasAuto() {
     // ordenada só por demanda (que empilhava tudo no mesmo dia isolado).
     // Nunca coloca 2 folgas coladas uma na outra — regra confirmada com o
     // cliente, sem exceção (é só 1 folga por vez, nunca um par). Também
-    // garante pelo menos 1 domingo de folga no mês pra cada colaborador,
-    // se der — domingo tem prioridade até a pessoa conseguir o primeiro.
+    // garante EXATAMENTE 1 domingo de folga no mês pra cada colaborador
+    // (obrigatório ter 1, nunca mais que 1) — domingo tem prioridade até a
+    // pessoa conseguir o primeiro, e depois disso os domingos saem da lista
+    // de candidatos, pra não ganhar um segundo.
     while (faltam > 0) {
       const candidatos = [];
       for (let d = 1; d <= diasNoMes; d++) {
@@ -1691,8 +1724,18 @@ async function escalaGerarFolgasAuto() {
         if (new Date(ano, mesNum-1, d).getDay() !== 0) continue;
         if (window._escalaDias.get(`${c.matricula}|${d}`)?.status === 'F') { temDomingo = true; break; }
       }
-      const domingosDisponiveis = temDomingo ? [] : candidatos.filter(d => new Date(ano, mesNum-1, d).getDay() === 0);
-      const listaFinal = domingosDisponiveis.length ? domingosDisponiveis : candidatos;
+
+      let listaFinal;
+      if (!temDomingo) {
+        // ainda não tem nenhum domingo — prioriza domingo disponível
+        const domingosDisponiveis = candidatos.filter(d => new Date(ano, mesNum-1, d).getDay() === 0);
+        listaFinal = domingosDisponiveis.length ? domingosDisponiveis : candidatos;
+      } else {
+        // já tem 1 domingo — evita dar um segundo (só sai domingo dos
+        // candidatos se ainda sobrar opção fora de domingo)
+        const semDomingo = candidatos.filter(d => new Date(ano, mesNum-1, d).getDay() !== 0);
+        listaFinal = semDomingo.length ? semDomingo : candidatos;
+      }
 
       const escolhido = melhorDia(listaFinal);
       inserts.push({
@@ -1703,12 +1746,14 @@ async function escalaGerarFolgasAuto() {
       folgasPorDia[escolhido-1]++;
       faltam--;
     }
+    processados++;
+    escalaLoadingAtualiza(processados, colabs.length);
   }
 
-  if (!inserts.length) { escalaMsg('Ninguém precisava de mais folgas — todo mundo já está na meta do mês.'); return; }
+  if (!inserts.length) { escalaGradeAtualiza(); escalaMsg('Ninguém precisava de mais folgas — todo mundo já está na meta do mês.'); return; }
 
   const { error } = await db.from('escala_dia').upsert(inserts, { onConflict: 'base,mes,matricula,dia' });
-  if (error) { escalaMsg('Erro ao gerar: ' + error.message, true); return; }
+  if (error) { escalaGradeAtualiza(); escalaMsg('Erro ao gerar: ' + error.message, true); return; }
   escalaGradeAtualiza();
   const avisoForcado = colabsComQuebraForcada > 0
     ? ` · ${colabsComQuebraForcada} folga(s) extra forçada(s) pra não passar de 6 dias seguidos trabalhando`
