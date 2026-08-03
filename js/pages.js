@@ -74,6 +74,25 @@ function escalaMesOptionsHTML(mesAtualSelecionado) {
   return opts.map(m => `<option value="${m}" ${m===mesAtualSelecionado?'selected':''}>${typeof adhMonthLabel==='function'?adhMonthLabel(m):m}${m===atual?' (atual)':''}</option>`).join('');
 }
 
+// Busca a malha de voos paginando de 1000 em 1000 — o Supabase corta em
+// 1000 linhas por padrão numa consulta só, então sem isso bases com mais de
+// 1000 voos no mês perdiam o resto (a curva caía de repente na hora em que
+// batia o limite, e o total do mês ficava travado em "1.000" redondo).
+async function escalaFetchMalha(base, mesInicioStr, mesFimStr, campos) {
+  const { count } = await db.from('malha').select('*', { count: 'exact', head: true })
+    .eq('base', base).gte('data', mesInicioStr).lte('data', mesFimStr);
+  const todas = [];
+  const PAGE = 1000;
+  for (let from = 0; from < (count || 0); from += PAGE) {
+    const { data, error } = await db.from('malha').select(campos)
+      .eq('base', base).gte('data', mesInicioStr).lte('data', mesFimStr)
+      .range(from, from + PAGE - 1);
+    if (error) { console.warn('[escala] malha:', error.message); break; }
+    if (data) todas.push(...data);
+  }
+  return todas;
+}
+
 async function escalaRenderDash(el) {
   const base = window._escalaBase;
   const mes  = window._escalaMes;
@@ -93,9 +112,7 @@ async function escalaRenderDash(el) {
     .select('*').in('base', [base, '']).eq('ativo', true);
   const parametrosEfetivos = escalaMesclarParametros(paramRows || [], base);
 
-  const { data: voosRows } = await db.from('malha')
-    .select('data,tipo,cia,hora_chegada,hora_saida')
-    .eq('base', base).gte('data', mesInicioStr).lte('data', mesFimStr);
+  const voosRows = await escalaFetchMalha(base, mesInicioStr, mesFimStr, 'data,tipo,cia,hora_chegada,hora_saida');
 
   let demandaPorDia = null; // Map<dia(1-31), Map<funcao, array(48) de 30min>>
   if (parametrosEfetivos.length && voosRows?.length) {
@@ -499,9 +516,7 @@ async function escalaRenderGrade(el) {
     .select('*').in('base', [base, '']).eq('ativo', true);
   const parametrosEfetivos = escalaMesclarParametros(paramRows || [], base);
 
-  const { data: voosRows } = await db.from('malha')
-    .select('data,tipo,cia,hora_chegada,hora_saida')
-    .eq('base', base).gte('data', mesInicioStr).lte('data', mesFimStr);
+  const voosRows = await escalaFetchMalha(base, mesInicioStr, mesFimStr, 'data,tipo,cia,hora_chegada,hora_saida');
 
   window._escalaDemandaPorDia = null;
   const voosPorDia = new Array(diasNoMes).fill(0);
@@ -1777,7 +1792,7 @@ async function escalaToggleVoosPanel() {
   const mesInicioStr = `${mes}-01`;
   const mesFimStr = `${mes}-${String(diasNoMes).padStart(2,'0')}`;
 
-  const { data: voosRows } = await db.from('malha').select('data,cia').eq('base', base).gte('data', mesInicioStr).lte('data', mesFimStr);
+  const voosRows = await escalaFetchMalha(base, mesInicioStr, mesFimStr, 'data,cia');
   window._escalaVoosDetalhe = voosRows || [];
   escalaRenderVoosPanel(ano, mesNum, diasNoMes);
 }
