@@ -753,21 +753,19 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   const LARG = { remover:46, mat:80, nome:210, setor:100, funcao:190, entrada:60, intInicio:60, intFim:60, saida:60, ch:46, dia:30 };
   const leftMat  = LARG.remover;
   const leftNome = LARG.remover + LARG.mat;
-  // Largura total explícita (não width:100%) — com table-layout:fixed, um
-  // width:100% faz o navegador espremer as colunas proporcionalmente pra
-  // caber na tela, em vez de deixar a tabela larga de verdade e rolar (o
-  // wrapper já tem overflow-x:auto). Isso cortava o último dia do mês.
+  // Largura total exata (colunas fixas + dias, todos com pixel fixo — nada
+  // de calc() por coluna, que estava causando erro de arredondamento e
+  // cortando o último dia). Em telas largas, a tabela cresce pra 100% do
+  // espaço disponível (table-layout:fixed distribui esse espaço extra
+  // proporcionalmente entre todas as colunas); em telas estreitas, mantém a
+  // largura mínima exata e rola horizontalmente.
   const larguraFixas = LARG.remover + LARG.mat + LARG.nome + LARG.setor + LARG.funcao + LARG.entrada + LARG.intInicio + LARG.intFim + LARG.saida + LARG.ch;
-  // Coluna de dia usa o espaço sobrando da tela, dividido entre os dias do
-  // mês — nunca menos que os 30px mínimos (aí é que entra a rolagem
-  // horizontal, em telas estreitas). Em telas largas, os dias esticam pra
-  // preencher, em vez de sobrar espaço em branco à direita da tabela.
-  const larguraColDia = `max(${LARG.dia}px, calc((100% - ${larguraFixas}px) / ${diasNoMes}))`;
+  const larguraTotal = larguraFixas + LARG.dia * diasNoMes;
 
-  let html = `<table style="border-collapse:collapse;font-size:13px;width:100%;table-layout:fixed"><colgroup>
+  let html = `<table style="border-collapse:collapse;font-size:13px;width:max(100%, ${larguraTotal}px);table-layout:fixed"><colgroup>
     <col style="width:${LARG.remover}px"><col style="width:${LARG.mat}px"><col style="width:${LARG.nome}px"><col style="width:${LARG.setor}px"><col style="width:${LARG.funcao}px">
     <col style="width:${LARG.entrada}px"><col style="width:${LARG.intInicio}px"><col style="width:${LARG.intFim}px"><col style="width:${LARG.saida}px"><col style="width:${LARG.ch}px">
-    ${Array(diasNoMes).fill(`<col style="width:${larguraColDia}">`).join('')}
+    ${Array(diasNoMes).fill(`<col style="width:${LARG.dia}px">`).join('')}
   </colgroup><thead><tr>`;
   html += `<th style="text-align:center;padding:8px 4px;position:sticky;left:0;background:var(--bg-surface);z-index:2;border:${BORDA}"><input type="checkbox" onchange="escalaSelecionarTodos(this.checked)" title="Selecionar todos"></th>`;
   html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;left:${leftMat}px;background:var(--bg-surface);z-index:2;border:${BORDA}">Matrícula</th>`;
