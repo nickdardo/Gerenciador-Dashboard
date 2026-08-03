@@ -742,8 +742,14 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   const LARG = { remover:46, mat:80, nome:210, setor:100, funcao:190, entrada:60, intInicio:60, intFim:60, saida:60, ch:46, dia:30 };
   const leftMat  = LARG.remover;
   const leftNome = LARG.remover + LARG.mat;
+  // Largura total explícita (não width:100%) — com table-layout:fixed, um
+  // width:100% faz o navegador espremer as colunas proporcionalmente pra
+  // caber na tela, em vez de deixar a tabela larga de verdade e rolar (o
+  // wrapper já tem overflow-x:auto). Isso cortava o último dia do mês.
+  const larguraFixas = LARG.remover + LARG.mat + LARG.nome + LARG.setor + LARG.funcao + LARG.entrada + LARG.intInicio + LARG.intFim + LARG.saida + LARG.ch;
+  const larguraTotal = larguraFixas + LARG.dia * diasNoMes;
 
-  let html = `<table style="border-collapse:collapse;font-size:13px;width:100%;table-layout:fixed"><colgroup>
+  let html = `<table style="border-collapse:collapse;font-size:13px;width:${larguraTotal}px;min-width:100%;table-layout:fixed"><colgroup>
     <col style="width:${LARG.remover}px"><col style="width:${LARG.mat}px"><col style="width:${LARG.nome}px"><col style="width:${LARG.setor}px"><col style="width:${LARG.funcao}px">
     <col style="width:${LARG.entrada}px"><col style="width:${LARG.intInicio}px"><col style="width:${LARG.intFim}px"><col style="width:${LARG.saida}px"><col style="width:${LARG.ch}px">
     ${Array(diasNoMes).fill(`<col style="width:${LARG.dia}px">`).join('')}
@@ -771,6 +777,19 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   // Linha pra adicionar por matrícula direto na tabela — digita e aperta
   // Enter, o nome aparece sozinho (mesma busca do campo de cima). Fica no
   // topo, sempre visível, em vez de escondida lá embaixo da lista.
+  // Pré-calcula quantas pessoas estão trabalhando em cada dia — recalcula
+  // sozinha a cada marcação de F/K/J/CH, porque a tabela inteira já
+  // re-renderiza toda vez que algo muda (escalaGradeAtualiza).
+  const contagemPorDia = new Array(diasNoMes).fill(0);
+  colabs.forEach(c => {
+    const conteudo = escalaConteudoDoMes(c, ano, mesNum, diasNoMes);
+    conteudo.forEach((item, i) => { if (!item.status) contagemPorDia[i]++; }); // sem status = trabalhando
+  });
+  html += `<tr style="background:rgba(0,160,210,.06)">
+    <td colspan="${NCOLS_FIXAS}" style="border:${BORDA};padding:6px 10px;color:var(--text-secondary);font-size:11px;text-align:right;font-weight:600;position:sticky;left:0;background:#111a2c;white-space:nowrap">Trabalhando no dia →</td>
+    ${contagemPorDia.map(n => `<td style="text-align:center;border:${BORDA};color:var(--text-primary);font-weight:700;font-size:12px">${n}</td>`).join('')}
+  </tr>`;
+
   html += `<tr>
     <td style="border:${BORDA};padding:2px;position:sticky;left:0;background:var(--adh-surface)"></td>
     <td style="border:${BORDA};padding:2px;position:sticky;left:${leftMat}px;background:var(--adh-surface)">
