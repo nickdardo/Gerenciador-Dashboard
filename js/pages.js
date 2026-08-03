@@ -55,15 +55,19 @@ async function pageEscala(el) {
   }
 
   if (window._escalaBase === undefined || !bases.includes(window._escalaBase)) {
-    // Prioridade: última base que esse usuário estava vendo (gravada no
-    // perfil) > base vinda de outro módulo (Gerador) > primeira base
-    // disponível. Resolve o bug de F5 sempre voltar pra primeira base.
-    const baseSalva = currentUserProfile?.escala_ultima_base;
+    // Prioridade: localStorage (instantâneo, sempre funciona) > perfil no
+    // banco (funciona entre dispositivos, mas depende da coluna existir) >
+    // base vinda de outro módulo (Gerador) > primeira base disponível.
+    let baseLocal = null;
+    try { baseLocal = localStorage.getItem('gde_escala_ultima_base'); } catch (_) {}
+    const baseSalva = baseLocal || currentUserProfile?.escala_ultima_base;
     window._escalaBase = (baseSalva && bases.includes(baseSalva)) ? baseSalva
       : (window._genBase && bases.includes(window._genBase)) ? window._genBase : bases[0];
   }
   if (!window._escalaMes) {
-    window._escalaMes = currentUserProfile?.escala_ultimo_mes || window._genMes || (typeof adhCurrentMonth === 'function' ? adhCurrentMonth() : null);
+    let mesLocal = null;
+    try { mesLocal = localStorage.getItem('gde_escala_ultimo_mes'); } catch (_) {}
+    window._escalaMes = mesLocal || currentUserProfile?.escala_ultimo_mes || window._genMes || (typeof adhCurrentMonth === 'function' ? adhCurrentMonth() : null);
   }
   if (!window._escalaDiaSelecionado) window._escalaDiaSelecionado = 1;
 
@@ -410,17 +414,25 @@ function escalaSetMes(mes) {
   escalaRenderGrade(document.getElementById('page-content'));
 }
 
-// Grava em profiles qual base/mês esse usuário estava vendo por último, pra
-// um F5 (ou entrar de novo depois) voltar exatamente onde ele parou, em vez
-// de sempre cair na primeira base da lista. Silencioso (não trava a troca de
-// tela por causa disso) — se falhar, só não lembra da próxima vez.
+// Grava qual base/mês esse usuário estava vendo por último, pra um F5 (ou
+// entrar de novo depois) voltar exatamente onde parou. Grava em DOIS
+// lugares: localStorage (instantâneo, funciona mesmo se a coluna no banco
+// não existir) e no perfil (profiles.escala_ultima_base/mes, pra valer
+// entre dispositivos diferentes). Se o banco falhar (ex.: coluna ainda não
+// criada — rodar escala-perfil-ultima-tela.sql), agora avisa em vez de
+// engolir o erro — antes o try/catch não pegava nada de verdade, porque o
+// supabase-js não lança exceção em erro de query, só devolve {error}.
 async function escalaSalvarUltimaTela(base, mes) {
+  try { localStorage.setItem('gde_escala_ultima_base', base); localStorage.setItem('gde_escala_ultimo_mes', mes); } catch (_) {}
+
   const uid = currentUserProfile?.id || currentUser?.id;
   if (!uid) return;
   if (currentUserProfile) { currentUserProfile.escala_ultima_base = base; currentUserProfile.escala_ultimo_mes = mes; }
-  try {
-    await db.from('profiles').update({ escala_ultima_base: base, escala_ultimo_mes: mes }).eq('id', uid);
-  } catch (_) { /* silencioso — não é crítico */ }
+
+  const { error } = await db.from('profiles').update({ escala_ultima_base: base, escala_ultimo_mes: mes }).eq('id', uid);
+  if (error) {
+    escalaMsg(`⚠ Salvei sua última base/mês só nesse navegador (localStorage) — não consegui salvar no perfil pra valer em outros dispositivos: ${error.message}. Provavelmente falta rodar o escala-perfil-ultima-tela.sql no Supabase.`, true);
+  }
 }
 
 // ══════════════════════════════════════════════════════
