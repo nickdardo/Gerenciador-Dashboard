@@ -550,6 +550,8 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
         <button class="adh-refresh-btn" onclick="escalaAdicionarFeriado()">📅 + Feriado dessa base</button>
         <button class="adh-refresh-btn" style="color:#fc8181" onclick="escalaLimparStatus()">🗑 Limpar folgas/status</button>
         <button class="adh-refresh-btn" style="color:#fc8181" onclick="escalaLimparColaboradores()">🗑 Limpar colaboradores</button>
+        <button id="escala-btn-remover-sel" class="adh-refresh-btn" style="color:#fc8181;display:none" onclick="escalaRemoverSelecionados()">🗑 Remover selecionados (0)</button>
+        <button class="adh-refresh-btn" onclick="escalaLimparOrdemManual()" title="Volta a ordenar sozinho por função + horário de entrada">↕ Ordenar automático</button>
       </div>
       <div id="escala-status-msg" style="font-size:11px;color:var(--text-muted);margin-top:8px;min-height:14px"></div>
     </div>
@@ -719,16 +721,25 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     const [entradaCalc] = horarioFixo ? horarioFixo.split('-') : [null];
     return c.entrada_manual || entradaCalc || '';
   };
+  // Se o responsável já arrastou algum colaborador antes, a lista toda
+  // passa a respeitar essa ordem manual (ordem_manual) em vez de reordenar
+  // sozinha por função/horário — só volta a ordenar automático se ninguém
+  // tiver ordem_manual definida ainda, ou se clicar em "Ordenar automático".
   const colabs = [...(window._escalaColabs || [])].sort((a, b) => {
+    const oa = a.ordem_manual, ob = b.ordem_manual;
+    if (oa != null && ob != null) return oa - ob;
+    if (oa != null) return -1;
+    if (ob != null) return 1;
     const fa = window.eoColabs?.get(a.matricula)?.funcao || '';
     const fb = window.eoColabs?.get(b.matricula)?.funcao || '';
     return fa.localeCompare(fb) || entradaDoColab(a).localeCompare(entradaDoColab(b)) || String(a.nome||'').localeCompare(String(b.nome||''));
   });
+  const temOrdemManual = colabs.some(c => c.ordem_manual != null);
   const NCOLS_FIXAS = 9; // Remover, Matrícula, Nome, Setor, Função, Entrada, Intervalo início, Intervalo fim, Saída, CH
   const NCOLS = NCOLS_FIXAS + diasNoMes;
   const BORDA = '1px solid rgba(255,255,255,.08)';
 
-  const LARG = { remover:30, mat:80, nome:210, setor:100, funcao:190, entrada:60, intInicio:60, intFim:60, saida:60, ch:46, dia:30 };
+  const LARG = { remover:46, mat:80, nome:210, setor:100, funcao:190, entrada:60, intInicio:60, intFim:60, saida:60, ch:46, dia:30 };
   const leftMat  = LARG.remover;
   const leftNome = LARG.remover + LARG.mat;
 
@@ -737,7 +748,7 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     <col style="width:${LARG.entrada}px"><col style="width:${LARG.intInicio}px"><col style="width:${LARG.intFim}px"><col style="width:${LARG.saida}px"><col style="width:${LARG.ch}px">
     ${Array(diasNoMes).fill(`<col style="width:${LARG.dia}px">`).join('')}
   </colgroup><thead><tr>`;
-  html += `<th style="padding:8px 4px;position:sticky;left:0;background:var(--bg-surface);z-index:2;border:${BORDA}"></th>`;
+  html += `<th style="text-align:center;padding:8px 4px;position:sticky;left:0;background:var(--bg-surface);z-index:2;border:${BORDA}"><input type="checkbox" onchange="escalaSelecionarTodos(this.checked)" title="Selecionar todos"></th>`;
   html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;left:${leftMat}px;background:var(--bg-surface);z-index:2;border:${BORDA}">Matrícula</th>`;
   html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;left:${leftNome}px;background:var(--bg-surface);z-index:2;border:${BORDA}">Nome</th>`;
   html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;border:${BORDA}">Setor</th>`;
@@ -788,8 +799,13 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
 
     const conteudo = escalaConteudoDoMes(c, ano, mesNum, diasNoMes);
 
-    html += `<tr style="background:${zebra}">`;
-    html += `<td style="text-align:center;position:sticky;left:0;background:inherit;border:${BORDA}"><span onclick="escalaRemoverColab('${c.matricula}')" style="cursor:pointer;color:#fc8181;font-size:15px;font-weight:700" title="Remover da escala">✕</span></td>`;
+    html += `<tr style="background:${zebra}" ondragover="event.preventDefault()" ondrop="escalaDrop(event,'${c.matricula}')">`;
+    html += `<td style="text-align:center;position:sticky;left:0;background:inherit;border:${BORDA}">
+      <div style="display:flex;align-items:center;justify-content:center;gap:5px">
+        <span draggable="true" ondragstart="escalaDragStart(event,'${c.matricula}')" style="cursor:grab;color:var(--text-muted);font-size:13px;user-select:none" title="Arrastar pra reordenar">⠿</span>
+        <input type="checkbox" data-escala-check="${c.matricula}" ${window._escalaSelecionados?.has(c.matricula)?'checked':''} onchange="escalaToggleSelecao('${c.matricula}',this.checked)" title="Selecionar">
+      </div>
+    </td>`;
     html += `<td style="padding:2px 10px;position:sticky;left:${leftMat}px;background:inherit;border:${BORDA}"><input type="text" value="${c.matricula}" onchange="escalaEditarMatricula('${c.matricula}',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-primary);font-weight:500;text-overflow:ellipsis;padding:6px 0" title="Editar matrícula"></td>`;
     html += `<td style="padding:8px 10px;color:var(--text-primary);font-weight:500;position:sticky;left:${leftNome}px;background:inherit;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:${BORDA}" title="${c.nome||''}">${c.nome||''}</td>`;
     html += `<td style="padding:8px 10px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;border:${BORDA}">${setor}</td>`;
@@ -982,16 +998,15 @@ async function escalaPreencherTodoStaff() {
   for (const [matricula, r] of window.eoColabs) {
     if ((r.station||'').toUpperCase() !== String(base||'').toUpperCase()) continue;
     if (typeof hcIsDesligado === 'function' && hcIsDesligado(matricula)) continue;
-    if (escalaCargoForaDaEscalaRevezada(r.funcao)) continue;
     candidatos.push({ matricula, nome: r.nome });
   }
-  if (!candidatos.length) { escalaMsg('Nenhum colaborador ativo (fora das funções administrativas) encontrado pra essa base.', true); return; }
+  if (!candidatos.length) { escalaMsg('Nenhum colaborador ativo encontrado pra essa base.', true); return; }
 
   const jaNaLista = new Set((window._escalaColabs||[]).map(c => c.matricula));
   const novos = candidatos.filter(c => !jaNaLista.has(c.matricula));
-  if (!novos.length) { escalaMsg('Todo mundo elegível já está nessa escala.'); return; }
+  if (!novos.length) { escalaMsg('Todo mundo já está nessa escala.'); return; }
 
-  if (!confirm(`Preencher a escala de ${base} com todo o staff ativo (${novos.length} colaborador${novos.length===1?'':'es'}, fora funções administrativas)? Você poderá remover quem não for necessário depois.`)) return;
+  if (!confirm(`Preencher a escala de ${base} com todo o efetivo ativo (${novos.length} colaborador${novos.length===1?'':'es'})? Você poderá remover quem não for necessário depois.`)) return;
 
   const linhas = novos.map(c => ({
     base, mes: window._escalaMes, matricula: c.matricula, nome: c.nome,
@@ -1040,6 +1055,107 @@ async function escalaRemoverColab(matricula) {
   window._escalaColabs = (window._escalaColabs||[]).filter(c => c.matricula !== matricula);
   for (const k of [...window._escalaDias.keys()]) if (k.startsWith(matricula+'|')) window._escalaDias.delete(k);
   escalaGradeAtualiza();
+}
+
+// ── Seleção múltipla (checkbox) e remoção em lote ──────
+function escalaToggleSelecao(matricula, checked) {
+  if (!window._escalaSelecionados) window._escalaSelecionados = new Set();
+  if (checked) window._escalaSelecionados.add(matricula);
+  else window._escalaSelecionados.delete(matricula);
+  escalaAtualizarBotaoRemoverSelecionados();
+}
+
+function escalaSelecionarTodos(checked) {
+  window._escalaSelecionados = new Set();
+  if (checked) {
+    document.querySelectorAll('[data-escala-check]').forEach(el => {
+      window._escalaSelecionados.add(el.getAttribute('data-escala-check'));
+      el.checked = true;
+    });
+  } else {
+    document.querySelectorAll('[data-escala-check]').forEach(el => { el.checked = false; });
+  }
+  escalaAtualizarBotaoRemoverSelecionados();
+}
+
+function escalaAtualizarBotaoRemoverSelecionados() {
+  const n = window._escalaSelecionados?.size || 0;
+  const btn = document.getElementById('escala-btn-remover-sel');
+  if (!btn) return;
+  btn.style.display = n > 0 ? 'inline-flex' : 'none';
+  btn.textContent = `🗑 Remover selecionados (${n})`;
+}
+
+async function escalaRemoverSelecionados() {
+  const selecionados = [...(window._escalaSelecionados || [])];
+  if (!selecionados.length) return;
+  if (!confirm(`Remover ${selecionados.length} colaborador${selecionados.length===1?'':'es'} dessa escala? As marcações de F/K/CH/J deles nesse mês também somem. Não dá pra desfazer.`)) return;
+
+  const base = window._escalaBase, mes = window._escalaMes;
+  await db.from('escala_dia').delete().eq('base', base).eq('mes', mes).in('matricula', selecionados);
+  const { error } = await db.from('escala_colaborador').delete().eq('base', base).eq('mes', mes).in('matricula', selecionados);
+  if (error) { escalaMsg('Erro ao remover: ' + error.message, true); return; }
+
+  const removidos = new Set(selecionados);
+  window._escalaColabs = (window._escalaColabs||[]).filter(c => !removidos.has(c.matricula));
+  for (const k of [...window._escalaDias.keys()]) {
+    const mat = k.split('|')[0];
+    if (removidos.has(mat)) window._escalaDias.delete(k);
+  }
+  window._escalaSelecionados = new Set();
+  escalaGradeAtualiza();
+  escalaAtualizarBotaoRemoverSelecionados();
+  escalaMsg(`✓ ${selecionados.length} colaborador${selecionados.length===1?'':'es'} removido${selecionados.length===1?'':'s'}.`);
+}
+
+// ── Arrastar pra reordenar manualmente ──────────────────
+// Enquanto ninguém arrasta nada, a lista continua ordenando sozinha por
+// função + horário de entrada. Assim que arrasta uma vez, a ordem vira
+// manual (salva em ordem_manual) e passa a valer até clicar em "Ordenar
+// automático" de novo.
+function escalaDragStart(e, matricula) {
+  e.dataTransfer.setData('text/plain', matricula);
+  e.dataTransfer.effectAllowed = 'move';
+}
+
+async function escalaDrop(e, matriculaAlvo) {
+  e.preventDefault();
+  const matriculaArrastada = e.dataTransfer.getData('text/plain');
+  if (!matriculaArrastada || matriculaArrastada === matriculaAlvo) return;
+
+  const lista = window._escalaColabs || [];
+  const idxArrastado = lista.findIndex(c => c.matricula === matriculaArrastada);
+  const idxAlvo = lista.findIndex(c => c.matricula === matriculaAlvo);
+  if (idxArrastado === -1 || idxAlvo === -1) return;
+
+  const [item] = lista.splice(idxArrastado, 1);
+  lista.splice(idxAlvo, 0, item);
+  lista.forEach((c, i) => { c.ordem_manual = i; });
+
+  const updates = lista.map((c, i) => ({
+    base: window._escalaBase, mes: window._escalaMes, matricula: c.matricula, nome: c.nome, ordem_manual: i,
+  }));
+  const BATCH = 200;
+  for (let i = 0; i < updates.length; i += BATCH) {
+    const { error } = await db.from('escala_colaborador').upsert(updates.slice(i, i+BATCH), { onConflict: 'base,mes,matricula' });
+    if (error) { escalaMsg('Erro ao salvar a ordem: ' + error.message, true); return; }
+  }
+  escalaGradeAtualiza();
+  escalaMsg('✓ Ordem atualizada — a lista não vai mais reordenar sozinha até você clicar em "Ordenar automático".');
+}
+
+async function escalaLimparOrdemManual() {
+  const lista = window._escalaColabs || [];
+  if (!lista.some(c => c.ordem_manual != null)) { escalaMsg('Essa escala já está na ordenação automática.'); return; }
+  lista.forEach(c => { c.ordem_manual = null; });
+  const updates = lista.map(c => ({ base: window._escalaBase, mes: window._escalaMes, matricula: c.matricula, nome: c.nome, ordem_manual: null }));
+  const BATCH = 200;
+  for (let i = 0; i < updates.length; i += BATCH) {
+    const { error } = await db.from('escala_colaborador').upsert(updates.slice(i, i+BATCH), { onConflict: 'base,mes,matricula' });
+    if (error) { escalaMsg('Erro ao voltar a ordem: ' + error.message, true); return; }
+  }
+  escalaGradeAtualiza();
+  escalaMsg('✓ Voltou pra ordenação automática (função → horário de entrada).');
 }
 
 // ── Digitação por teclado ──────────────────────────────
