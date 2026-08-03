@@ -645,17 +645,10 @@ function escalaConteudoDoMes(c, ano, mesNum, diasNoMes) {
   }
   return brutos.map((s, i) => {
     if (s === 'F') {
-      const dia = i + 1;
-      const diaSemana = new Date(ano, mesNum-1, dia).getDay(); // 0=dom ... 6=sáb
-      // Domingo é sempre a "âncora" da folga agrupada — nunca aparece como
-      // FA, mesmo com folga do lado (é o lado que vira FA). Sábado só vira
-      // FA se domingo (dia seguinte) também for folga; segunda só vira FA
-      // se domingo (dia anterior) também for folga. Qualquer outro par de
-      // F adjacentes (fora desse padrão) continua aparecendo como F comum.
-      let exibido = 'F';
-      if (diaSemana === 6 && brutos[i+1] === 'F')      exibido = 'FA'; // sábado + domingo de folga
-      else if (diaSemana === 1 && brutos[i-1] === 'F') exibido = 'FA'; // domingo de folga + segunda
-      return { status: 'F', exibido, editavel: true };
+      // Conversão automática pra "FA" (sábado+domingo ou domingo+segunda)
+      // foi desligada a pedido do cliente — por enquanto essa regra fica
+      // manual; sempre mostra "F" simples, mesmo com folga agrupada do lado.
+      return { status: 'F', exibido: 'F', editavel: true };
     }
     if (s === 'K')  return { status: 'K',  exibido: 'K',  editavel: true };
     if (s === 'CH') return { status: 'CH', exibido: 'CH', editavel: true };
