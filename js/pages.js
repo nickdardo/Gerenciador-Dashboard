@@ -105,6 +105,27 @@ async function escalaFetchMalha(base, mesInicioStr, mesFimStr, campos) {
   return todas;
 }
 
+// Mesmo problema, mesmo remédio, agora pra escala_dia (F/FA/J/K/CH de cada
+// colaborador em cada dia): sem paginar, uma base com bastante gente e
+// bastante marcação no mês passa fácil de 1000 linhas, e o Supabase corta o
+// resto sem avisar — a marcação continua salva no banco, só não volta na
+// consulta. Achado ao investigar folgas que "sumiam" mesmo depois de
+// confirmadas salvas direto na tabela.
+async function escalaFetchDias(base, mes) {
+  const { count } = await db.from('escala_dia').select('*', { count: 'exact', head: true })
+    .eq('base', base).eq('mes', mes);
+  const todas = [];
+  const PAGE = 1000;
+  for (let from = 0; from < (count || 0); from += PAGE) {
+    const { data, error } = await db.from('escala_dia').select('*')
+      .eq('base', base).eq('mes', mes)
+      .range(from, from + PAGE - 1);
+    if (error) { console.warn('[escala] escala_dia:', error.message); break; }
+    if (data) todas.push(...data);
+  }
+  return todas;
+}
+
 async function escalaRenderDash(el) {
   const base = window._escalaBase;
   const mes  = window._escalaMes;
@@ -518,9 +539,9 @@ async function escalaRenderGrade(el) {
   const base = window._escalaBase;
   const mes  = window._escalaMes;
 
-  const [{ data: colabsIniciais }, { data: dias }, { data: travaRow }] = await Promise.all([
+  const [{ data: colabsIniciais }, dias, { data: travaRow }] = await Promise.all([
     db.from('escala_colaborador').select('*').eq('base', base).eq('mes', mes).order('created_at'),
-    db.from('escala_dia').select('*').eq('base', base).eq('mes', mes),
+    escalaFetchDias(base, mes),
     db.from('escala_trava').select('*').eq('base', base).eq('mes', mes).maybeSingle(),
   ]);
 

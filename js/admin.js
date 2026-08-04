@@ -2737,7 +2737,7 @@ async function adminAutoLoadFiles() {
     if (pcdData.length) {
       window.eoPcd = new Map(pcdData.map(r => [r.matricula, r]));
       adminFiles.pcd = { count: pcdData.length, date: 'banco' };
-      console.log(`[autoLoad] pcd: ${pcdRes.data.length} colaboradores no banco`);
+      console.log(`[autoLoad] pcd: ${pcdData.length} colaboradores no banco`);
     }
 
   } catch(err) {
