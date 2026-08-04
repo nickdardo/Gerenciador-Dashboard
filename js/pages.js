@@ -696,8 +696,8 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
         </div>
         <button class="adh-refresh-btn" ${dis} style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600" onclick="escalaPreencherTodoStaff()">${escalaIcone('users')}Preencher com Staff</button>
         <button class="adh-refresh-btn" ${dis} style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600" onclick="escalaGerarFolgasAuto()">${escalaIcone('zap')}Gerar folgas automáticas</button>
+        <button class="adh-refresh-btn" ${dis} style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600" onclick="escalaPreencherHorarioMesAnterior()">${escalaIcone('calclock')}Horário do mês anterior</button>
         <button class="adh-refresh-btn" ${dis} onclick="escalaAdicionarFeriado()">${escalaIcone('calendarPlus')}+ Feriado dessa base</button>
-        <button class="adh-refresh-btn" ${dis} onclick="escalaPreencherHorarioMesAnterior()">${escalaIcone('calclock')}Horário do mês anterior</button>
         <button class="adh-refresh-btn" onclick="escalaBaixarModeloCursos()">${escalaIcone('download')}Modelo de Cursos</button>
         <button class="adh-refresh-btn" ${dis} onclick="document.getElementById('escala-cursos-input').click()">${escalaIcone('upload')}Importar Cursos</button>
         <input type="file" id="escala-cursos-input" ${dis} accept=".xlsx,.xls" style="display:none" onchange="escalaImportarCursos(this)">
@@ -706,6 +706,9 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
         <button id="escala-btn-remover-sel" class="adh-refresh-btn" ${dis} style="color:#fc8181;display:none" onclick="escalaRemoverSelecionados()">${escalaIcone('trash')}Remover selecionados (0)</button>
         <button class="adh-refresh-btn" ${dis} onclick="escalaLimparOrdemManual()" title="Volta a ordenar sozinho por função + horário de entrada">${escalaIcone('sort')}Ordenar automático</button>
         <button class="adh-refresh-btn" style="${window._escalaAgruparPorTurno?'background:var(--blue);color:#0b0f1a;border:none;font-weight:600':''}" onclick="escalaToggleAgruparTurno()" title="Agrupa a lista por função e depois por turno, com subtotal por bloco">${escalaIcone('layers')}Agrupar por função/turno</button>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">
+        ${Array(7).fill('<button class="adh-refresh-btn" disabled style="min-width:90px;opacity:.35" title="Reservado pra uma função futura"></button>').join('')}
       </div>
       <div id="escala-status-msg" style="font-size:11px;color:var(--text-muted);margin-top:8px;min-height:14px"></div>
     </div>
@@ -720,7 +723,7 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#fb923c;margin-right:5px"></span>CH · Folga compensa (tecla C)</span>
         <span style="color:var(--text-muted)">clique numa célula vazia ou de trabalho pra marcar F/J/K/C · fim de semana e feriado ficam destacados nas colunas</span>
       </div>
-      <div id="escala-grade-wrap" style="overflow-x:auto">${escalaGradeTabelaHTML(ano, mesNum, diasNoMes)}</div>
+      <div id="escala-grade-wrap" style="overflow:auto;max-height:calc(100vh - 420px);border-radius:8px">${escalaGradeTabelaHTML(ano, mesNum, diasNoMes)}</div>
     </div>
   `;
 }
@@ -1089,24 +1092,24 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     <col style="width:${LARG.entrada}px"><col style="width:${LARG.intInicio}px"><col style="width:${LARG.intFim}px"><col style="width:${LARG.saida}px"><col style="width:${LARG.ch}px">
     ${Array(diasNoMes).fill(`<col style="width:${LARG.dia}px">`).join('')}
   </colgroup><thead><tr>`;
-  html += `<th style="text-align:center;padding:8px 2px;position:sticky;left:0;background:var(--bg-surface);z-index:2;border:${BORDA}"><input type="checkbox" onchange="escalaSelecionarTodos(this.checked)" title="Selecionar todos" style="margin:0"></th>`;
-  html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;left:${leftMat}px;background:var(--bg-surface);z-index:2;border:${BORDA}">Matrícula</th>`;
-  html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;left:${leftNome}px;background:var(--bg-surface);z-index:2;border:${BORDA}">Nome</th>`;
-  html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;border:${BORDA}">Setor</th>`;
-  html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;border:${BORDA}" title="Grupo manual — usado no Agrupar por função/turno">Turno</th>`;
-  html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;border:${BORDA}">Função</th>`;
-  html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:11px;text-transform:uppercase;border:${BORDA}">Entrada</th>`;
-  html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:10px;text-transform:uppercase;border:${BORDA}" title="Início do intervalo">Interv. ↓</th>`;
-  html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:10px;text-transform:uppercase;border:${BORDA}" title="Fim do intervalo">Interv. ↑</th>`;
-  html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:11px;text-transform:uppercase;border:${BORDA}">Saída</th>`;
-  html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:11px;text-transform:uppercase;border:${BORDA}">CH</th>`;
+  html += `<th style="text-align:center;padding:8px 2px;position:sticky;top:0;left:0;background:var(--bg-surface);z-index:3;border:${BORDA}"><input type="checkbox" onchange="escalaSelecionarTodos(this.checked)" title="Selecionar todos" style="margin:0"></th>`;
+  html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;top:0;left:${leftMat}px;background:var(--bg-surface);z-index:3;border:${BORDA}">Matrícula</th>`;
+  html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;top:0;left:${leftNome}px;background:var(--bg-surface);z-index:3;border:${BORDA}">Nome</th>`;
+  html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA}">Setor</th>`;
+  html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA}" title="Grupo manual — usado no Agrupar por função/turno">Turno</th>`;
+  html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA}">Função</th>`;
+  html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA}">Entrada</th>`;
+  html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:10px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA}" title="Início do intervalo">Interv. ↓</th>`;
+  html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:10px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA}" title="Fim do intervalo">Interv. ↑</th>`;
+  html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA}">Saída</th>`;
+  html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA}">CH</th>`;
   for (let d = 1; d <= diasNoMes; d++) {
     const dow = new Date(ano, mesNum-1, d).getDay();
     const dataISO = `${ano}-${String(mesNum).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const feriado = window._escalaFeriados?.get(dataISO);
     const fimDeSemana = dow === 0 || dow === 6;
-    const bg = feriado ? 'rgba(252,129,129,.14)' : fimDeSemana ? 'var(--weekend-tint)' : 'transparent';
-    html += `<th style="padding:5px 2px;color:${feriado?'#fc8181':'var(--text-muted)'};font-size:10.5px;font-weight:600;text-align:center;background:${bg};border:${BORDA}" title="${feriado?feriado.nome:''}">${ESCALA_DIAS_SEMANA[dow]}<br><span style="color:${feriado?'#fc8181':'var(--text-secondary)'};font-size:11px">${d}</span></th>`;
+    const bg = feriado ? 'rgba(252,129,129,.14)' : fimDeSemana ? 'var(--weekend-tint)' : 'var(--bg-surface)';
+    html += `<th style="padding:5px 2px;color:${feriado?'#fc8181':'var(--text-muted)'};font-size:10.5px;font-weight:600;text-align:center;position:sticky;top:0;background:${bg};z-index:2;border:${BORDA}" title="${feriado?feriado.nome:''}">${ESCALA_DIAS_SEMANA[dow]}<br><span style="color:${feriado?'#fc8181':'var(--text-secondary)'};font-size:11px">${d}</span></th>`;
   }
   html += `</tr></thead><tbody>`;
 
