@@ -975,18 +975,23 @@ function escalaFeriadosNacionais(ano) {
 // checa do mais específico pro mais genérico, porque alguns títulos batem
 // com mais de uma palavra-chave (ex.: "Atendimento Passageiro Líder" tem
 // "líder" mas é PAX, não Líder de Operações — por isso PASSAGEIRO vem
-// primeiro).
-const ESCALA_GRUPOS = ['Supervisores', 'Líder de Operações', 'Auxiliar Líder', 'Auxiliar de Rampa', 'Operadores', 'PAX', 'Outros'];
+// primeiro; "Supervisor de Limpeza" tem "supervisor" mas é Limpeza, não
+// Supervisores — por isso LIMPEZA vem antes do SUPERVISOR genérico).
+// "Administração" é o balde final — qualquer função que não bate com
+// nenhuma palavra-chave cai aqui (era chamado de "Outros" antes).
+const ESCALA_GRUPOS = ['Supervisores', 'Líder de Operações', 'Auxiliar Líder', 'Auxiliar de Rampa', 'Operadores', 'PAX', 'Limpeza', 'GSE', 'Administração'];
 function escalaGrupoDaFuncao(funcaoRaw) {
   const f = String(funcaoRaw || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  if (!f) return 'Outros';
+  if (!f) return 'Administração';
   if (f.includes('PASSAGEIRO')) return 'PAX'; // Atendimento/Coord./Agente Serv. Passageiro (líder ou não)
+  if (f.includes('LIMPEZA')) return 'Limpeza'; // ASG Limpeza, Encarregado de Limpeza, Supervisor de Limpeza
   if (f.includes('SUPERVISOR')) return 'Supervisores';
   if (f.includes('LIDER') && f.includes('RAMPA')) return 'Auxiliar Líder'; // AUX.LIDER DE RAMPA
   if (f.includes('AUXILIAR') && f.includes('RAMPA')) return 'Auxiliar de Rampa';
   if (f.includes('LIDER')) return 'Líder de Operações';
   if (f.includes('OPERADOR')) return 'Operadores';
-  return 'Outros';
+  if (f.includes('MECANIC') || f.includes('MANUTEN') || f.includes('SERRALHEIRO') || f.includes('PINTOR') || f.includes('ELETRIC')) return 'GSE';
+  return 'Administração';
 }
 function escalaFuncaoGrupoDoColab(c) {
   const funcao = window.eoColabs?.get(c.matricula)?.funcao || '';
