@@ -75,8 +75,11 @@ async function pageEscala(el) {
     try { agruparLocal = localStorage.getItem('gde_escala_agrupar'); } catch (_) {}
     window._escalaAgruparPorTurno = agruparLocal === '1';
   }
-  if (window._escalaOrdemSetor === undefined) {
-    try { window._escalaOrdemSetor = localStorage.getItem('gde_escala_ordem_setor') || 'entrada'; } catch (_) { window._escalaOrdemSetor = 'entrada'; }
+  if (window._escalaOrdemColuna === undefined) {
+    try { window._escalaOrdemColuna = localStorage.getItem('gde_escala_ordem_coluna') || null; } catch (_) { window._escalaOrdemColuna = null; }
+  }
+  if (window._escalaOrdemDirecao === undefined) {
+    try { window._escalaOrdemDirecao = localStorage.getItem('gde_escala_ordem_direcao') || 'asc'; } catch (_) { window._escalaOrdemDirecao = 'asc'; }
   }
   if (window._escalaGruposVisiveis === undefined) {
     try {
@@ -729,14 +732,6 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
         <button class="adh-refresh-btn" style="${window._escalaAgruparPorTurno?'background:var(--blue);color:#0b0f1a;border:none;font-weight:600':''}" onclick="escalaToggleAgruparTurno()" title="Agrupa a lista por grupo (função) e depois por setor, com contagem por bloco">${escalaIcone('layers')}Agrupar por grupo/setor</button>
       </div>
       <div id="escala-grupo-organizacao" style="display:flex;gap:16px;align-items:flex-end;flex-wrap:nowrap;overflow-x:auto;margin-top:10px;padding-bottom:2px">
-        <div>
-          <label style="font-size:10.5px;color:var(--text-muted);display:block;margin-bottom:3px">Ordenar dentro do setor</label>
-          <select class="adh-month-select" onchange="escalaSetOrdemSetor(this.value)">
-            <option value="entrada" ${(window._escalaOrdemSetor||'entrada')==='entrada'?'selected':''}>Horário de entrada</option>
-            <option value="nome" ${window._escalaOrdemSetor==='nome'?'selected':''}>Nome (A-Z)</option>
-            <option value="matricula" ${window._escalaOrdemSetor==='matricula'?'selected':''}>Matrícula</option>
-          </select>
-        </div>
         <div style="position:relative">
           <label style="font-size:10.5px;color:var(--text-muted);display:block;margin-bottom:3px">Mostrar grupos</label>
           <select class="adh-month-select" onchange="escalaSetMostrarGrupos(this.value)">
@@ -755,7 +750,7 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
             <option value="__recolhido__" ${window._escalaBlocosRecolhidos?'selected':''}>Recolhido (só cabeçalho e total)</option>
           </select>
         </div>
-        ${Array(4).fill('<button class="adh-refresh-btn" disabled style="min-width:90px;opacity:.35" title="Reservado pra uma função futura"></button>').join('')}
+        ${Array(5).fill('<button class="adh-refresh-btn" disabled style="min-width:90px;opacity:.35" title="Reservado pra uma função futura"></button>').join('')}
       </div>
       <div id="escala-status-msg" style="font-size:11px;color:var(--text-muted);margin-top:8px;min-height:14px"></div>
     </div>
@@ -837,6 +832,17 @@ function escalaHorarioFixoDoColab(matricula, ano, mesNum, diasNoMes) {
   let melhor = null, melhorN = 0;
   for (const [h, n] of contagem) { if (n > melhorN) { melhor = h; melhorN = n; } }
   return melhor;
+}
+
+// Horário de entrada "efetivo" de um colaborador — manual se tiver, senão o
+// mais frequente do ponto batido no mês. Usado em vários lugares (grade,
+// ordenação simples, ordenação agrupada, ordenar por coluna) — extraído
+// aqui uma vez só pra não ter 4 cópias levemente diferentes se um dia
+// precisar mudar a regra.
+function escalaEntradaEfetivaDoColab(c, ano, mesNum, diasNoMes) {
+  const horarioFixo = escalaHorarioFixoDoColab(c.matricula, ano, mesNum, diasNoMes);
+  const [entradaCalc] = horarioFixo ? horarioFixo.split('-') : [null];
+  return c.entrada_manual || entradaCalc || '';
 }
 
 // Mesma lógica da entrada/saída fixa (moda do mês), mas usando o segundo
@@ -1009,9 +1015,21 @@ function escalaToggleAgruparTurno() {
 }
 
 // ── Controles de organização dos grupos/setores ────────
-function escalaSetOrdemSetor(valor) {
-  window._escalaOrdemSetor = valor;
-  try { localStorage.setItem('gde_escala_ordem_setor', valor); } catch (_) {}
+// Clique no cabeçalho de Matrícula/Nome/Turno/Setor/Entrada — funciona nos
+// dois modos (lista simples e agrupada por grupo/setor). Clicar nesse
+// cabeçalho vale mais que a ordem manual de arrastar (é uma escolha
+// explícita); "Ordenar automático" limpa e volta pro padrão de novo.
+function escalaOrdenarPorColuna(coluna) {
+  if (window._escalaOrdemColuna === coluna) {
+    window._escalaOrdemDirecao = window._escalaOrdemDirecao === 'desc' ? 'asc' : 'desc';
+  } else {
+    window._escalaOrdemColuna = coluna;
+    window._escalaOrdemDirecao = 'asc';
+  }
+  try {
+    localStorage.setItem('gde_escala_ordem_coluna', window._escalaOrdemColuna);
+    localStorage.setItem('gde_escala_ordem_direcao', window._escalaOrdemDirecao);
+  } catch (_) {}
   escalaGradeAtualiza();
 }
 
@@ -1161,27 +1179,47 @@ function escalaBlocoSubtotalHTML(label, colabsDoBloco, ano, mesNum, diasNoMes, N
 }
 
 function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
-  // Mesma lógica de "entrada" usada na renderização de cada linha (entrada
-  // manual, senão o horário mais frequente do mês) — pra ordenar exatamente
-  // como aparece na tela: função, depois horário de entrada (menor pro maior).
-  const entradaDoColab = (c) => {
-    const horarioFixo = escalaHorarioFixoDoColab(c.matricula, ano, mesNum, diasNoMes);
-    const [entradaCalc] = horarioFixo ? horarioFixo.split('-') : [null];
-    return c.entrada_manual || entradaCalc || '';
+  const entradaDoColab = (c) => escalaEntradaEfetivaDoColab(c, ano, mesNum, diasNoMes);
+
+  // Valor de cada colaborador pra uma coluna clicável específica — mesmo
+  // catálogo usado tanto pro clique no cabeçalho (lista simples) quanto pra
+  // ordenação dentro de cada setor (lista agrupada), pra não ter dois
+  // critérios "quase iguais" competindo.
+  const valorColuna = (c, coluna) => {
+    switch (coluna) {
+      case 'matricula': return String(c.matricula || '');
+      case 'nome': return String(c.nome || '');
+      case 'turno': return escalaSetorDoTurno(entradaDoColab(c)); // coluna "Turno" (automático, por horário)
+      case 'setor': return String(c.turno || ''); // coluna "Setor" (manual)
+      case 'entrada': default: return entradaDoColab(c);
+    }
   };
-  // Se o responsável já arrastou algum colaborador antes, a lista toda
-  // passa a respeitar essa ordem manual (ordem_manual) em vez de reordenar
-  // sozinha por função/horário — só volta a ordenar automático se ninguém
-  // tiver ordem_manual definida ainda, ou se clicar em "Ordenar automático".
-  const colabs = [...(window._escalaColabs || [])].sort((a, b) => {
-    const oa = a.ordem_manual, ob = b.ordem_manual;
-    if (oa != null && ob != null) return oa - ob;
-    if (oa != null) return -1;
-    if (ob != null) return 1;
-    const fa = window.eoColabs?.get(a.matricula)?.funcao || '';
-    const fb = window.eoColabs?.get(b.matricula)?.funcao || '';
-    return fa.localeCompare(fb) || entradaDoColab(a).localeCompare(entradaDoColab(b)) || String(a.nome||'').localeCompare(String(b.nome||''));
-  });
+
+  const colunaAtiva = window._escalaOrdemColuna || null;
+  const direcao = window._escalaOrdemDirecao === 'desc' ? -1 : 1;
+
+  let colabs;
+  if (colunaAtiva) {
+    // Clicou num cabeçalho — essa escolha explícita vale mais que a ordem
+    // manual de arrastar. "Ordenar automático" (ou arrastar de novo) volta
+    // a valer quando limpar a coluna ativa.
+    colabs = [...(window._escalaColabs || [])].sort((a, b) =>
+      direcao * String(valorColuna(a, colunaAtiva)).localeCompare(String(valorColuna(b, colunaAtiva)), 'pt-BR', { numeric: true }));
+  } else {
+    // Se o responsável já arrastou algum colaborador antes, a lista toda
+    // passa a respeitar essa ordem manual (ordem_manual) em vez de reordenar
+    // sozinha por função/horário — só volta a ordenar automático se ninguém
+    // tiver ordem_manual definida ainda, ou se clicar em "Ordenar automático".
+    colabs = [...(window._escalaColabs || [])].sort((a, b) => {
+      const oa = a.ordem_manual, ob = b.ordem_manual;
+      if (oa != null && ob != null) return oa - ob;
+      if (oa != null) return -1;
+      if (ob != null) return 1;
+      const fa = window.eoColabs?.get(a.matricula)?.funcao || '';
+      const fb = window.eoColabs?.get(b.matricula)?.funcao || '';
+      return fa.localeCompare(fb) || entradaDoColab(a).localeCompare(entradaDoColab(b)) || String(a.nome||'').localeCompare(String(b.nome||''));
+    });
+  }
   const temOrdemManual = colabs.some(c => c.ordem_manual != null);
   const NCOLS_FIXAS = 11; // Remover, Matrícula, Nome, Setor, Turno, Função, Entrada, Intervalo início, Intervalo fim, Saída, CH
   const NCOLS = NCOLS_FIXAS + diasNoMes;
@@ -1206,12 +1244,12 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     ${Array(diasNoMes).fill(`<col style="width:${LARG.dia}px">`).join('')}
   </colgroup><thead><tr>`;
   html += `<th style="text-align:center;padding:8px 2px;position:sticky;top:0;left:0;background:var(--bg-surface);z-index:3;border:${BORDA}"><input type="checkbox" onchange="escalaSelecionarTodos(this.checked)" title="Selecionar todos" style="margin:0"></th>`;
-  html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;top:0;left:${leftMat}px;background:var(--bg-surface);z-index:3;border:${BORDA}">Matrícula</th>`;
-  html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;top:0;left:${leftNome}px;background:var(--bg-surface);z-index:3;border:${BORDA}">Nome</th>`;
-  html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA}" title="Calculado sozinho pelo horário de entrada">Turno</th>`;
-  html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA}" title="Campo manual — usado no Agrupar por grupo/setor, particular de cada base">Setor</th>`;
+  html += `<th style="text-align:left;padding:8px 10px;color:${window._escalaOrdemColuna==='matricula'?'var(--blue)':'var(--text-muted)'};font-size:11px;text-transform:uppercase;position:sticky;top:0;left:${leftMat}px;background:var(--bg-surface);z-index:3;border:${BORDA};cursor:pointer;user-select:none" onclick="escalaOrdenarPorColuna('matricula')" title="Clique pra ordenar por matrícula">Matrícula${window._escalaOrdemColuna==='matricula'?(window._escalaOrdemDirecao==='desc'?' ↓':' ↑'):''}</th>`;
+  html += `<th style="text-align:left;padding:8px 10px;color:${window._escalaOrdemColuna==='nome'?'var(--blue)':'var(--text-muted)'};font-size:11px;text-transform:uppercase;position:sticky;top:0;left:${leftNome}px;background:var(--bg-surface);z-index:3;border:${BORDA};cursor:pointer;user-select:none" onclick="escalaOrdenarPorColuna('nome')" title="Clique pra ordenar por nome">Nome${window._escalaOrdemColuna==='nome'?(window._escalaOrdemDirecao==='desc'?' ↓':' ↑'):''}</th>`;
+  html += `<th style="text-align:left;padding:8px 10px;color:${window._escalaOrdemColuna==='turno'?'var(--blue)':'var(--text-muted)'};font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA};cursor:pointer;user-select:none" onclick="escalaOrdenarPorColuna('turno')" title="Calculado sozinho pelo horário de entrada — clique pra ordenar">Turno${window._escalaOrdemColuna==='turno'?(window._escalaOrdemDirecao==='desc'?' ↓':' ↑'):''}</th>`;
+  html += `<th style="text-align:left;padding:8px 10px;color:${window._escalaOrdemColuna==='setor'?'var(--blue)':'var(--text-muted)'};font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA};cursor:pointer;user-select:none" onclick="escalaOrdenarPorColuna('setor')" title="Campo manual, particular de cada base — clique pra ordenar">Setor${window._escalaOrdemColuna==='setor'?(window._escalaOrdemDirecao==='desc'?' ↓':' ↑'):''}</th>`;
   html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA}">Função</th>`;
-  html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA}">Entrada</th>`;
+  html += `<th style="text-align:center;padding:8px 4px;color:${window._escalaOrdemColuna==='entrada'?'var(--blue)':'var(--text-muted)'};font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA};cursor:pointer;user-select:none" onclick="escalaOrdenarPorColuna('entrada')" title="Clique pra ordenar por horário de entrada">Entrada${window._escalaOrdemColuna==='entrada'?(window._escalaOrdemDirecao==='desc'?' ↓':' ↑'):''}</th>`;
   html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:10px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA}" title="Início do intervalo">Interv. ↓</th>`;
   html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:10px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA}" title="Fim do intervalo">Interv. ↑</th>`;
   html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA}">Saída</th>`;
@@ -1265,15 +1303,9 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     // Agrupado: Grupo (bloco maior, lista fechada) → Setor (subgrupo manual)
     // → colaboradores. A ordem manual de arrastar não se aplica aqui (não
     // tem um sentido único quando a lista está partida em vários blocos) —
-    // ordena pelo critério escolhido em "Ordenar dentro do setor".
-    const criterioOrdem = window._escalaOrdemSetor || 'entrada';
-    const chaveOrdenacao = (c) => {
-      if (criterioOrdem === 'nome') return String(c.nome || '');
-      if (criterioOrdem === 'matricula') return String(c.matricula || '');
-      const horarioFixo = escalaHorarioFixoDoColab(c.matricula, ano, mesNum, diasNoMes);
-      const [entradaCalc] = horarioFixo ? horarioFixo.split('-') : [null];
-      return c.entrada_manual || entradaCalc || '';
-    };
+    // usa a mesma coluna/direção escolhida no clique do cabeçalho (padrão:
+    // Entrada, crescente).
+    const colunaOrdemGrupo = colunaAtiva || 'entrada';
 
     const gruposFuncao = new Map(); // codigo -> { label, turnos: Map(turnoLabel -> colabs[]) }
     colabs.forEach(c => {
@@ -1307,7 +1339,7 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
         html += escalaBlocoHeaderHTML(turnoLabel, colabsDoTurno.length, ti % 2 === 0 ? 'turno-a' : 'turno-b', NCOLS);
         if (!recolhido) {
           colabsDoTurno
-            .sort((a, b) => chaveOrdenacao(a).localeCompare(chaveOrdenacao(b)) || String(a.nome||'').localeCompare(String(b.nome||'')))
+            .sort((a, b) => direcao * String(valorColuna(a, colunaOrdemGrupo)).localeCompare(String(valorColuna(b, colunaOrdemGrupo)), 'pt-BR', { numeric: true }))
             .forEach((c, ci) => { html += escalaLinhaColabHTML(c, ci, ctxLinha); });
         }
         html += escalaBlocoSubtotalHTML(turnoLabel, colabsDoTurno, ano, mesNum, diasNoMes, NCOLS_FIXAS, false, BORDA);
@@ -1778,7 +1810,16 @@ async function escalaDrop(e, matriculaAlvo) {
 async function escalaLimparOrdemManual() {
   if (escalaVerificarTravada()) return;
   const lista = window._escalaColabs || [];
-  if (!lista.some(c => c.ordem_manual != null)) { escalaMsg('Essa escala já está na ordenação automática.'); return; }
+  const temOrdemManual = lista.some(c => c.ordem_manual != null);
+  const temOrdemColuna = !!window._escalaOrdemColuna;
+  if (!temOrdemManual && !temOrdemColuna) { escalaMsg('Essa escala já está na ordenação automática.'); return; }
+
+  window._escalaOrdemColuna = null;
+  window._escalaOrdemDirecao = 'asc';
+  try { localStorage.removeItem('gde_escala_ordem_coluna'); localStorage.setItem('gde_escala_ordem_direcao', 'asc'); } catch (_) {}
+
+  if (!temOrdemManual) { escalaGradeAtualiza(); escalaMsg('✓ Voltou pra ordenação automática (função → horário de entrada).'); return; }
+
   lista.forEach(c => { c.ordem_manual = null; });
   const updates = lista.map(c => ({ base: window._escalaBase, mes: window._escalaMes, matricula: c.matricula, nome: c.nome, ordem_manual: null }));
   const BATCH = 200;
