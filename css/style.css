@@ -571,6 +571,18 @@ a { color: inherit; text-decoration: none; }
   width: 100%;
 }
 
+/* Modo flex, ligado só na Escala Online (via classe .pc-flex adicionada/
+   removida na troca de página) — deixa o painel da grade (.escala-fill)
+   esticar pra ocupar exatamente o espaço que sobra até o fim da tela,
+   em vez de uma altura fixa "chutada" que sobra ou corta dependendo do
+   monitor. */
+#page-content.pc-flex {
+  display: flex;
+  flex-direction: column;
+}
+#page-content.pc-flex > * { flex-shrink: 0; }
+#page-content.pc-flex > .escala-fill { flex: 1 1 auto; min-height: 0; }
+
 #btn-topo {
   position: fixed;
   left: 50%;

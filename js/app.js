@@ -163,6 +163,7 @@ function navigateTo(pageId) {
 
   // Render page
   const content = document.getElementById('page-content');
+  content.classList.remove('pc-flex');
   content.innerHTML = '';
 
   switch (pageId) {
@@ -196,18 +197,35 @@ function sbIcon(name) {
   return `<span class="sb-icon">${icons[name] || ''}</span>`;
 }
 
-// Botão flutuante "voltar ao topo" — aparece quando rola bastante em
-// qualquer tela (o scroll de verdade é dentro de #page-content, não na
-// janela toda), some quando volta pro início.
+// Botão flutuante "voltar ao topo" — na maioria das telas o scroll de
+// verdade é em #page-content, mas na Escala Online a grade tem seu próprio
+// scroll interno (#escala-grade-wrap, pra caber em qualquer monitor sem
+// perder a barra horizontal lá embaixo — ver handoff). Por isso escuta os
+// dois: pega o scroll em qualquer elemento (captura, já que scroll não
+// borbulha) e reage se for um dos dois contêineres que interessam.
 (function () {
   const LIMIAR = 400; // px rolados antes do botão aparecer
+  function containerRolavel() {
+    const grade = document.getElementById('escala-grade-wrap');
+    if (grade && grade.scrollHeight > grade.clientHeight) return grade;
+    return document.getElementById('page-content');
+  }
   function setup() {
-    const wrap = document.getElementById('page-content');
     const btn = document.getElementById('btn-topo');
-    if (!wrap || !btn) return;
-    wrap.addEventListener('scroll', () => {
-      btn.classList.toggle('visivel', wrap.scrollTop > LIMIAR);
-    });
+    if (!btn) return;
+
+    document.addEventListener('scroll', (e) => {
+      const alvo = e.target;
+      if (!alvo || (alvo.id !== 'page-content' && alvo.id !== 'escala-grade-wrap')) return;
+      if (alvo !== containerRolavel()) return; // só reage ao contêiner que manda no momento
+      btn.classList.toggle('visivel', alvo.scrollTop > LIMIAR);
+    }, true);
+
+    btn.onclick = () => {
+      const alvo = containerRolavel();
+      if (alvo) alvo.scrollTo({ top: 0, behavior: 'smooth' });
+      btn.classList.remove('visivel');
+    };
   }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', setup);

@@ -658,6 +658,7 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
     ? `<button class="adh-refresh-btn" style="${travada?'background:#fc8181;color:#1a0b0b;border:none;font-weight:600':''}" onclick="escalaAlternarTrava()">${escalaIcone(travada?'lock':'unlock')}${travada?'Destravar escala':'Travar escala'}</button>`
     : (travada ? `<span class="adh-base-badge" style="color:#fc8181;border-color:rgba(252,129,129,.35)">${escalaIcone('lock')}Escala travada</span>` : '');
 
+  el.classList.add('pc-flex');
   el.innerHTML = `
     <div class="page-header">
       <div>
@@ -713,8 +714,8 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
       <div id="escala-status-msg" style="font-size:11px;color:var(--text-muted);margin-top:8px;min-height:14px"></div>
     </div>
 
-    <div class="hc-panel">
-      <div style="display:flex;gap:14px;margin-bottom:12px;font-size:11px;color:var(--text-secondary);flex-wrap:wrap">
+    <div class="hc-panel escala-fill" style="display:flex;flex-direction:column;min-height:0">
+      <div style="display:flex;gap:14px;margin-bottom:12px;font-size:11px;color:var(--text-secondary);flex-wrap:wrap;flex-shrink:0">
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:var(--text-muted);margin-right:5px"></span>F · Folga</span>
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#a78bfa;margin-right:5px"></span>FA · Folga agrupada</span>
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#c9a24a;margin-right:5px"></span>L · Férias (automático)</span>
@@ -723,7 +724,7 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#fb923c;margin-right:5px"></span>CH · Folga compensa (tecla C)</span>
         <span style="color:var(--text-muted)">clique numa célula vazia ou de trabalho pra marcar F/J/K/C · fim de semana e feriado ficam destacados nas colunas</span>
       </div>
-      <div id="escala-grade-wrap" style="overflow:auto;max-height:calc(100vh - 420px);border-radius:8px">${escalaGradeTabelaHTML(ano, mesNum, diasNoMes)}</div>
+      <div id="escala-grade-wrap" style="flex:1;min-height:120px;overflow:auto;border-radius:8px">${escalaGradeTabelaHTML(ano, mesNum, diasNoMes)}</div>
     </div>
   `;
 }
