@@ -70,6 +70,26 @@ async function pageEscala(el) {
     window._escalaMes = mesLocal || currentUserProfile?.escala_ultimo_mes || window._genMes || (typeof adhCurrentMonth === 'function' ? adhCurrentMonth() : null);
   }
   if (!window._escalaDiaSelecionado) window._escalaDiaSelecionado = 1;
+  if (window._escalaAgruparPorTurno === undefined) {
+    let agruparLocal = null;
+    try { agruparLocal = localStorage.getItem('gde_escala_agrupar'); } catch (_) {}
+    window._escalaAgruparPorTurno = agruparLocal === '1';
+  }
+  if (window._escalaOrdemSetor === undefined) {
+    try { window._escalaOrdemSetor = localStorage.getItem('gde_escala_ordem_setor') || 'entrada'; } catch (_) { window._escalaOrdemSetor = 'entrada'; }
+  }
+  if (window._escalaGruposVisiveis === undefined) {
+    try {
+      const salvo = localStorage.getItem('gde_escala_grupos_visiveis');
+      const lista = salvo ? JSON.parse(salvo) : null;
+      window._escalaGruposVisiveis = (lista && lista.length) ? new Set(lista) : null;
+    } catch (_) { window._escalaGruposVisiveis = null; }
+  }
+  if (window._escalaBlocosRecolhidos === undefined) {
+    let recolhidoLocal = null;
+    try { recolhidoLocal = localStorage.getItem('gde_escala_blocos_recolhidos'); } catch (_) {}
+    window._escalaBlocosRecolhidos = recolhidoLocal === '1';
+  }
 
   await escalaRenderGrade(el);
 }
@@ -689,8 +709,8 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
     </div>` : ''}
 
     <div class="hc-panel" style="margin-bottom:16px">
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <div style="position:relative;flex:1;min-width:260px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap;overflow-x:auto;padding-bottom:2px">
+        <div style="position:relative;flex:1 1 60px;min-width:60px">
           <input id="escala-busca" class="adh-search-input" ${dis} style="width:100%;box-sizing:border-box;padding:9px 12px;background:var(--bg-hover);border:1px solid var(--border-strong);border-radius:8px;color:var(--text-primary)"
             oninput="escalaBuscarColab(this.value)" placeholder="Buscar por matrícula ou nome pra adicionar...">
           <div id="escala-busca-resultados" style="position:absolute;top:calc(100% + 4px);left:0;right:0;background:#141b2c;border:1px solid var(--border-strong);border-radius:8px;z-index:20;display:none;max-height:220px;overflow-y:auto;box-shadow:var(--adh-shadow-card)"></div>
@@ -706,10 +726,36 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
         <button class="adh-refresh-btn" ${dis} style="color:#fc8181" onclick="escalaLimparColaboradores()">${escalaIcone('trash')}Limpar colaboradores</button>
         <button id="escala-btn-remover-sel" class="adh-refresh-btn" ${dis} style="color:#fc8181;display:none" onclick="escalaRemoverSelecionados()">${escalaIcone('trash')}Remover selecionados (0)</button>
         <button class="adh-refresh-btn" ${dis} onclick="escalaLimparOrdemManual()" title="Volta a ordenar sozinho por função + horário de entrada">${escalaIcone('sort')}Ordenar automático</button>
-        <button class="adh-refresh-btn" style="${window._escalaAgruparPorTurno?'background:var(--blue);color:#0b0f1a;border:none;font-weight:600':''}" onclick="escalaToggleAgruparTurno()" title="Agrupa a lista por função e depois por turno, com subtotal por bloco">${escalaIcone('layers')}Agrupar por função/turno</button>
+        <button class="adh-refresh-btn" style="${window._escalaAgruparPorTurno?'background:var(--blue);color:#0b0f1a;border:none;font-weight:600':''}" onclick="escalaToggleAgruparTurno()" title="Agrupa a lista por grupo (função) e depois por setor, com contagem por bloco">${escalaIcone('layers')}Agrupar por grupo/setor</button>
       </div>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">
-        ${Array(7).fill('<button class="adh-refresh-btn" disabled style="min-width:90px;opacity:.35" title="Reservado pra uma função futura"></button>').join('')}
+      <div id="escala-grupo-organizacao" style="display:flex;gap:16px;align-items:flex-end;flex-wrap:nowrap;overflow-x:auto;margin-top:10px;padding-bottom:2px">
+        <div>
+          <label style="font-size:10.5px;color:var(--text-muted);display:block;margin-bottom:3px">Ordenar dentro do setor</label>
+          <select class="adh-month-select" onchange="escalaSetOrdemSetor(this.value)">
+            <option value="entrada" ${(window._escalaOrdemSetor||'entrada')==='entrada'?'selected':''}>Horário de entrada</option>
+            <option value="nome" ${window._escalaOrdemSetor==='nome'?'selected':''}>Nome (A-Z)</option>
+            <option value="matricula" ${window._escalaOrdemSetor==='matricula'?'selected':''}>Matrícula</option>
+          </select>
+        </div>
+        <div style="position:relative">
+          <label style="font-size:10.5px;color:var(--text-muted);display:block;margin-bottom:3px">Mostrar grupos</label>
+          <select class="adh-month-select" onchange="escalaSetMostrarGrupos(this.value)">
+            <option value="__todos__" ${!window._escalaGruposVisiveis?'selected':''}>Todos os grupos</option>
+            <option value="__sup_lider__">Só Supervisores e Líderes</option>
+            <option value="__escolher__">Escolher grupos...</option>
+          </select>
+          <div id="escala-grupos-painel" style="display:none;position:absolute;top:calc(100% + 4px);left:0;background:#141b2c;border:1px solid var(--border-strong);border-radius:8px;padding:8px 10px;z-index:30;min-width:190px;box-shadow:var(--adh-shadow-card)">
+            ${ESCALA_GRUPOS.map(g => `<label style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:11.5px;color:var(--text-secondary);white-space:nowrap"><input type="checkbox" value="${g}" onchange="escalaAtualizarGruposEscolhidos()" ${(!window._escalaGruposVisiveis||window._escalaGruposVisiveis.has(g))?'checked':''}>${g}</label>`).join('')}
+          </div>
+        </div>
+        <div>
+          <label style="font-size:10.5px;color:var(--text-muted);display:block;margin-bottom:3px">Blocos</label>
+          <select class="adh-month-select" onchange="escalaSetBlocosRecolhidos(this.value)">
+            <option value="__expandido__" ${!window._escalaBlocosRecolhidos?'selected':''}>Expandido</option>
+            <option value="__recolhido__" ${window._escalaBlocosRecolhidos?'selected':''}>Recolhido (só cabeçalho e total)</option>
+          </select>
+        </div>
+        ${Array(4).fill('<button class="adh-refresh-btn" disabled style="min-width:90px;opacity:.35" title="Reservado pra uma função futura"></button>').join('')}
       </div>
       <div id="escala-status-msg" style="font-size:11px;color:var(--text-muted);margin-top:8px;min-height:14px"></div>
     </div>
@@ -727,6 +773,7 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
       <div id="escala-grade-wrap" style="flex:1;min-height:120px;overflow:auto;border-radius:8px">${escalaGradeTabelaHTML(ano, mesNum, diasNoMes)}</div>
     </div>
   `;
+  escalaAjustarStickyOffset();
 }
 
 function escalaGradeAtualiza() {
@@ -739,6 +786,19 @@ function escalaGradeAtualiza() {
     const n = (window._escalaColabs||[]).length;
     contador.textContent = `${n} colaborador${n===1?'':'es'}`;
   }
+  escalaAjustarStickyOffset();
+}
+
+// Mede a altura de verdade do cabeçalho (varia um pouco conforme zoom/fonte
+// do navegador) e grava numa variável CSS — assim a 2ª linha grudada
+// ("Trabalhando no dia") encosta certinho embaixo do cabeçalho, sem
+// depender de eu adivinhar um valor fixo em pixel.
+function escalaAjustarStickyOffset() {
+  const wrap = document.getElementById('escala-grade-wrap');
+  const thead = wrap?.querySelector('thead tr');
+  if (!wrap || !thead) return;
+  const altura = thead.getBoundingClientRect().height;
+  if (altura > 0) wrap.style.setProperty('--escala-thead-h', `${Math.round(altura)}px`);
 }
 
 const ESCALA_DIAS_SEMANA = ['dom','seg','ter','qua','qui','sex','sáb'];
@@ -909,23 +969,29 @@ function escalaFeriadosNacionais(ano) {
   return feriados;
 }
 
-// ── Agrupamento por Função + Turno ─────────────────────
-// Função (bloco maior) reaproveita a mesma categorização já usada no Staff
-// (hcCargoGrupo, em headcount.js) a partir do texto livre de função do
-// cadastro — não precisa recadastrar nada. Turno (bloco menor, dentro de
-// cada função) é um campo novo e manual por colaborador (coluna 'turno' em
-// escala_colaborador), porque o nome do turno varia por função (Turno D/A
-// pra Líder, Noite/Madrugada pra Operador etc.) — não dá pra calcular
-// sozinho, o gestor que decide e digita.
-const ESCALA_FUNCAO_GRUPO_LABEL = {
-  RAMP: 'Rampa', CLEANING: 'Limpeza', GSE: 'GSE', PAX: 'Passageiros',
-  SUPERVISION: 'Supervisão', SECURITY: 'Segurança', LEADERSHIP: 'Liderança',
-  OPERATOR: 'Operador', OTHERS: 'Outros',
-};
+// ── Agrupamento por Grupo + Setor ──────────────────────
+// Grupo (bloco maior) — lista fechada, confirmada com o cliente, casando
+// texto de função (sempre comparado sem acento, maiúsculo). Ordem importa:
+// checa do mais específico pro mais genérico, porque alguns títulos batem
+// com mais de uma palavra-chave (ex.: "Atendimento Passageiro Líder" tem
+// "líder" mas é PAX, não Líder de Operações — por isso PASSAGEIRO vem
+// primeiro).
+const ESCALA_GRUPOS = ['Supervisores', 'Líder de Operações', 'Auxiliar Líder', 'Auxiliar de Rampa', 'Operadores', 'PAX', 'Outros'];
+function escalaGrupoDaFuncao(funcaoRaw) {
+  const f = String(funcaoRaw || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  if (!f) return 'Outros';
+  if (f.includes('PASSAGEIRO')) return 'PAX'; // Atendimento/Coord./Agente Serv. Passageiro (líder ou não)
+  if (f.includes('SUPERVISOR')) return 'Supervisores';
+  if (f.includes('LIDER') && f.includes('RAMPA')) return 'Auxiliar Líder'; // AUX.LIDER DE RAMPA
+  if (f.includes('AUXILIAR') && f.includes('RAMPA')) return 'Auxiliar de Rampa';
+  if (f.includes('LIDER')) return 'Líder de Operações';
+  if (f.includes('OPERADOR')) return 'Operadores';
+  return 'Outros';
+}
 function escalaFuncaoGrupoDoColab(c) {
   const funcao = window.eoColabs?.get(c.matricula)?.funcao || '';
-  const codigo = typeof hcCargoGrupo === 'function' ? hcCargoGrupo(funcao) : 'OTHERS';
-  return { codigo, label: ESCALA_FUNCAO_GRUPO_LABEL[codigo] || 'Outros' };
+  const label = escalaGrupoDaFuncao(funcao);
+  return { codigo: label, label };
 }
 function escalaEscapeAttr(s) {
   return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -933,6 +999,47 @@ function escalaEscapeAttr(s) {
 
 function escalaToggleAgruparTurno() {
   window._escalaAgruparPorTurno = !window._escalaAgruparPorTurno;
+  try { localStorage.setItem('gde_escala_agrupar', window._escalaAgruparPorTurno ? '1' : '0'); } catch (_) {}
+  escalaGradeAtualiza();
+}
+
+// ── Controles de organização dos grupos/setores ────────
+function escalaSetOrdemSetor(valor) {
+  window._escalaOrdemSetor = valor;
+  try { localStorage.setItem('gde_escala_ordem_setor', valor); } catch (_) {}
+  escalaGradeAtualiza();
+}
+
+function escalaSetMostrarGrupos(valor) {
+  const painel = document.getElementById('escala-grupos-painel');
+  if (valor === '__escolher__') {
+    if (painel) painel.style.display = painel.style.display === 'none' ? 'block' : 'none';
+    return; // a lista de grupos escolhidos só muda quando marca/desmarca no painel
+  }
+  if (painel) painel.style.display = 'none';
+  window._escalaGruposVisiveis = valor === '__sup_lider__' ? new Set(['Supervisores', 'Líder de Operações']) : null;
+  escalaSalvarGruposVisiveis();
+  escalaGradeAtualiza();
+}
+
+function escalaAtualizarGruposEscolhidos() {
+  const painel = document.getElementById('escala-grupos-painel');
+  if (!painel) return;
+  const marcados = [...painel.querySelectorAll('input[type="checkbox"]:checked')].map(i => i.value);
+  window._escalaGruposVisiveis = marcados.length ? new Set(marcados) : null;
+  escalaSalvarGruposVisiveis();
+  escalaGradeAtualiza();
+}
+
+function escalaSalvarGruposVisiveis() {
+  try {
+    localStorage.setItem('gde_escala_grupos_visiveis', window._escalaGruposVisiveis ? JSON.stringify([...window._escalaGruposVisiveis]) : '');
+  } catch (_) {}
+}
+
+function escalaSetBlocosRecolhidos(valor) {
+  window._escalaBlocosRecolhidos = valor === '__recolhido__';
+  try { localStorage.setItem('gde_escala_blocos_recolhidos', window._escalaBlocosRecolhidos ? '1' : '0'); } catch (_) {}
   escalaGradeAtualiza();
 }
 
@@ -1029,21 +1136,21 @@ function escalaBlocoHeaderHTML(label, contagem, nivel, NCOLS) {
     <span style="color:${cor};opacity:.75;font-size:11px;margin-left:8px">${contagem} pessoa${contagem===1?'':'s'}</span>
   </td></tr>`;
 }
-function escalaBlocoFolgasPorDia(colabsDoBloco, ano, mesNum, diasNoMes) {
+function escalaBlocoTrabalhandoPorDia(colabsDoBloco, ano, mesNum, diasNoMes) {
   const porDia = new Array(diasNoMes).fill(0);
   colabsDoBloco.forEach(c => {
     escalaConteudoDoMes(c, ano, mesNum, diasNoMes).forEach((item, i) => {
-      if (['F','FA','J','CH','L'].includes(item.status)) porDia[i]++;
+      if (!item.status) porDia[i]++; // sem status = trabalhando, mesmo critério da linha "Trabalhando no dia" do topo
     });
   });
   return porDia;
 }
 function escalaBlocoSubtotalHTML(label, colabsDoBloco, ano, mesNum, diasNoMes, NCOLS_FIXAS, forte, BORDA) {
-  const porDia = escalaBlocoFolgasPorDia(colabsDoBloco, ano, mesNum, diasNoMes);
+  const porDia = escalaBlocoTrabalhandoPorDia(colabsDoBloco, ano, mesNum, diasNoMes);
   const bg = forte ? 'var(--bg-surface)' : 'var(--bg-hover)';
   const peso = forte ? '600' : '500';
   return `<tr style="background:${bg}">
-    <td colspan="${NCOLS_FIXAS}" style="padding:4px 10px;color:var(--text-secondary);font-size:11px;text-align:right;font-weight:${peso};border:${BORDA}">${label} — folgas no dia →</td>
+    <td colspan="${NCOLS_FIXAS}" style="padding:4px 10px;color:var(--text-secondary);font-size:11px;text-align:right;font-weight:${peso};border:${BORDA}">${label} — trabalhando no dia →</td>
     ${porDia.map(n => `<td style="text-align:center;border:${BORDA};color:var(--text-secondary);font-weight:${peso};font-size:11px">${n}</td>`).join('')}
   </tr>`;
 }
@@ -1096,8 +1203,8 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   html += `<th style="text-align:center;padding:8px 2px;position:sticky;top:0;left:0;background:var(--bg-surface);z-index:3;border:${BORDA}"><input type="checkbox" onchange="escalaSelecionarTodos(this.checked)" title="Selecionar todos" style="margin:0"></th>`;
   html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;top:0;left:${leftMat}px;background:var(--bg-surface);z-index:3;border:${BORDA}">Matrícula</th>`;
   html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;top:0;left:${leftNome}px;background:var(--bg-surface);z-index:3;border:${BORDA}">Nome</th>`;
-  html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA}">Setor</th>`;
-  html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA}" title="Grupo manual — usado no Agrupar por função/turno">Turno</th>`;
+  html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA}" title="Calculado sozinho pelo horário de entrada">Turno</th>`;
+  html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA}" title="Campo manual — usado no Agrupar por grupo/setor, particular de cada base">Setor</th>`;
   html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA}">Função</th>`;
   html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA}">Entrada</th>`;
   html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:10px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA}" title="Início do intervalo">Interv. ↓</th>`;
@@ -1126,8 +1233,8 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     conteudo.forEach((item, i) => { if (!item.status) contagemPorDia[i]++; }); // sem status = trabalhando
   });
   html += `<tr style="background:rgba(0,160,210,.06)">
-    <td colspan="${NCOLS_FIXAS}" style="border:${BORDA};padding:6px 10px;color:var(--text-secondary);font-size:11px;text-align:right;font-weight:600;position:sticky;left:0;background:var(--bg-surface);white-space:nowrap">Trabalhando no dia →</td>
-    ${contagemPorDia.map(n => `<td style="text-align:center;border:${BORDA};color:var(--text-primary);font-weight:700;font-size:12px">${n}</td>`).join('')}
+    <td colspan="${NCOLS_FIXAS}" style="border:${BORDA};padding:6px 10px;color:var(--text-secondary);font-size:11px;text-align:right;font-weight:600;position:sticky;top:var(--escala-thead-h, 36px);left:0;z-index:1;background:var(--bg-surface);white-space:nowrap">Trabalhando no dia →</td>
+    ${contagemPorDia.map(n => `<td style="text-align:center;border:${BORDA};color:var(--text-primary);font-weight:700;font-size:12px;position:sticky;top:var(--escala-thead-h, 36px);z-index:1;background:var(--bg-surface)">${n}</td>`).join('')}
   </tr>`;
 
   html += `<tr>
@@ -1150,12 +1257,14 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     // continua valendo aqui.
     colabs.forEach((c, ci) => { html += escalaLinhaColabHTML(c, ci, ctxLinha); });
   } else {
-    // Agrupado: Função (bloco maior, reaproveitando hcCargoGrupo) → Turno
-    // (subgrupo manual) → colaboradores. A ordem manual de arrastar não se
-    // aplica aqui (não tem um sentido único quando a lista está partida em
-    // vários blocos) — ordena por horário de entrada + nome dentro de cada
-    // turno, igual o critério automático da lista simples.
-    const entradaDoColabOrdenacao = (c) => {
+    // Agrupado: Grupo (bloco maior, lista fechada) → Setor (subgrupo manual)
+    // → colaboradores. A ordem manual de arrastar não se aplica aqui (não
+    // tem um sentido único quando a lista está partida em vários blocos) —
+    // ordena pelo critério escolhido em "Ordenar dentro do setor".
+    const criterioOrdem = window._escalaOrdemSetor || 'entrada';
+    const chaveOrdenacao = (c) => {
+      if (criterioOrdem === 'nome') return String(c.nome || '');
+      if (criterioOrdem === 'matricula') return String(c.matricula || '');
       const horarioFixo = escalaHorarioFixoDoColab(c.matricula, ano, mesNum, diasNoMes);
       const [entradaCalc] = horarioFixo ? horarioFixo.split('-') : [null];
       return c.entrada_manual || entradaCalc || '';
@@ -1166,28 +1275,36 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
       const { codigo, label } = escalaFuncaoGrupoDoColab(c);
       if (!gruposFuncao.has(codigo)) gruposFuncao.set(codigo, { label, turnos: new Map() });
       const grupo = gruposFuncao.get(codigo);
-      const turnoLabel = c.turno || '(sem turno)';
+      const turnoLabel = c.turno || '(sem setor)';
       if (!grupo.turnos.has(turnoLabel)) grupo.turnos.set(turnoLabel, []);
       grupo.turnos.get(turnoLabel).push(c);
     });
 
-    const funcoesOrdenadas = [...gruposFuncao.entries()].sort((a, b) => a[1].label.localeCompare(b[1].label));
+    // "Mostrar grupos" — null/ausente = mostra todos (padrão)
+    const gruposVisiveis = window._escalaGruposVisiveis;
+    let funcoesOrdenadas = [...gruposFuncao.entries()].sort((a, b) => ESCALA_GRUPOS.indexOf(a[1].label) - ESCALA_GRUPOS.indexOf(b[1].label));
+    if (gruposVisiveis && gruposVisiveis.size) {
+      funcoesOrdenadas = funcoesOrdenadas.filter(([, grupo]) => gruposVisiveis.has(grupo.label));
+    }
+    const recolhido = !!window._escalaBlocosRecolhidos;
 
     funcoesOrdenadas.forEach(([, grupo]) => {
       const todosDaFuncao = [...grupo.turnos.values()].flat();
       html += escalaBlocoHeaderHTML(grupo.label, todosDaFuncao.length, 'funcao', NCOLS);
 
       const turnosOrdenados = [...grupo.turnos.entries()].sort((a, b) => {
-        if (a[0] === '(sem turno)') return 1;
-        if (b[0] === '(sem turno)') return -1;
+        if (a[0] === '(sem setor)') return 1;
+        if (b[0] === '(sem setor)') return -1;
         return a[0].localeCompare(b[0]);
       });
 
       turnosOrdenados.forEach(([turnoLabel, colabsDoTurno], ti) => {
         html += escalaBlocoHeaderHTML(turnoLabel, colabsDoTurno.length, ti % 2 === 0 ? 'turno-a' : 'turno-b', NCOLS);
-        colabsDoTurno
-          .sort((a, b) => entradaDoColabOrdenacao(a).localeCompare(entradaDoColabOrdenacao(b)) || String(a.nome||'').localeCompare(String(b.nome||'')))
-          .forEach((c, ci) => { html += escalaLinhaColabHTML(c, ci, ctxLinha); });
+        if (!recolhido) {
+          colabsDoTurno
+            .sort((a, b) => chaveOrdenacao(a).localeCompare(chaveOrdenacao(b)) || String(a.nome||'').localeCompare(String(b.nome||'')))
+            .forEach((c, ci) => { html += escalaLinhaColabHTML(c, ci, ctxLinha); });
+        }
         html += escalaBlocoSubtotalHTML(turnoLabel, colabsDoTurno, ano, mesNum, diasNoMes, NCOLS_FIXAS, false, BORDA);
       });
 
