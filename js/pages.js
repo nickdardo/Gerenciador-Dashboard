@@ -663,6 +663,7 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
       <div>
         <h1 class="page-title">Escala Online</h1>
         <p class="page-sub">Montar escala · ${base} · ${typeof adhMonthLabel==='function'?adhMonthLabel(mes):mes} · <span id="escala-contador-colabs" style="color:var(--text-primary);font-weight:600">${(window._escalaColabs||[]).length} colaborador${(window._escalaColabs||[]).length===1?'':'es'}</span></p>
+        <p id="escala-save-indicator" style="font-size:11px;margin:4px 0 0;color:var(--text-muted)">● Nenhuma alteração ainda</p>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
         ${bases.length>1
@@ -2337,9 +2338,23 @@ function escalaVoosLeave() {
   });
 }
 
+// Ponto único por onde toda ação da Escala Online já passa (sucesso ou
+// erro) — por isso é aqui, e só aqui, que também acendemos o indicador
+// fixo "✓ Salvo" no cabeçalho, sem precisar mexer em cada função que
+// salva individualmente (menos risco de esquecer alguma).
 function escalaMsg(texto, erro) {
   const el = document.getElementById('escala-status-msg');
   if (el) el.innerHTML = `<span style="color:${erro?'#fc8181':'#5fa87a'}">${texto}</span>`;
+
+  const ind = document.getElementById('escala-save-indicator');
+  if (ind) {
+    if (erro) {
+      ind.innerHTML = `<span style="color:#fc8181">⚠ ${texto.replace(/^[🔒⚠]\s*/, '')}</span>`;
+    } else {
+      const hora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      ind.innerHTML = `<span style="color:#5fa87a">✓ Salvo às ${hora}</span>`;
+    }
+  }
 }
 
 async function escalaAdicionarFeriado() {
