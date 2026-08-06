@@ -1148,25 +1148,102 @@ const ADH_COR_REALIZADA = '#2FA84F';
 const ADH_COR_PLANEJADA = '#6FB1E8';
 const ADH_COR_HORA_EXTRA= '#E8862F';
 
-function adhBuildMultiLineChartSVG(labels, series) {
-  const W = 900, H = 140, PAD = 26;
-  const n = labels.length;
-  const maxV = Math.max(1, ...series.flatMap(s => s.values)) * 1.15;
-  const x = i => n > 1 ? PAD + i*(W-PAD*2)/(n-1) : W/2;
-  const y = v => H-18 - (v/maxV)*(H-30);
-  const passo = maxV > 40 ? 20 : maxV > 10 ? 5 : 1;
-  const linhasGrid = [];
-  for (let v = 0; v <= maxV; v += passo) {
-    linhasGrid.push(`<line x1="${PAD}" y1="${y(v)}" x2="${W-PAD}" y2="${y(v)}" stroke="var(--weekend-tint)"/><text x="2" y="${y(v)+3}" font-size="8" fill="#6b7488">${Math.round(v)}</text>`);
+// Larguras compartilhadas entre o construtor do gráfico e o handler de
+// hover — precisam ser exatamente iguais pros dois lados calcularem a
+// mesma posição X pro mesmo índice de hora.
+const ADH_CHART_W = 900, ADH_CHART_H = 160, ADH_CHART_PAD = 28;
+
+function adhSmoothPath(pts) {
+  if (!pts.length) return '';
+  if (pts.length === 1) return `M ${pts[0][0]},${pts[0][1]}`;
+  let d = `M ${pts[0][0]},${pts[0][1]}`;
+  for (let i = 0; i < pts.length-1; i++) {
+    const [x0,y0] = pts[i], [x1,y1] = pts[i+1];
+    const cx = (x0+x1)/2;
+    d += ` C ${cx},${y0} ${cx},${y1} ${x1},${y1}`;
   }
-  const labelsSVG = labels.map((l,i) => (i % 3 === 0 ? `<text x="${x(i)}" y="${H-4}" text-anchor="middle" font-size="8" fill="#6b7488">${l}</text>` : '')).join('');
-  const seriesSVG = series.map(s => {
-    const pts = s.values.map((v,i) => `${x(i)},${y(v)}`).join(' ');
-    const areaHTML = s.area ? `<polygon points="${x(0)},${y(0)} ${pts} ${x(n-1)},${y(0)}" fill="${s.color}" opacity="0.10"/>` : '';
+  return d;
+}
+
+// Um gráfico só com as 4 séries juntas. Como as escalas são bem diferentes
+// (voos ~0-10, colaboradores ~0-80), cada série é normalizada pro seu
+// próprio pico (0 a 1) só pra desenhar — assim dá pra comparar o FORMATO e
+// o TIMING de todas juntas sem uma sumir atrás da outra. Os valores reais
+// não aparecem no eixo (ficariam enganosos, misturando escalas) — aparecem
+// certinho no tooltip ao passar o mouse.
+function adhBuildUnifiedChartSVG(labels, series) {
+  const W = ADH_CHART_W, H = ADH_CHART_H, PAD = ADH_CHART_PAD;
+  const n = labels.length;
+  const x = i => n > 1 ? PAD + i*(W-PAD*2)/(n-1) : W/2;
+  const yNorm = v => H-22 - v*(H-34);
+
+  const seriesComPico = series.map(s => ({ ...s, maxV: Math.max(1, ...s.values) }));
+
+  const linhasGrid = [0, 0.25, 0.5, 0.75, 1].map(f =>
+    `<line x1="${PAD}" y1="${yNorm(f)}" x2="${W-PAD}" y2="${yNorm(f)}" stroke="var(--weekend-tint)"/>`
+  ).join('');
+  const labelsSVG = labels.map((l,i) => (i % 3 === 0 ? `<text x="${x(i)}" y="${H-6}" text-anchor="middle" font-size="8" fill="#6b7488">${l}h</text>` : '')).join('');
+
+  const seriesSVG = seriesComPico.map(s => {
+    const pts = s.values.map((v,i) => [x(i), yNorm(v / s.maxV)]);
     const dashAttr = s.dashed ? ' stroke-dasharray="5,3"' : '';
-    return `${areaHTML}<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="2"${dashAttr}/>`;
+    return `<path d="${adhSmoothPath(pts)}" fill="none" stroke="${s.color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"${dashAttr}/>`;
   }).join('');
-  return `<svg width="100%" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">${linhasGrid.join('')}${seriesSVG}${labelsSVG}</svg>`;
+  const dotsSVG = seriesComPico.map((s,si) => `<circle id="adh-chart-dot-${si}" cx="0" cy="0" r="3" fill="${s.color}" opacity="0"/>`).join('');
+
+  window._adhChartHoverData = { labels, series: seriesComPico };
+
+  return `<svg width="100%" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="cursor:crosshair"
+      onmousemove="adhChartHover(event,this)" onmouseleave="adhChartHoverEnd()">
+    ${linhasGrid}
+    ${seriesSVG}
+    <line id="adh-chart-guide" x1="0" y1="8" x2="0" y2="${H-16}" stroke="var(--text-muted)" stroke-width="1" opacity="0"/>
+    ${dotsSVG}
+    ${labelsSVG}
+  </svg>`;
+}
+
+function adhChartHover(e, svgEl) {
+  const data = window._adhChartHoverData;
+  if (!data) return;
+  const rect = svgEl.getBoundingClientRect();
+  if (!rect.width) return;
+  const W = ADH_CHART_W, H = ADH_CHART_H, PAD = ADH_CHART_PAD;
+  const n = data.labels.length;
+  const stepX = n > 1 ? (W-PAD*2)/(n-1) : 0;
+  const fracX = (e.clientX - rect.left) / rect.width;
+  let i = stepX ? Math.round(((fracX*W) - PAD) / stepX) : 0;
+  i = Math.max(0, Math.min(n-1, i));
+  const px = PAD + i*stepX;
+  const yNorm = v => H-22 - v*(H-34);
+
+  const guide = document.getElementById('adh-chart-guide');
+  if (guide) { guide.setAttribute('x1', px); guide.setAttribute('x2', px); guide.setAttribute('opacity', '1'); }
+
+  data.series.forEach((s, si) => {
+    const dot = document.getElementById('adh-chart-dot-'+si);
+    if (dot) { dot.setAttribute('cx', px); dot.setAttribute('cy', yNorm(s.values[i]/s.maxV)); dot.setAttribute('opacity', '1'); }
+  });
+
+  const tip = document.getElementById('adh-tooltip');
+  if (tip) {
+    tip.className = 'adh-tooltip adh-tooltip-compact';
+    tip.innerHTML = `<div style="font-weight:600;margin-bottom:6px;font-size:12px">${data.labels[i]}h</div>` +
+      data.series.map(s => {
+        const v = s.values[i];
+        const vFmt = v >= 10 ? Math.round(v) : Math.round(v*10)/10;
+        return `<div style="display:flex;align-items:center;gap:6px;font-size:11px;padding:1px 0"><span style="width:8px;height:8px;border-radius:2px;background:${s.color};flex-shrink:0"></span>${s.label}: <b>${vFmt}</b></div>`;
+      }).join('');
+    tip.style.display = 'block';
+    adhPositionTooltip(e);
+  }
+}
+
+function adhChartHoverEnd() {
+  const guide = document.getElementById('adh-chart-guide');
+  if (guide) guide.setAttribute('opacity', '0');
+  document.querySelectorAll('circle[id^="adh-chart-dot-"]').forEach(d => d.setAttribute('opacity', '0'));
+  adhHideTooltip();
 }
 
 function adhHoraParaNum(hhmm) {
@@ -1296,7 +1373,7 @@ async function adhToggleGraficosHora(base) {
   painel.dataset.carregado = base;
 
   const legenda = `
-    <div style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:14px;font-size:11px;color:var(--text-secondary)">
+    <div style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:10px;font-size:11px;color:var(--text-secondary)">
       <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${ADH_COR_VOO};margin-right:5px"></span>Voo previsto</span>
       <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${ADH_COR_REALIZADA};margin-right:5px"></span>Escala realizada</span>
       <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${ADH_COR_PLANEJADA};margin-right:5px"></span>Escala planejada</span>
@@ -1308,18 +1385,12 @@ async function adhToggleGraficosHora(base) {
   painel.innerHTML = `
     <div class="hc-panel">
       ${legenda}
-      <p style="font-size:11px;color:var(--text-muted);margin:0 0 4px">Voos previstos por hora (média de ${numDias} dia${numDias===1?'':'s'} com voo)</p>
-      ${adhBuildMultiLineChartSVG(horas, [{ values: voos, color: ADH_COR_VOO, area: true }])}
-      <p style="font-size:11px;color:var(--text-muted);margin:14px 0 4px">Colaboradores — escala realizada x hora extra (média de ${numDias} dia${numDias===1?'':'s'})</p>
-      ${adhBuildMultiLineChartSVG(horas, [
-        { values: realizadaMedia, color: ADH_COR_REALIZADA },
-        { values: horaExtraMedia, color: ADH_COR_HORA_EXTRA },
-      ])}
-      <p style="font-size:11px;color:var(--text-muted);margin:14px 0 4px">Escala realizada x planejada x hora extra${semDimensionamento ? ' — sem dimensionamento carregado pra esse mês/base ainda' : ''}</p>
-      ${adhBuildMultiLineChartSVG(horas, [
-        { values: realizadaMedia, color: ADH_COR_REALIZADA },
-        { values: planejada, color: ADH_COR_PLANEJADA, dashed: true },
-        { values: horaExtraMedia, color: ADH_COR_HORA_EXTRA },
+      <p style="font-size:11px;color:var(--text-muted);margin:0 0 6px">Média de ${numDias} dia${numDias===1?'':'s'} do mês · cada linha na sua própria escala (passe o mouse pros valores reais)${semDimensionamento ? ' · sem dimensionamento carregado pra essa base/mês ainda' : ''}</p>
+      ${adhBuildUnifiedChartSVG(horas, [
+        { label: 'Voo previsto', values: voos, color: ADH_COR_VOO },
+        { label: 'Escala realizada', values: realizadaMedia, color: ADH_COR_REALIZADA },
+        { label: 'Escala planejada', values: planejada, color: ADH_COR_PLANEJADA, dashed: true },
+        { label: 'Hora extra', values: horaExtraMedia, color: ADH_COR_HORA_EXTRA },
       ])}
     </div>`;
 }
@@ -1683,11 +1754,11 @@ function adhRenderDetalhe(el, base, showBack) {
 
       ${base ? `
       <!-- Gráficos por hora (voos, escala realizada/planejada, hora extra) -->
-      <div style="margin:0 24px 16px">
-        <button class="adh-refresh-btn" onclick="adhToggleGraficosHora('${adhEsc(base)}')" id="adh-graficos-btn">
+      <div style="margin:0 24px 16px;text-align:center">
+        <button class="adh-refresh-btn" onclick="adhToggleGraficosHora('${adhEsc(base)}')" id="adh-graficos-btn" style="display:inline-flex;margin:0 auto">
           <i class="ti ti-chart-line" aria-hidden="true"></i> Ver voos e hora extra por hora do dia
         </button>
-        <div id="adh-graficos-hora-panel" style="display:none;margin-top:12px"></div>
+        <div id="adh-graficos-hora-panel" style="display:none;margin-top:12px;text-align:left"></div>
       </div>` : ''}
 
       <!-- Table -->
