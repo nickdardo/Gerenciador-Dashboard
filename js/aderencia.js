@@ -1173,40 +1173,75 @@ function adhSmoothPath(pts) {
 // o TIMING de todas juntas sem uma sumir atrás da outra. Os valores reais
 // não aparecem no eixo (ficariam enganosos, misturando escalas) — aparecem
 // certinho no tooltip ao passar o mouse.
-function adhBuildUnifiedChartSVG(labels, series, larguraPx) {
+function adhBuildUnifiedChartSVG(labels, series, larguraPx, opts) {
+  opts = opts || {};
+  const idPrefix = opts.idPrefix || 'default';
   const W = Math.max(300, Math.round(larguraPx || 900)), H = ADH_CHART_H, PAD = ADH_CHART_PAD;
   const n = labels.length;
   const x = i => n > 1 ? PAD + i*(W-PAD*2)/(n-1) : W/2;
   const yNorm = v => H-22 - v*(H-38);
 
-  const seriesComPico = series.map(s => ({ ...s, maxV: Math.max(1, ...s.values) }));
+  // Normaliza por GRUPO de unidade — se vier mais de uma série no mesmo
+  // gráfico com unidades diferentes, cada grupo tem sua própria escala
+  // (voos x pessoas, por exemplo). Séries do mesmo grupo compartilham a
+  // MESMA escala, então dá pra comparar a altura delas direto no gráfico.
+  const gruposMax = {};
+  series.forEach(s => {
+    const g = s.grupo || 'default';
+    gruposMax[g] = Math.max(gruposMax[g] || 1, ...s.values);
+  });
+  const seriesComPico = series.map(s => ({ ...s, maxV: gruposMax[s.grupo || 'default'] }));
+
+  const gruposUnicos = [...new Set(series.map(s => s.grupo || 'default'))];
+  const mostrarEixo = opts.mostrarEixo && gruposUnicos.length === 1;
+  const maxEixo = mostrarEixo ? gruposMax[gruposUnicos[0]] : null;
 
   const linhasGrid = [0, 0.25, 0.5, 0.75, 1].map(f =>
-    `<line x1="${PAD}" y1="${yNorm(f)}" x2="${W-PAD}" y2="${yNorm(f)}" stroke="var(--weekend-tint)"/>`
+    `<line x1="${PAD}" y1="${yNorm(f)}" x2="${W-PAD}" y2="${yNorm(f)}" stroke="var(--weekend-tint)"/>` +
+    (mostrarEixo ? `<text x="4" y="${yNorm(f)-3}" font-size="9" font-family="Inter, sans-serif" fill="#6b7488">${Math.round(maxEixo*f)}</text>` : '')
   ).join('');
   const labelsSVG = labels.map((l,i) => (i % 3 === 0 ? `<text x="${x(i)}" y="${H-8}" text-anchor="middle" font-size="10" font-family="Inter, sans-serif" fill="#6b7488">${l}h</text>` : '')).join('');
 
   const seriesSVG = seriesComPico.map(s => {
     const pts = s.values.map((v,i) => [x(i), yNorm(v / s.maxV)]);
     const dashAttr = s.dashed ? ' stroke-dasharray="5,3"' : '';
-    return `<path d="${adhSmoothPath(pts)}" fill="none" stroke="${s.color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"${dashAttr}/>`;
+    const areaHTML = s.area ? `<path d="M ${x(0)},${yNorm(0)} ${pts.map(([px,py])=>`L ${px},${py}`).join(' ')} L ${x(n-1)},${yNorm(0)} Z" fill="${s.color}" opacity="0.16"/>` : '';
+    return `${areaHTML}<path d="${adhSmoothPath(pts)}" fill="none" stroke="${s.color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"${dashAttr}/>`;
   }).join('');
-  const dotsSVG = seriesComPico.map((s,si) => `<circle id="adh-chart-dot-${si}" cx="0" cy="0" r="3" fill="${s.color}" opacity="0"/>`).join('');
+  const dotsSVG = seriesComPico.map((s,si) => `<circle id="adh-chart-dot-${idPrefix}-${si}" cx="0" cy="0" r="3" fill="${s.color}" opacity="0"/>`).join('');
 
-  window._adhChartHoverData = { labels, series: seriesComPico, W, H, PAD };
+  // Destaque estático no pico — só faz sentido com 1 série só no gráfico
+  // (senão fica ambíguo de qual série é o pico).
+  let picoSVG = '';
+  if (opts.mostrarPico && seriesComPico.length === 1) {
+    const s = seriesComPico[0];
+    const iPico = s.values.indexOf(Math.max(...s.values));
+    const px = x(iPico), py = yNorm(s.values[iPico]/s.maxV);
+    const vFmt = s.values[iPico] >= 10 ? Math.round(s.values[iPico]) : Math.round(s.values[iPico]*10)/10;
+    picoSVG = `<circle cx="${px}" cy="${py}" r="4" fill="${s.color}" stroke="var(--bg-surface)" stroke-width="1.5"/>
+      <text x="${px}" y="${py-10}" text-anchor="middle" font-size="11" font-weight="700" font-family="Inter, sans-serif" fill="${s.color}">${vFmt}</text>`;
+  }
 
-  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="display:block;width:100%;height:${H}px;cursor:crosshair"
-      onmousemove="adhChartHover(event,this)" onmouseleave="adhChartHoverEnd()">
+  // Cada gráfico guarda seu próprio estado de hover, indexado pelo
+  // idPrefix — sem isso, com 2 gráficos na mesma tela, passar o mouse num
+  // ia mexer nos elementos (guia, pontinhos, estatísticas) do outro, já
+  // que os dois disputariam a mesma variável/ids globais.
+  window._adhChartHoverDataMap = window._adhChartHoverDataMap || {};
+  window._adhChartHoverDataMap[idPrefix] = { labels, series: seriesComPico, W, H, PAD };
+
+  return `<svg id="adh-chart-svg-${idPrefix}" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="display:block;width:100%;height:${H}px;cursor:crosshair"
+      onmousemove="adhChartHover(event,this,'${idPrefix}')" onmouseleave="adhChartHoverEnd('${idPrefix}')">
     ${linhasGrid}
     ${seriesSVG}
-    <line id="adh-chart-guide" x1="0" y1="8" x2="0" y2="${H-16}" stroke="var(--text-muted)" stroke-width="1" opacity="0"/>
+    ${picoSVG}
+    <line id="adh-chart-guide-${idPrefix}" x1="0" y1="8" x2="0" y2="${H-16}" stroke="var(--text-muted)" stroke-width="1" opacity="0"/>
     ${dotsSVG}
     ${labelsSVG}
   </svg>`;
 }
 
-function adhChartHover(e, svgEl) {
-  const data = window._adhChartHoverData;
+function adhChartHover(e, svgEl, idPrefix) {
+  const data = (window._adhChartHoverDataMap || {})[idPrefix];
   if (!data) return;
   const rect = svgEl.getBoundingClientRect();
   if (!rect.width) return;
@@ -1239,11 +1274,11 @@ function adhChartHover(e, svgEl) {
   const px = PAD + hFrac*stepX;
   const yNorm = v => H-22 - v*(H-38);
 
-  const guide = document.getElementById('adh-chart-guide');
+  const guide = document.getElementById('adh-chart-guide-'+idPrefix);
   if (guide) { guide.setAttribute('x1', px); guide.setAttribute('x2', px); guide.setAttribute('opacity', '1'); }
 
   data.series.forEach((s, si) => {
-    const dot = document.getElementById('adh-chart-dot-'+si);
+    const dot = document.getElementById('adh-chart-dot-'+idPrefix+'-'+si);
     const vInterp = interp(s.values);
     if (dot) { dot.setAttribute('cx', px); dot.setAttribute('cy', yNorm(vInterp/s.maxV)); dot.setAttribute('opacity', '1'); }
   });
@@ -1262,21 +1297,21 @@ function adhChartHover(e, svgEl) {
   }
 
   // Também atualiza a faixa de estatísticas fixa embaixo do gráfico (se
-  // essa instância tiver uma — o painel de voos/hora extra tem).
-  const statHora = document.getElementById('adh-stat-hora');
+  // essa instância tiver uma — o painel de escala tem, o de voos não).
+  const statHora = document.getElementById('adh-stat-hora-'+idPrefix);
   if (statHora) {
     statHora.textContent = horaLabel;
     data.series.forEach((s, si) => {
-      const cel = document.getElementById('adh-stat-'+si);
+      const cel = document.getElementById('adh-stat-'+idPrefix+'-'+si);
       if (cel) cel.textContent = adhFmtStatValor(interp(s.values));
     });
   }
 }
 
-function adhChartHoverEnd() {
-  const guide = document.getElementById('adh-chart-guide');
+function adhChartHoverEnd(idPrefix) {
+  const guide = document.getElementById('adh-chart-guide-'+idPrefix);
   if (guide) guide.setAttribute('opacity', '0');
-  document.querySelectorAll('circle[id^="adh-chart-dot-"]').forEach(d => d.setAttribute('opacity', '0'));
+  document.querySelectorAll(`circle[id^="adh-chart-dot-${idPrefix}-"]`).forEach(d => d.setAttribute('opacity', '0'));
   adhHideTooltip();
 }
 
@@ -1410,20 +1445,21 @@ async function adhToggleGraficosHora(base) {
   if (btn) btn.disabled = false;
   painel.dataset.carregado = `${base}|${mes}`;
 
-  const legenda = `
-    <div style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:10px;font-size:11px;color:var(--text-secondary)">
-      <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${ADH_COR_VOO};margin-right:5px"></span>Voo previsto</span>
+  const legendaEscala = `
+    <div style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:2px;font-size:11px;color:var(--text-secondary)">
       <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${ADH_COR_REALIZADA};margin-right:5px"></span>Escala realizada</span>
       <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${ADH_COR_PLANEJADA};margin-right:5px"></span>Escala planejada</span>
       <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${ADH_COR_HORA_EXTRA};margin-right:5px"></span>Hora extra</span>
     </div>`;
 
   const semPlanejado = !temPlanejado;
+  const seriesVoo = [
+    { key: 'voo', label: 'Voo previsto', color: ADH_COR_VOO, values: voos, grupo: 'voos', area: true },
+  ];
   const seriesInfo = [
-    { key: 'voo', label: 'Voo previsto', color: ADH_COR_VOO, values: voos },
-    { key: 'realizada', label: 'Escala realizada', color: ADH_COR_REALIZADA, values: realizadaMedia },
-    { key: 'planejada', label: 'Escala planejada', color: ADH_COR_PLANEJADA, values: planejadaMedia, dashed: true },
-    { key: 'extra', label: 'Hora extra', color: ADH_COR_HORA_EXTRA, values: horaExtraMedia },
+    { key: 'realizada', label: 'Escala realizada', color: ADH_COR_REALIZADA, values: realizadaMedia, grupo: 'pessoas' },
+    { key: 'planejada', label: 'Escala planejada', color: ADH_COR_PLANEJADA, values: planejadaMedia, dashed: true, grupo: 'pessoas' },
+    { key: 'extra', label: 'Hora extra', color: ADH_COR_HORA_EXTRA, values: horaExtraMedia, grupo: 'pessoas' },
   ];
   // Ponto de partida da faixa de estatísticas: a hora de pico da escala
   // realizada (a métrica mais "âncora" das quatro) — só até o usuário
@@ -1431,27 +1467,38 @@ async function adhToggleGraficosHora(base) {
   const horaPico = realizadaMedia.indexOf(Math.max(...realizadaMedia));
 
   painel.innerHTML = `
+    <div class="hc-panel" style="padding:14px 16px;margin-bottom:14px">
+      <p style="font-size:11px;font-weight:600;color:var(--text-primary);margin:0 0 2px">Voos em atendimento</p>
+      <p style="font-size:10px;color:var(--text-muted);margin:0 0 8px">Média de voos previstos por hora, ao longo do mês</p>
+      <div id="adh-chart-container-voo">${adhBuildUnifiedChartSVG(horas, seriesVoo, null, { mostrarEixo: true, mostrarPico: true, idPrefix: 'voo' })}</div>
+    </div>
     <div class="hc-panel" style="padding:14px 16px">
-      ${legenda}
-      <p style="font-size:10px;color:var(--text-muted);margin:0 0 6px">${temMarcacao ? `Média de ${numDias} dia${numDias===1?'':'s'} do mês` : 'Sem marcação de ponto carregada pra essa base/mês ainda'} · cada linha na sua própria escala${semPlanejado ? ' · sem horário planejado (Horarios.xlsx) carregado pra essa base/mês ainda' : ''}</p>
-      <div id="adh-chart-container">${adhBuildUnifiedChartSVG(horas, seriesInfo)}</div>
+      <p style="font-size:11px;font-weight:600;color:var(--text-primary);margin:0 0 2px">Escala — realizada, planejada e hora extra</p>
+      ${legendaEscala}
+      <p style="font-size:10px;color:var(--text-muted);margin:0 0 6px">${temMarcacao ? `Média de ${numDias} dia${numDias===1?'':'s'} do mês` : 'Sem marcação de ponto carregada pra essa base/mês ainda'} · as três dividem a mesma escala (pessoas)${semPlanejado ? ' · sem horário planejado (Horarios.xlsx) carregado pra essa base/mês ainda' : ''}</p>
+      <div id="adh-chart-container-escala">${adhBuildUnifiedChartSVG(horas, seriesInfo, null, { idPrefix: 'escala' })}</div>
       <div id="adh-chart-stats" style="display:flex;align-items:center;gap:18px;margin-top:8px;padding-top:10px;border-top:1px solid var(--border);flex-wrap:wrap">
-        <div style="font-size:10px;color:var(--text-muted);min-width:32px" id="adh-stat-hora">${horas[horaPico]}h</div>
+        <div style="font-size:10px;color:var(--text-muted);min-width:32px" id="adh-stat-hora-escala">${horas[horaPico]}h</div>
         ${seriesInfo.map((s,si) => `
           <div>
             <div style="font-size:8.5px;color:${s.color};text-transform:uppercase;letter-spacing:.02em">${s.label}</div>
-            <div style="font-size:13px;font-weight:700;color:var(--text-primary)" id="adh-stat-${si}">${adhFmtStatValor(s.values[horaPico])}</div>
+            <div style="font-size:13px;font-weight:700;color:var(--text-primary)" id="adh-stat-escala-${si}">${adhFmtStatValor(s.values[horaPico])}</div>
           </div>`).join('')}
       </div>
     </div>`;
 
-  // Re-renderiza o SVG com a largura REAL do painel na tela — assim o texto
-  // fica em pixel de verdade (10px = 10px), em vez de escalar junto com a
-  // largura do container e ficar gigante em painéis largos.
-  const container = document.getElementById('adh-chart-container');
-  if (container) {
-    const larguraReal = Math.round(container.getBoundingClientRect().width);
-    if (larguraReal > 50) container.innerHTML = adhBuildUnifiedChartSVG(horas, seriesInfo, larguraReal);
+  // Re-renderiza os dois SVGs com a largura REAL de cada painel na tela —
+  // assim o texto fica em pixel de verdade (10px = 10px), em vez de
+  // escalar junto com a largura do container e ficar gigante.
+  const containerVoo = document.getElementById('adh-chart-container-voo');
+  if (containerVoo) {
+    const larguraVoo = Math.round(containerVoo.getBoundingClientRect().width);
+    if (larguraVoo > 50) containerVoo.innerHTML = adhBuildUnifiedChartSVG(horas, seriesVoo, larguraVoo, { mostrarEixo: true, mostrarPico: true, idPrefix: 'voo' });
+  }
+  const containerEscala = document.getElementById('adh-chart-container-escala');
+  if (containerEscala) {
+    const larguraEscala = Math.round(containerEscala.getBoundingClientRect().width);
+    if (larguraEscala > 50) containerEscala.innerHTML = adhBuildUnifiedChartSVG(horas, seriesInfo, larguraEscala, { idPrefix: 'escala' });
   }
 }
 
