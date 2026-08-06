@@ -535,12 +535,20 @@ async function adhForceRefresh() {
   if (el) await pageAderencia(el);
 }
 
-// Força atualização, além de trocar o mês selecionado.
+// Força atualização, além de trocar o mês selecionado. Se a tela atual for
+// o detalhe de uma base específica (drill-down), continua nela — antes
+// sempre voltava pra visão geral de todas as bases ao trocar o mês, porque
+// só olhava pra pageAderencia() sem checar se tinha uma base aberta.
 async function adhChangeMonth(mes) {
   window._adhMes = mes;
   adhBaseKPI = null; adhColabKPI = null;
   const el = window._adhCurrentEl;
-  if (el) await pageAderencia(el);
+  if (!el) return;
+  if (window._adhBase) {
+    await adhRenderDetalhe(el, window._adhBase, window._adhShowBack !== false);
+  } else {
+    await pageAderencia(el);
+  }
 }
 
 function adhMonthSelectorHTML() {
@@ -1132,6 +1140,190 @@ function adhBuildEvolutionChart(hist) {
     </svg>`;
 }
 
+// ── Gráficos por hora do dia (voos, escala realizada/planejada, hora extra) ──
+// Mesma linguagem visual do gráfico de evolução acima (SVG simples, sem
+// biblioteca externa) — só que aceitando várias séries de uma vez.
+const ADH_COR_VOO       = '#1B4F8C';
+const ADH_COR_REALIZADA = '#2FA84F';
+const ADH_COR_PLANEJADA = '#6FB1E8';
+const ADH_COR_HORA_EXTRA= '#E8862F';
+
+function adhBuildMultiLineChartSVG(labels, series) {
+  const W = 900, H = 140, PAD = 26;
+  const n = labels.length;
+  const maxV = Math.max(1, ...series.flatMap(s => s.values)) * 1.15;
+  const x = i => n > 1 ? PAD + i*(W-PAD*2)/(n-1) : W/2;
+  const y = v => H-18 - (v/maxV)*(H-30);
+  const passo = maxV > 40 ? 20 : maxV > 10 ? 5 : 1;
+  const linhasGrid = [];
+  for (let v = 0; v <= maxV; v += passo) {
+    linhasGrid.push(`<line x1="${PAD}" y1="${y(v)}" x2="${W-PAD}" y2="${y(v)}" stroke="var(--weekend-tint)"/><text x="2" y="${y(v)+3}" font-size="8" fill="#6b7488">${Math.round(v)}</text>`);
+  }
+  const labelsSVG = labels.map((l,i) => (i % 3 === 0 ? `<text x="${x(i)}" y="${H-4}" text-anchor="middle" font-size="8" fill="#6b7488">${l}</text>` : '')).join('');
+  const seriesSVG = series.map(s => {
+    const pts = s.values.map((v,i) => `${x(i)},${y(v)}`).join(' ');
+    const areaHTML = s.area ? `<polygon points="${x(0)},${y(0)} ${pts} ${x(n-1)},${y(0)}" fill="${s.color}" opacity="0.10"/>` : '';
+    const dashAttr = s.dashed ? ' stroke-dasharray="5,3"' : '';
+    return `${areaHTML}<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="2"${dashAttr}/>`;
+  }).join('');
+  return `<svg width="100%" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">${linhasGrid.join('')}${seriesSVG}${labelsSVG}</svg>`;
+}
+
+function adhHoraParaNum(hhmm) {
+  if (!hhmm) return null;
+  const partes = String(hhmm).split(':');
+  const h = parseInt(partes[0], 10), m = parseInt(partes[1]||'0', 10);
+  if (isNaN(h)) return null;
+  return h + (isNaN(m)?0:m)/60;
+}
+
+// Escala realizada e hora extra por hora — direto dos Maps já carregados
+// (pontoMarcacao/pontoHorarios), sem precisar de consulta nova ao banco:
+// pra cada batida de ponto do mês nessa base, soma 1 em cada hora que o
+// intervalo [entrada,saída] cruza, depois divide pelo número de dias com
+// dado pra virar uma média diária. Hora extra = presença fora de qualquer
+// intervalo planejado (ent1/sai1/ent2/sai2) daquele mesmo dia.
+function adhEscalaPorHora(base, mes) {
+  const [ano, mesNum] = mes.split('-').map(Number);
+  const realizada = new Array(24).fill(0);
+  const horaExtra = new Array(24).fill(0);
+  const diasComDado = new Set();
+
+  for (const [key, m] of pontoMarcacao) {
+    if (m.filial !== base) continue;
+    const partesData = key.split('|')[2];
+    if (!partesData) continue;
+    const [dd, mm, yyyy] = partesData.split('/').map(Number);
+    if (mm !== mesNum || yyyy !== ano) continue;
+    diasComDado.add(partesData);
+
+    const h = pontoHorarios.get(key);
+    const planejados = h ? [[h.ent1,h.sai1],[h.ent2,h.sai2]]
+      .filter(([a,b]) => a && b)
+      .map(([a,b]) => [adhHoraParaNum(a), adhHoraParaNum(b)])
+      .filter(([a,b]) => a != null && b != null) : [];
+
+    [[m.bat1,m.bat2],[m.bat3,m.bat4],[m.bat5,m.bat6],[m.bat7,m.bat8]].forEach(([ini, fim]) => {
+      const iniN = adhHoraParaNum(ini), fimN = adhHoraParaNum(fim);
+      if (iniN == null || fimN == null || fimN <= iniN) return;
+      for (let hr = 0; hr < 24; hr++) {
+        if (iniN < hr+1 && fimN > hr) {
+          realizada[hr]++;
+          const dentroDoPlanejado = planejados.some(([pi,pf]) => pi <= hr && pf >= hr+1);
+          if (!dentroDoPlanejado) horaExtra[hr]++;
+        }
+      }
+    });
+  }
+
+  const numDias = diasComDado.size || 1;
+  return {
+    realizadaMedia: realizada.map(v => v / numDias),
+    horaExtraMedia: horaExtra.map(v => v / numDias),
+    numDias,
+  };
+}
+
+// Escala planejada por hora — vem do dimensionamento gerado no Gerador
+// (tabela escala_dimensionamento: cada linha é um grupo função+horário com
+// uma quantidade "qtd" de pessoas). Paginado de 1000 em 1000, mesmo motivo
+// de sempre — sem isso, dimensionamentos grandes perderiam linhas.
+async function adhPlanejadaPorHora(base, mes) {
+  const { count } = await db.from('escala_dimensionamento').select('*', { count: 'exact', head: true })
+    .eq('base', base).eq('mes', mes);
+  const linhas = [];
+  const PAGE = 1000;
+  for (let from = 0; from < (count || 0); from += PAGE) {
+    const { data, error } = await db.from('escala_dimensionamento').select('entrada,saida,qtd')
+      .eq('base', base).eq('mes', mes).range(from, from + PAGE - 1);
+    if (error) { console.warn('[aderencia] escala_dimensionamento:', error.message); break; }
+    if (data) linhas.push(...data);
+  }
+  const planejada = new Array(24).fill(0);
+  linhas.forEach(r => {
+    const iniN = adhHoraParaNum(r.entrada), fimN = adhHoraParaNum(r.saida);
+    if (iniN == null || fimN == null || fimN <= iniN) return;
+    for (let hr = 0; hr < 24; hr++) {
+      if (iniN < hr+1 && fimN > hr) planejada[hr] += (r.qtd || 0);
+    }
+  });
+  return planejada;
+}
+
+// Voos previstos por hora (média do mês) — vem da malha, reaproveitando o
+// mesmo buscador paginado já usado na Escala Online (escalaFetchMalha, em
+// pages.js) pra não duplicar a mesma correção do limite de 1000 linhas.
+async function adhVoosPorHora(base, mes) {
+  const [ano, mesNum] = mes.split('-').map(Number);
+  const diasNoMes = new Date(ano, mesNum, 0).getDate();
+  const dataIni = `${ano}-${String(mesNum).padStart(2,'0')}-01`;
+  const dataFim = `${ano}-${String(mesNum).padStart(2,'0')}-${String(diasNoMes).padStart(2,'0')}`;
+  if (typeof escalaFetchMalha !== 'function') return new Array(24).fill(0);
+  const voos = await escalaFetchMalha(base, dataIni, dataFim, 'data,hora_chegada');
+  const porHora = new Array(24).fill(0);
+  const diasComVoo = new Set();
+  voos.forEach(v => {
+    if (v.data) diasComVoo.add(v.data);
+    const h = parseInt(String(v.hora_chegada||'').split(':')[0], 10);
+    if (!isNaN(h) && h >= 0 && h < 24) porHora[h]++;
+  });
+  const numDias = diasComVoo.size || diasNoMes;
+  return porHora.map(v => v / numDias);
+}
+
+async function adhToggleGraficosHora(base) {
+  const painel = document.getElementById('adh-graficos-hora-panel');
+  const btn = document.getElementById('adh-graficos-btn');
+  if (!painel) return;
+  const abrindo = painel.style.display === 'none';
+  painel.style.display = abrindo ? 'block' : 'none';
+  if (!abrindo) return;
+
+  if (painel.dataset.carregado === base) return; // já calculado pra essa base, não refaz à toa
+  painel.innerHTML = `<div style="padding:16px;color:var(--text-muted);font-size:12px">Calculando...</div>`;
+  if (btn) btn.disabled = true;
+
+  const mes = window._adhMes || adhCurrentMonth();
+  const horas = Array.from({length:24}, (_,i) => String(i).padStart(2,'0'));
+
+  const { realizadaMedia, horaExtraMedia, numDias } = adhEscalaPorHora(base, mes);
+  const [planejada, voos] = await Promise.all([
+    adhPlanejadaPorHora(base, mes),
+    adhVoosPorHora(base, mes),
+  ]);
+
+  if (btn) btn.disabled = false;
+  painel.dataset.carregado = base;
+
+  const legenda = `
+    <div style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:14px;font-size:11px;color:var(--text-secondary)">
+      <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${ADH_COR_VOO};margin-right:5px"></span>Voo previsto</span>
+      <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${ADH_COR_REALIZADA};margin-right:5px"></span>Escala realizada</span>
+      <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${ADH_COR_PLANEJADA};margin-right:5px"></span>Escala planejada</span>
+      <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${ADH_COR_HORA_EXTRA};margin-right:5px"></span>Hora extra</span>
+    </div>`;
+
+  const semDimensionamento = planejada.every(v => v === 0);
+
+  painel.innerHTML = `
+    <div class="hc-panel">
+      ${legenda}
+      <p style="font-size:11px;color:var(--text-muted);margin:0 0 4px">Voos previstos por hora (média de ${numDias} dia${numDias===1?'':'s'} com voo)</p>
+      ${adhBuildMultiLineChartSVG(horas, [{ values: voos, color: ADH_COR_VOO, area: true }])}
+      <p style="font-size:11px;color:var(--text-muted);margin:14px 0 4px">Colaboradores — escala realizada x hora extra (média de ${numDias} dia${numDias===1?'':'s'})</p>
+      ${adhBuildMultiLineChartSVG(horas, [
+        { values: realizadaMedia, color: ADH_COR_REALIZADA },
+        { values: horaExtraMedia, color: ADH_COR_HORA_EXTRA },
+      ])}
+      <p style="font-size:11px;color:var(--text-muted);margin:14px 0 4px">Escala realizada x planejada x hora extra${semDimensionamento ? ' — sem dimensionamento carregado pra esse mês/base ainda' : ''}</p>
+      ${adhBuildMultiLineChartSVG(horas, [
+        { values: realizadaMedia, color: ADH_COR_REALIZADA },
+        { values: planejada, color: ADH_COR_PLANEJADA, dashed: true },
+        { values: horaExtraMedia, color: ADH_COR_HORA_EXTRA },
+      ])}
+    </div>`;
+}
+
 function adhExportExcel() {
   try {
     const hist = window._adhHistData;
@@ -1450,7 +1642,7 @@ function adhRenderDetalhe(el, base, showBack) {
       <!-- Header -->
       <div class="adh-det-header">
         <div style="display:flex;align-items:center;gap:12px">
-          ${showBack ? `<button class="adh-back-btn" onclick="pageAderencia(document.getElementById('page-content'))">
+          ${showBack ? `<button class="adh-back-btn" onclick="window._adhBase=null;pageAderencia(document.getElementById('page-content'))">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
             </svg>
@@ -1488,6 +1680,15 @@ function adhRenderDetalhe(el, base, showBack) {
           bk ? { label:'Com ponto', sub:'registrado no mês', value: bk.colabs.toLocaleString('pt-BR') } : null,
         ]},
       ])}
+
+      ${base ? `
+      <!-- Gráficos por hora (voos, escala realizada/planejada, hora extra) -->
+      <div style="margin:0 24px 16px">
+        <button class="adh-refresh-btn" onclick="adhToggleGraficosHora('${adhEsc(base)}')" id="adh-graficos-btn">
+          <i class="ti ti-chart-line" aria-hidden="true"></i> Ver voos e hora extra por hora do dia
+        </button>
+        <div id="adh-graficos-hora-panel" style="display:none;margin-top:12px"></div>
+      </div>` : ''}
 
       <!-- Table -->
       <div class="adh-colab-section">
@@ -1565,6 +1766,7 @@ function adhRenderDetalhe(el, base, showBack) {
   // Store for sorting
   window._adhColabList = colabList;
   window._adhBase = base;
+  window._adhShowBack = showBack;
 
   // Setup tooltip
   adhSetupTooltip();
