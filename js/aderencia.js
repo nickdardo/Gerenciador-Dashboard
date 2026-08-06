@@ -1237,6 +1237,17 @@ function adhChartHover(e, svgEl) {
     tip.style.display = 'block';
     adhPositionTooltip(e);
   }
+
+  // Também atualiza a faixa de estatísticas fixa embaixo do gráfico (se
+  // essa instância tiver uma — o painel de voos/hora extra tem).
+  const statHora = document.getElementById('adh-stat-hora');
+  if (statHora) {
+    statHora.textContent = `${data.labels[i]}h`;
+    data.series.forEach((s, si) => {
+      const cel = document.getElementById('adh-stat-'+si);
+      if (cel) cel.textContent = adhFmtStatValor(s.values[i]);
+    });
+  }
 }
 
 function adhChartHoverEnd() {
@@ -1260,17 +1271,37 @@ function adhHoraParaNum(hhmm) {
 // intervalo [entrada,saída] cruza, depois divide pelo número de dias com
 // dado pra virar uma média diária. Hora extra = presença fora de qualquer
 // intervalo planejado (ent1/sai1/ent2/sai2) daquele mesmo dia.
+// Escala realizada, hora extra E planejada por hora — tudo numa passada só
+// sobre os Maps já carregados (pontoMarcacao + pontoHorarios), sem
+// nenhuma consulta ao banco. Antes, "planejada" vinha de uma tabela à
+// parte (escala_dimensionamento, do Gerador) que geralmente está vazia —
+// o cliente já tem o planejado de verdade no Horarios.xlsx, que é o mesmo
+// arquivo já usado aqui pra calcular hora extra. Loop de hora otimizado
+// pra só percorrer as horas que o intervalo realmente toca (antes rodava
+// as 24 horas pra cada batida, sem necessidade — isso que deixava lento
+// em bases grandes).
 function adhEscalaPorHora(base, mes) {
   const [ano, mesNum] = mes.split('-').map(Number);
   const realizada = new Array(24).fill(0);
   const horaExtra = new Array(24).fill(0);
+  const planejada = new Array(24).fill(0);
   const diasComDado = new Set();
+  const diasComPlanejado = new Set();
+
+  function somarIntervalos(pares, alvo, hrIniSet) {
+    pares.forEach(([ini, fim]) => {
+      const iniN = adhHoraParaNum(ini), fimN = adhHoraParaNum(fim);
+      if (iniN == null || fimN == null || fimN <= iniN) return;
+      const hrIni = Math.max(0, Math.floor(iniN)), hrFim = Math.min(24, Math.ceil(fimN));
+      for (let hr = hrIni; hr < hrFim; hr++) alvo(hr);
+    });
+  }
 
   for (const [key, m] of pontoMarcacao) {
     if (m.filial !== base) continue;
     const partesData = key.split('|')[2];
     if (!partesData) continue;
-    const [dd, mm, yyyy] = partesData.split('/').map(Number);
+    const [, mm, yyyy] = partesData.split('/').map(Number);
     if (mm !== mesNum || yyyy !== ano) continue;
     diasComDado.add(partesData);
 
@@ -1280,51 +1311,35 @@ function adhEscalaPorHora(base, mes) {
       .map(([a,b]) => [adhHoraParaNum(a), adhHoraParaNum(b)])
       .filter(([a,b]) => a != null && b != null) : [];
 
-    [[m.bat1,m.bat2],[m.bat3,m.bat4],[m.bat5,m.bat6],[m.bat7,m.bat8]].forEach(([ini, fim]) => {
-      const iniN = adhHoraParaNum(ini), fimN = adhHoraParaNum(fim);
-      if (iniN == null || fimN == null || fimN <= iniN) return;
-      for (let hr = 0; hr < 24; hr++) {
-        if (iniN < hr+1 && fimN > hr) {
-          realizada[hr]++;
-          const dentroDoPlanejado = planejados.some(([pi,pf]) => pi <= hr && pf >= hr+1);
-          if (!dentroDoPlanejado) horaExtra[hr]++;
-        }
-      }
+    somarIntervalos([[m.bat1,m.bat2],[m.bat3,m.bat4],[m.bat5,m.bat6],[m.bat7,m.bat8]], (hr) => {
+      realizada[hr]++;
+      const dentroDoPlanejado = planejados.some(([pi,pf]) => pi <= hr && pf >= hr+1);
+      if (!dentroDoPlanejado) horaExtra[hr]++;
     });
   }
 
+  // Planejada conta todo mundo com horário previsto naquele dia, tenha
+  // batido ponto ou não — senão uma falta "esvaziaria" o planejado, quando
+  // na real a escala continuava prevendo a pessoa ali.
+  for (const [key, h] of pontoHorarios) {
+    if (h.filial !== base) continue;
+    const partesData = key.split('|')[2];
+    if (!partesData) continue;
+    const [, mm, yyyy] = partesData.split('/').map(Number);
+    if (mm !== mesNum || yyyy !== ano) continue;
+    diasComPlanejado.add(partesData);
+    somarIntervalos([[h.ent1,h.sai1],[h.ent2,h.sai2]], (hr) => { planejada[hr]++; });
+  }
+
   const numDias = diasComDado.size || 1;
+  const numDiasPlanejado = diasComPlanejado.size || 1;
   return {
     realizadaMedia: realizada.map(v => v / numDias),
     horaExtraMedia: horaExtra.map(v => v / numDias),
+    planejadaMedia: planejada.map(v => v / numDiasPlanejado),
     numDias,
+    temPlanejado: diasComPlanejado.size > 0,
   };
-}
-
-// Escala planejada por hora — vem do dimensionamento gerado no Gerador
-// (tabela escala_dimensionamento: cada linha é um grupo função+horário com
-// uma quantidade "qtd" de pessoas). Paginado de 1000 em 1000, mesmo motivo
-// de sempre — sem isso, dimensionamentos grandes perderiam linhas.
-async function adhPlanejadaPorHora(base, mes) {
-  const { count } = await db.from('escala_dimensionamento').select('*', { count: 'exact', head: true })
-    .eq('base', base).eq('mes', mes);
-  const linhas = [];
-  const PAGE = 1000;
-  for (let from = 0; from < (count || 0); from += PAGE) {
-    const { data, error } = await db.from('escala_dimensionamento').select('entrada,saida,qtd')
-      .eq('base', base).eq('mes', mes).range(from, from + PAGE - 1);
-    if (error) { console.warn('[aderencia] escala_dimensionamento:', error.message); break; }
-    if (data) linhas.push(...data);
-  }
-  const planejada = new Array(24).fill(0);
-  linhas.forEach(r => {
-    const iniN = adhHoraParaNum(r.entrada), fimN = adhHoraParaNum(r.saida);
-    if (iniN == null || fimN == null || fimN <= iniN) return;
-    for (let hr = 0; hr < 24; hr++) {
-      if (iniN < hr+1 && fimN > hr) planejada[hr] += (r.qtd || 0);
-    }
-  });
-  return planejada;
 }
 
 // Voos previstos por hora (média do mês) — vem da malha, reaproveitando o
@@ -1356,21 +1371,19 @@ async function adhToggleGraficosHora(base) {
   painel.style.display = abrindo ? 'block' : 'none';
   if (!abrindo) return;
 
-  if (painel.dataset.carregado === base) return; // já calculado pra essa base, não refaz à toa
+  if (painel.dataset.carregado === `${base}|${window._adhMes}`) return; // já calculado pra essa base+mês, não refaz à toa
   painel.innerHTML = `<div style="padding:16px;color:var(--text-muted);font-size:12px">Calculando...</div>`;
   if (btn) btn.disabled = true;
+  await new Promise(r => setTimeout(r, 0)); // deixa o "Calculando..." pintar na tela antes de travar a thread no cálculo
 
   const mes = window._adhMes || adhCurrentMonth();
   const horas = Array.from({length:24}, (_,i) => String(i).padStart(2,'0'));
 
-  const { realizadaMedia, horaExtraMedia, numDias } = adhEscalaPorHora(base, mes);
-  const [planejada, voos] = await Promise.all([
-    adhPlanejadaPorHora(base, mes),
-    adhVoosPorHora(base, mes),
-  ]);
+  const { realizadaMedia, horaExtraMedia, planejadaMedia, numDias, temPlanejado } = adhEscalaPorHora(base, mes);
+  const voos = await adhVoosPorHora(base, mes);
 
   if (btn) btn.disabled = false;
-  painel.dataset.carregado = base;
+  painel.dataset.carregado = `${base}|${mes}`;
 
   const legenda = `
     <div style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:10px;font-size:11px;color:var(--text-secondary)">
@@ -1380,19 +1393,36 @@ async function adhToggleGraficosHora(base) {
       <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${ADH_COR_HORA_EXTRA};margin-right:5px"></span>Hora extra</span>
     </div>`;
 
-  const semDimensionamento = planejada.every(v => v === 0);
+  const semPlanejado = !temPlanejado;
+  const seriesInfo = [
+    { key: 'voo', label: 'Voo previsto', color: ADH_COR_VOO, values: voos },
+    { key: 'realizada', label: 'Escala realizada', color: ADH_COR_REALIZADA, values: realizadaMedia },
+    { key: 'planejada', label: 'Escala planejada', color: ADH_COR_PLANEJADA, values: planejadaMedia, dashed: true },
+    { key: 'extra', label: 'Hora extra', color: ADH_COR_HORA_EXTRA, values: horaExtraMedia },
+  ];
+  // Ponto de partida da faixa de estatísticas: a hora de pico da escala
+  // realizada (a métrica mais "âncora" das quatro) — só até o usuário
+  // passar o mouse e trocar pra hora que ele escolher.
+  const horaPico = realizadaMedia.indexOf(Math.max(...realizadaMedia));
 
   painel.innerHTML = `
-    <div class="hc-panel">
+    <div class="hc-panel" style="padding:16px 18px">
       ${legenda}
-      <p style="font-size:11px;color:var(--text-muted);margin:0 0 6px">Média de ${numDias} dia${numDias===1?'':'s'} do mês · cada linha na sua própria escala (passe o mouse pros valores reais)${semDimensionamento ? ' · sem dimensionamento carregado pra essa base/mês ainda' : ''}</p>
-      ${adhBuildUnifiedChartSVG(horas, [
-        { label: 'Voo previsto', values: voos, color: ADH_COR_VOO },
-        { label: 'Escala realizada', values: realizadaMedia, color: ADH_COR_REALIZADA },
-        { label: 'Escala planejada', values: planejada, color: ADH_COR_PLANEJADA, dashed: true },
-        { label: 'Hora extra', values: horaExtraMedia, color: ADH_COR_HORA_EXTRA },
-      ])}
+      <p style="font-size:10.5px;color:var(--text-muted);margin:0 0 6px">Média de ${numDias} dia${numDias===1?'':'s'} do mês · cada linha na sua própria escala${semPlanejado ? ' · sem horário planejado (Horarios.xlsx) carregado pra essa base/mês ainda' : ''}</p>
+      ${adhBuildUnifiedChartSVG(horas, seriesInfo)}
+      <div id="adh-chart-stats" style="display:flex;align-items:center;gap:22px;margin-top:10px;padding-top:12px;border-top:1px solid var(--border);flex-wrap:wrap">
+        <div style="font-size:11px;color:var(--text-muted);min-width:38px" id="adh-stat-hora">${horas[horaPico]}h</div>
+        ${seriesInfo.map((s,si) => `
+          <div>
+            <div style="font-size:9.5px;color:${s.color};text-transform:uppercase;letter-spacing:.02em">${s.label}</div>
+            <div style="font-size:17px;font-weight:700;color:var(--text-primary)" id="adh-stat-${si}">${adhFmtStatValor(s.values[horaPico])}</div>
+          </div>`).join('')}
+      </div>
     </div>`;
+}
+
+function adhFmtStatValor(v) {
+  return v >= 10 ? String(Math.round(v)) : String(Math.round(v*10)/10);
 }
 
 function adhExportExcel() {
