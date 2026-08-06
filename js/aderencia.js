@@ -1149,9 +1149,11 @@ const ADH_COR_PLANEJADA = '#6FB1E8';
 const ADH_COR_HORA_EXTRA= '#E8862F';
 
 // Larguras compartilhadas entre o construtor do gráfico e o handler de
-// hover — precisam ser exatamente iguais pros dois lados calcularem a
-// mesma posição X pro mesmo índice de hora.
-const ADH_CHART_W = 900, ADH_CHART_H = 160, ADH_CHART_PAD = 28;
+// hover. A largura é ajustada dinamicamente pra bater 1-pra-1 com o
+// tamanho real do painel na tela (ver adhToggleGraficosHora) — sem isso,
+// o texto "dentro" do SVG escalava junto com a largura do container (que é
+// bem largo nesse painel) e ficava enorme, desproporcional ao resto.
+const ADH_CHART_H = 140, ADH_CHART_PAD = 30;
 
 function adhSmoothPath(pts) {
   if (!pts.length) return '';
@@ -1171,18 +1173,18 @@ function adhSmoothPath(pts) {
 // o TIMING de todas juntas sem uma sumir atrás da outra. Os valores reais
 // não aparecem no eixo (ficariam enganosos, misturando escalas) — aparecem
 // certinho no tooltip ao passar o mouse.
-function adhBuildUnifiedChartSVG(labels, series) {
-  const W = ADH_CHART_W, H = ADH_CHART_H, PAD = ADH_CHART_PAD;
+function adhBuildUnifiedChartSVG(labels, series, larguraPx) {
+  const W = Math.max(300, Math.round(larguraPx || 900)), H = ADH_CHART_H, PAD = ADH_CHART_PAD;
   const n = labels.length;
   const x = i => n > 1 ? PAD + i*(W-PAD*2)/(n-1) : W/2;
-  const yNorm = v => H-22 - v*(H-34);
+  const yNorm = v => H-22 - v*(H-38);
 
   const seriesComPico = series.map(s => ({ ...s, maxV: Math.max(1, ...s.values) }));
 
   const linhasGrid = [0, 0.25, 0.5, 0.75, 1].map(f =>
     `<line x1="${PAD}" y1="${yNorm(f)}" x2="${W-PAD}" y2="${yNorm(f)}" stroke="var(--weekend-tint)"/>`
   ).join('');
-  const labelsSVG = labels.map((l,i) => (i % 3 === 0 ? `<text x="${x(i)}" y="${H-6}" text-anchor="middle" font-size="8" fill="#6b7488">${l}h</text>` : '')).join('');
+  const labelsSVG = labels.map((l,i) => (i % 3 === 0 ? `<text x="${x(i)}" y="${H-8}" text-anchor="middle" font-size="10" font-family="Inter, sans-serif" fill="#6b7488">${l}h</text>` : '')).join('');
 
   const seriesSVG = seriesComPico.map(s => {
     const pts = s.values.map((v,i) => [x(i), yNorm(v / s.maxV)]);
@@ -1191,9 +1193,9 @@ function adhBuildUnifiedChartSVG(labels, series) {
   }).join('');
   const dotsSVG = seriesComPico.map((s,si) => `<circle id="adh-chart-dot-${si}" cx="0" cy="0" r="3" fill="${s.color}" opacity="0"/>`).join('');
 
-  window._adhChartHoverData = { labels, series: seriesComPico };
+  window._adhChartHoverData = { labels, series: seriesComPico, W, H, PAD };
 
-  return `<svg width="100%" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="cursor:crosshair"
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="display:block;width:100%;height:${H}px;cursor:crosshair"
       onmousemove="adhChartHover(event,this)" onmouseleave="adhChartHoverEnd()">
     ${linhasGrid}
     ${seriesSVG}
@@ -1208,14 +1210,14 @@ function adhChartHover(e, svgEl) {
   if (!data) return;
   const rect = svgEl.getBoundingClientRect();
   if (!rect.width) return;
-  const W = ADH_CHART_W, H = ADH_CHART_H, PAD = ADH_CHART_PAD;
+  const { W, H, PAD } = data;
   const n = data.labels.length;
   const stepX = n > 1 ? (W-PAD*2)/(n-1) : 0;
   const fracX = (e.clientX - rect.left) / rect.width;
   let i = stepX ? Math.round(((fracX*W) - PAD) / stepX) : 0;
   i = Math.max(0, Math.min(n-1, i));
   const px = PAD + i*stepX;
-  const yNorm = v => H-22 - v*(H-34);
+  const yNorm = v => H-22 - v*(H-38);
 
   const guide = document.getElementById('adh-chart-guide');
   if (guide) { guide.setAttribute('x1', px); guide.setAttribute('x2', px); guide.setAttribute('opacity', '1'); }
@@ -1406,19 +1408,28 @@ async function adhToggleGraficosHora(base) {
   const horaPico = realizadaMedia.indexOf(Math.max(...realizadaMedia));
 
   painel.innerHTML = `
-    <div class="hc-panel" style="padding:16px 18px">
+    <div class="hc-panel" style="padding:14px 16px">
       ${legenda}
-      <p style="font-size:10.5px;color:var(--text-muted);margin:0 0 6px">Média de ${numDias} dia${numDias===1?'':'s'} do mês · cada linha na sua própria escala${semPlanejado ? ' · sem horário planejado (Horarios.xlsx) carregado pra essa base/mês ainda' : ''}</p>
-      ${adhBuildUnifiedChartSVG(horas, seriesInfo)}
-      <div id="adh-chart-stats" style="display:flex;align-items:center;gap:22px;margin-top:10px;padding-top:12px;border-top:1px solid var(--border);flex-wrap:wrap">
-        <div style="font-size:11px;color:var(--text-muted);min-width:38px" id="adh-stat-hora">${horas[horaPico]}h</div>
+      <p style="font-size:10px;color:var(--text-muted);margin:0 0 6px">Média de ${numDias} dia${numDias===1?'':'s'} do mês · cada linha na sua própria escala${semPlanejado ? ' · sem horário planejado (Horarios.xlsx) carregado pra essa base/mês ainda' : ''}</p>
+      <div id="adh-chart-container">${adhBuildUnifiedChartSVG(horas, seriesInfo)}</div>
+      <div id="adh-chart-stats" style="display:flex;align-items:center;gap:18px;margin-top:8px;padding-top:10px;border-top:1px solid var(--border);flex-wrap:wrap">
+        <div style="font-size:10px;color:var(--text-muted);min-width:32px" id="adh-stat-hora">${horas[horaPico]}h</div>
         ${seriesInfo.map((s,si) => `
           <div>
-            <div style="font-size:9.5px;color:${s.color};text-transform:uppercase;letter-spacing:.02em">${s.label}</div>
-            <div style="font-size:17px;font-weight:700;color:var(--text-primary)" id="adh-stat-${si}">${adhFmtStatValor(s.values[horaPico])}</div>
+            <div style="font-size:8.5px;color:${s.color};text-transform:uppercase;letter-spacing:.02em">${s.label}</div>
+            <div style="font-size:13px;font-weight:700;color:var(--text-primary)" id="adh-stat-${si}">${adhFmtStatValor(s.values[horaPico])}</div>
           </div>`).join('')}
       </div>
     </div>`;
+
+  // Re-renderiza o SVG com a largura REAL do painel na tela — assim o texto
+  // fica em pixel de verdade (10px = 10px), em vez de escalar junto com a
+  // largura do container e ficar gigante em painéis largos.
+  const container = document.getElementById('adh-chart-container');
+  if (container) {
+    const larguraReal = Math.round(container.getBoundingClientRect().width);
+    if (larguraReal > 50) container.innerHTML = adhBuildUnifiedChartSVG(horas, seriesInfo, larguraReal);
+  }
 }
 
 function adhFmtStatValor(v) {
