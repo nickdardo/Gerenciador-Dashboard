@@ -763,7 +763,7 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#fc8181;margin-right:5px"></span>J · Afastado</span>
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#38bdf8;margin-right:5px"></span>K · Cursos</span>
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#fb923c;margin-right:5px"></span>CH · Folga compensa (tecla C)</span>
-        <span style="color:var(--text-muted)">clique numa célula vazia ou de trabalho pra marcar F/J/K/C · fim de semana e feriado ficam destacados nas colunas</span>
+        <span style="color:var(--text-muted)">clique numa célula vazia ou de trabalho pra marcar F/J/K/C/A · fim de semana e feriado ficam destacados nas colunas</span>
       </div>
       <div id="escala-grade-wrap" style="flex:1;min-height:120px;overflow:auto;border-radius:8px">${escalaGradeTabelaHTML(ano, mesNum, diasNoMes)}</div>
     </div>
@@ -1089,10 +1089,34 @@ async function escalaEditarTurno(matricula, valorSelecionado) {
   escalaMsg(turno ? `✓ Turno definido: ${turno}.` : '✓ Turno removido.');
 }
 
+// Igual escalaEditarTurno, só que pro Bloco de horário — o nível de
+// agrupamento a mais dentro do Setor (pra juntar 23:00 com 00:00 no mesmo
+// bloco, por exemplo, sem precisar de uma regra automática adivinhando
+// isso sozinha).
+async function escalaEditarBloco(matricula, valorSelecionado) {
+  if (escalaVerificarTravada()) { escalaGradeAtualiza(); return; }
+  let bloco = valorSelecionado;
+  if (bloco === '__novo__') {
+    const novo = prompt('Nome do novo bloco de horário (ex: Virada 23h-00h, Manhã):');
+    if (!novo || !novo.trim()) { escalaGradeAtualiza(); return; }
+    bloco = novo.trim();
+  }
+  bloco = bloco || null;
+
+  const { error } = await db.from('escala_colaborador').update({ bloco_horario: bloco })
+    .eq('base', window._escalaBase).eq('mes', window._escalaMes).eq('matricula', matricula);
+  if (error) { escalaMsg('Erro ao salvar bloco de horário: ' + error.message, true); return; }
+
+  const c = (window._escalaColabs||[]).find(x => x.matricula === matricula);
+  if (c) c.bloco_horario = bloco;
+  escalaGradeAtualiza();
+  escalaMsg(bloco ? `✓ Bloco de horário definido: ${bloco}.` : '✓ Bloco de horário removido.');
+}
+
 // Linha de um colaborador — extraída pra função própria porque é usada tanto
 // na lista simples quanto dentro de cada bloco de função/turno agrupado.
 function escalaLinhaColabHTML(c, ci, ctx) {
-  const { ano, mesNum, diasNoMes, leftMat, leftNome, BORDA, turnosExistentes } = ctx;
+  const { ano, mesNum, diasNoMes, leftMat, leftNome, BORDA, turnosExistentes, blocosExistentes } = ctx;
   const travada = !!window._escalaTravada;
   const dis = travada ? 'disabled' : '';
   const info = window.eoColabs?.get(c.matricula);
@@ -1126,6 +1150,13 @@ function escalaLinhaColabHTML(c, ci, ctx) {
       <option value="__novo__">+ novo turno...</option>
     </select>
   </td>`;
+  html += `<td style="padding:2px 6px;border:${BORDA}">
+    <select ${dis} onchange="escalaEditarBloco('${c.matricula}', this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-secondary);font-size:11px;padding:4px 0;cursor:pointer">
+      <option value="">—</option>
+      ${blocosExistentes.map(b => `<option value="${escalaEscapeAttr(b)}" ${c.bloco_horario===b?'selected':''}>${escalaEscapeAttr(b)}</option>`).join('')}
+      <option value="__novo__">+ novo bloco...</option>
+    </select>
+  </td>`;
   html += `<td style="padding:8px 10px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:${BORDA}" title="${funcao}">${funcao}</td>`;
   html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" ${dis} value="${entrada}" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" onchange="escalaEditarHorario('${c.matricula}','entrada',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-secondary);text-align:center;font-size:12px;padding:4px"></td>`;
   html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" ${dis} value="${intInicio}" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" onchange="escalaEditarHorario('${c.matricula}','intervalo_inicio',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-muted);text-align:center;font-size:12px;padding:4px" title="Início do intervalo"></td>`;
@@ -1150,13 +1181,17 @@ function escalaLinhaColabHTML(c, ci, ctx) {
 // folgas por dia daquele bloco — mesma definição de "folga" usada no
 // restante do módulo (F/FA/J/CH conta, K não conta porque continua sendo
 // dia de trabalho).
-function escalaBlocoHeaderHTML(label, contagem, nivel, NCOLS) {
-  const bg = nivel === 'funcao' ? 'var(--bg-surface)' : nivel === 'turno-a' ? 'rgba(0,160,210,.12)' : 'rgba(159,122,234,.12)';
-  const cor = nivel === 'funcao' ? 'var(--text-primary)' : nivel === 'turno-a' ? 'var(--blue)' : 'var(--purple)';
-  const paddingLeft = nivel === 'funcao' ? '10px' : '26px';
+function escalaBlocoHeaderHTML(label, contagem, nivel, NCOLS, grupoBotao) {
+  const bg = nivel === 'funcao' ? 'var(--bg-surface)' : nivel === 'turno-a' ? 'rgba(0,160,210,.12)' : nivel === 'turno-b' ? 'rgba(159,122,234,.12)' : 'var(--bg-hover)';
+  const cor = nivel === 'funcao' ? 'var(--text-primary)' : nivel === 'turno-a' ? 'var(--blue)' : nivel === 'turno-b' ? 'var(--purple)' : 'var(--text-secondary)';
+  const paddingLeft = nivel === 'funcao' ? '10px' : nivel === 'bloco' ? '42px' : '26px';
+  const botaoHtml = grupoBotao ? `<button class="adh-refresh-btn" style="padding:3px 10px;font-size:10px;margin-left:12px" onclick="escalaGerarFolgasAuto('${escalaEscapeAttr(grupoBotao)}')" title="Gera folgas automáticas só pra esse grupo">${escalaIcone('zap')}Gerar folgas</button>` : '';
   return `<tr><td colspan="${NCOLS}" style="padding:6px ${paddingLeft};background:${bg}">
-    <span style="font-weight:600;color:${cor};font-size:${nivel==='funcao'?'12.5px':'11.5px'}">${label}</span>
-    <span style="color:${cor};opacity:.75;font-size:11px;margin-left:8px">${contagem} pessoa${contagem===1?'':'s'}</span>
+    <div style="display:flex;align-items:center">
+      <span style="font-weight:600;color:${cor};font-size:${nivel==='funcao'?'12.5px':'11.5px'}">${label}</span>
+      <span style="color:${cor};opacity:.75;font-size:11px;margin-left:8px">${contagem} pessoa${contagem===1?'':'s'}</span>
+      ${botaoHtml}
+    </div>
   </td></tr>`;
 }
 function escalaBlocoTrabalhandoPorDia(colabsDoBloco, ano, mesNum, diasNoMes) {
@@ -1191,6 +1226,7 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
       case 'nome': return String(c.nome || '');
       case 'turno': return escalaSetorDoTurno(entradaDoColab(c)); // coluna "Turno" (automático, por horário)
       case 'setor': return String(c.turno || ''); // coluna "Setor" (manual)
+      case 'bloco': return String(c.bloco_horario || ''); // coluna "Bloco" (manual, agrupa horários "iguais na prática")
       case 'entrada': default: return entradaDoColab(c);
     }
   };
@@ -1225,6 +1261,7 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   const NCOLS = NCOLS_FIXAS + diasNoMes;
   const BORDA = '1px solid var(--border-strong)';
   const turnosExistentes = [...new Set(colabs.map(c => c.turno).filter(Boolean))].sort((a,b) => a.localeCompare(b));
+  const blocosExistentes = [...new Set(colabs.map(c => c.bloco_horario).filter(Boolean))].sort((a,b) => a.localeCompare(b));
 
   const LARG = { remover:36, mat:80, nome:210, setor:100, turno:110, funcao:190, entrada:60, intInicio:60, intFim:60, saida:60, ch:46, dia:30 };
   const leftMat  = LARG.remover;
@@ -1248,6 +1285,7 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   html += `<th style="text-align:left;padding:8px 10px;color:${window._escalaOrdemColuna==='nome'?'var(--blue)':'var(--text-muted)'};font-size:11px;text-transform:uppercase;position:sticky;top:0;left:${leftNome}px;background:var(--bg-surface);z-index:3;border:${BORDA};cursor:pointer;user-select:none" onclick="escalaOrdenarPorColuna('nome')" title="Clique pra ordenar por nome">Nome${window._escalaOrdemColuna==='nome'?(window._escalaOrdemDirecao==='desc'?' ↓':' ↑'):''}</th>`;
   html += `<th style="text-align:left;padding:8px 10px;color:${window._escalaOrdemColuna==='turno'?'var(--blue)':'var(--text-muted)'};font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA};cursor:pointer;user-select:none" onclick="escalaOrdenarPorColuna('turno')" title="Calculado sozinho pelo horário de entrada — clique pra ordenar">Turno${window._escalaOrdemColuna==='turno'?(window._escalaOrdemDirecao==='desc'?' ↓':' ↑'):''}</th>`;
   html += `<th style="text-align:left;padding:8px 10px;color:${window._escalaOrdemColuna==='setor'?'var(--blue)':'var(--text-muted)'};font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA};cursor:pointer;user-select:none" onclick="escalaOrdenarPorColuna('setor')" title="Campo manual, particular de cada base — clique pra ordenar">Setor${window._escalaOrdemColuna==='setor'?(window._escalaOrdemDirecao==='desc'?' ↓':' ↑'):''}</th>`;
+  html += `<th style="text-align:left;padding:8px 10px;color:${window._escalaOrdemColuna==='bloco'?'var(--blue)':'var(--text-muted)'};font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA};cursor:pointer;user-select:none" onclick="escalaOrdenarPorColuna('bloco')" title="Campo manual — junta quem entra em horários diferentes mas é o mesmo bloco (ex.: 23:00 com 00:00) — clique pra ordenar">Bloco${window._escalaOrdemColuna==='bloco'?(window._escalaOrdemDirecao==='desc'?' ↓':' ↑'):''}</th>`;
   html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA}">Função</th>`;
   html += `<th style="text-align:center;padding:8px 4px;color:${window._escalaOrdemColuna==='entrada'?'var(--blue)':'var(--text-muted)'};font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA};cursor:pointer;user-select:none" onclick="escalaOrdenarPorColuna('entrada')" title="Clique pra ordenar por horário de entrada">Entrada${window._escalaOrdemColuna==='entrada'?(window._escalaOrdemDirecao==='desc'?' ↓':' ↑'):''}</th>`;
   html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:10px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA}" title="Início do intervalo">Interv. ↓</th>`;
@@ -1293,7 +1331,7 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     html += `<tr><td colspan="${NCOLS}" style="padding:24px;text-align:center;color:var(--text-muted);font-size:12.5px;border:${BORDA}">Nenhum colaborador ativo encontrado pra essa base+mês — busque por matrícula ou nome acima.</td></tr>`;
   }
 
-  const ctxLinha = { ano, mesNum, diasNoMes, leftMat, leftNome, BORDA, turnosExistentes };
+  const ctxLinha = { ano, mesNum, diasNoMes, leftMat, leftNome, BORDA, turnosExistentes, blocosExistentes };
 
   if (!window._escalaAgruparPorTurno) {
     // Lista simples (comportamento de sempre) — ordem manual de arrastar
@@ -1301,20 +1339,24 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     colabs.forEach((c, ci) => { html += escalaLinhaColabHTML(c, ci, ctxLinha); });
   } else {
     // Agrupado: Grupo (bloco maior, lista fechada) → Setor (subgrupo manual)
-    // → colaboradores. A ordem manual de arrastar não se aplica aqui (não
-    // tem um sentido único quando a lista está partida em vários blocos) —
-    // usa a mesma coluna/direção escolhida no clique do cabeçalho (padrão:
+    // → Bloco de horário (subgrupo manual dentro do setor, opcional — só
+    // aparece se tiver mais de um bloco naquele setor, pra não poluir quem
+    // ainda não usa). A ordem manual de arrastar não se aplica aqui — usa a
+    // mesma coluna/direção escolhida no clique do cabeçalho (padrão:
     // Entrada, crescente).
     const colunaOrdemGrupo = colunaAtiva || 'entrada';
 
-    const gruposFuncao = new Map(); // codigo -> { label, turnos: Map(turnoLabel -> colabs[]) }
+    const gruposFuncao = new Map(); // grupoCodigo -> { label, setores: Map(setorLabel -> Map(blocoLabel -> colabs[])) }
     colabs.forEach(c => {
       const { codigo, label } = escalaFuncaoGrupoDoColab(c);
-      if (!gruposFuncao.has(codigo)) gruposFuncao.set(codigo, { label, turnos: new Map() });
+      if (!gruposFuncao.has(codigo)) gruposFuncao.set(codigo, { label, setores: new Map() });
       const grupo = gruposFuncao.get(codigo);
-      const turnoLabel = c.turno || '(sem setor)';
-      if (!grupo.turnos.has(turnoLabel)) grupo.turnos.set(turnoLabel, []);
-      grupo.turnos.get(turnoLabel).push(c);
+      const setorLabel = c.turno || '(sem setor)';
+      if (!grupo.setores.has(setorLabel)) grupo.setores.set(setorLabel, new Map());
+      const setorMap = grupo.setores.get(setorLabel);
+      const blocoLabel = c.bloco_horario || '(sem bloco)';
+      if (!setorMap.has(blocoLabel)) setorMap.set(blocoLabel, []);
+      setorMap.get(blocoLabel).push(c);
     });
 
     // "Mostrar grupos" — null/ausente = mostra todos (padrão)
@@ -1324,29 +1366,43 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
       funcoesOrdenadas = funcoesOrdenadas.filter(([, grupo]) => gruposVisiveis.has(grupo.label));
     }
     const recolhido = !!window._escalaBlocosRecolhidos;
+    const ordenarColabs = (lista) => [...lista].sort((a, b) =>
+      direcao * String(valorColuna(a, colunaOrdemGrupo)).localeCompare(String(valorColuna(b, colunaOrdemGrupo)), 'pt-BR', { numeric: true }));
 
     funcoesOrdenadas.forEach(([, grupo]) => {
-      const todosDaFuncao = [...grupo.turnos.values()].flat();
-      html += escalaBlocoHeaderHTML(grupo.label, todosDaFuncao.length, 'funcao', NCOLS);
+      const todosDoGrupo = [...grupo.setores.values()].flatMap(setorMap => [...setorMap.values()].flat());
+      html += escalaBlocoHeaderHTML(grupo.label, todosDoGrupo.length, 'funcao', NCOLS, grupo.label);
 
-      const turnosOrdenados = [...grupo.turnos.entries()].sort((a, b) => {
+      const setoresOrdenados = [...grupo.setores.entries()].sort((a, b) => {
         if (a[0] === '(sem setor)') return 1;
         if (b[0] === '(sem setor)') return -1;
         return a[0].localeCompare(b[0]);
       });
 
-      turnosOrdenados.forEach(([turnoLabel, colabsDoTurno], ti) => {
-        html += escalaBlocoHeaderHTML(turnoLabel, colabsDoTurno.length, ti % 2 === 0 ? 'turno-a' : 'turno-b', NCOLS);
-        if (!recolhido) {
-          colabsDoTurno
-            .sort((a, b) => direcao * String(valorColuna(a, colunaOrdemGrupo)).localeCompare(String(valorColuna(b, colunaOrdemGrupo)), 'pt-BR', { numeric: true }))
-            .forEach((c, ci) => { html += escalaLinhaColabHTML(c, ci, ctxLinha); });
-        }
-        html += escalaBlocoSubtotalHTML(turnoLabel, colabsDoTurno, ano, mesNum, diasNoMes, NCOLS_FIXAS, false, BORDA);
+      setoresOrdenados.forEach(([setorLabel, blocosMap], si) => {
+        const todosDoSetor = [...blocosMap.values()].flat();
+        html += escalaBlocoHeaderHTML(setorLabel, todosDoSetor.length, si % 2 === 0 ? 'turno-a' : 'turno-b', NCOLS);
+
+        const temMaisDeUmBloco = blocosMap.size > 1;
+        const blocosOrdenados = [...blocosMap.entries()].sort((a, b) => {
+          if (a[0] === '(sem bloco)') return 1;
+          if (b[0] === '(sem bloco)') return -1;
+          return a[0].localeCompare(b[0]);
+        });
+
+        blocosOrdenados.forEach(([blocoLabel, colabsDoBloco]) => {
+          if (temMaisDeUmBloco) html += escalaBlocoHeaderHTML(blocoLabel, colabsDoBloco.length, 'bloco', NCOLS);
+          if (!recolhido) {
+            ordenarColabs(colabsDoBloco).forEach((c, ci) => { html += escalaLinhaColabHTML(c, ci, ctxLinha); });
+          }
+          if (temMaisDeUmBloco) html += escalaBlocoSubtotalHTML(blocoLabel, colabsDoBloco, ano, mesNum, diasNoMes, NCOLS_FIXAS, false, BORDA);
+        });
+
+        html += escalaBlocoSubtotalHTML(setorLabel, todosDoSetor, ano, mesNum, diasNoMes, NCOLS_FIXAS, false, BORDA);
       });
 
-      if (grupo.turnos.size > 1) {
-        html += escalaBlocoSubtotalHTML(`Total ${grupo.label}`, todosDaFuncao, ano, mesNum, diasNoMes, NCOLS_FIXAS, true, BORDA);
+      if (grupo.setores.size > 1) {
+        html += escalaBlocoSubtotalHTML(`Total ${grupo.label}`, todosDoGrupo, ano, mesNum, diasNoMes, NCOLS_FIXAS, true, BORDA);
       }
       html += `<tr><td colspan="${NCOLS}" style="height:8px;border:none"></td></tr>`;
     });
@@ -1835,7 +1891,7 @@ async function escalaLimparOrdemManual() {
 // Clica na célula pra selecionar (fica com contorno azul), depois digita
 // F, J ou K pra marcar — L é recusado (férias é automático, não digitável),
 // e qualquer outra tecla também é recusada. Backspace/Delete limpa.
-const ESCALA_TECLAS_VALIDAS = ['F', 'J', 'K', 'CH'];
+const ESCALA_TECLAS_VALIDAS = ['F', 'J', 'K', 'CH', 'FA'];
 
 function escalaSelecionarCelula(matricula, dia, elCel) {
   if (window._escalaCelSelecionadaEl) {
@@ -1848,7 +1904,7 @@ function escalaSelecionarCelula(matricula, dia, elCel) {
   }
   window._escalaCelSelecionadaEl = elCel;
   window._escalaCelulaSelecionada = { matricula, dia };
-  escalaMsg('Célula selecionada — digite F, J, K ou C (compensa). Backspace limpa.');
+  escalaMsg('Célula selecionada — digite F, J, K, C (compensa) ou A (folga agrupada). Backspace limpa.');
 }
 
 function escalaRestaurarSelecaoVisual() {
@@ -1905,13 +1961,14 @@ async function escalaAplicarTeclaNaCelula(tecla) {
   }
 
   // 'C' é o atalho de uma tecla só pra marcar CH (Folga compensa / banco de
-  // horas) — o status salvo sempre é 'CH' (duas letras, igual o resto do
-  // sistema já espera pra exibir e pra contar em Aderência); só o atalho de
-  // digitação é de uma tecla, pro mesmo jeito de usar F/J/K.
-  const statusFinal = tecla === 'C' ? 'CH' : tecla;
+  // horas), e 'A' pra marcar FA (Folga agrupada) — o status salvo sempre é
+  // a versão de duas letras (igual o resto do sistema já espera pra exibir
+  // e pra contar em Aderência); só o atalho de digitação é de uma tecla,
+  // pro mesmo jeito de usar F/J/K.
+  const statusFinal = tecla === 'C' ? 'CH' : tecla === 'A' ? 'FA' : tecla;
 
   if (ESCALA_TECLAS_VALIDAS.indexOf(statusFinal) === -1) {
-    escalaMsg(`"${tecla}" não é uma letra válida nessa célula. Use F, J, K ou C (compensa).`, true);
+    escalaMsg(`"${tecla}" não é uma letra válida nessa célula. Use F, J, K, C (compensa) ou A (folga agrupada).`, true);
     return;
   }
 
@@ -2099,12 +2156,13 @@ async function escalaDiasSeguidosNoFimDoMesAnterior(base, matricula, mesAtual) {
   return seq;
 }
 
-async function escalaGerarFolgasAuto() {
+async function escalaGerarFolgasAuto(grupoFiltro) {
   if (escalaVerificarTravada()) return;
-  const colabs = window._escalaColabs || [];
-  if (!colabs.length) { escalaMsg('Adicione pelo menos um colaborador antes.', true); return; }
+  let colabs = window._escalaColabs || [];
+  if (grupoFiltro) colabs = colabs.filter(c => escalaFuncaoGrupoDoColab(c).label === grupoFiltro);
+  if (!colabs.length) { escalaMsg(grupoFiltro ? `Não achei ninguém no grupo "${grupoFiltro}".` : 'Adicione pelo menos um colaborador antes.', true); return; }
 
-  escalaMostrarLoading(`Calculando folgas para ${colabs.length} colaborador${colabs.length===1?'':'es'}...`);
+  escalaMostrarLoading(`Calculando folgas para ${colabs.length} colaborador${colabs.length===1?'':'es'}${grupoFiltro?` (${grupoFiltro})`:''}...`);
 
   const [ano, mesNum] = window._escalaMes.split('-').map(Number);
   const diasNoMes = new Date(ano, mesNum, 0).getDate();
