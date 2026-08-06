@@ -1214,9 +1214,29 @@ function adhChartHover(e, svgEl) {
   const n = data.labels.length;
   const stepX = n > 1 ? (W-PAD*2)/(n-1) : 0;
   const fracX = (e.clientX - rect.left) / rect.width;
-  let i = stepX ? Math.round(((fracX*W) - PAD) / stepX) : 0;
-  i = Math.max(0, Math.min(n-1, i));
-  const px = PAD + i*stepX;
+
+  // Posição contínua (não mais só as 24 horas cheias) — arredondada pro
+  // múltiplo de 5 minutos mais próximo (1 hora = 12 fatias de 5 min), pra
+  // o cursor acompanhar a curva suave em vez de pular de hora em hora.
+  // Limite superior é 23:55 (não 23:00) — senão a última hora do dia nunca
+  // deixava passar de "23h" no rótulo.
+  const hFracMax = (n-1) + 11/12;
+  let hFrac = stepX ? ((fracX*W) - PAD) / stepX : 0;
+  hFrac = Math.max(0, Math.min(hFracMax, hFrac));
+  hFrac = Math.round(hFrac * 12) / 12;
+  hFrac = Math.max(0, Math.min(hFracMax, hFrac));
+
+  const i0 = Math.min(n-1, Math.floor(hFrac));
+  const i1 = Math.min(n-1, i0+1);
+  const t = hFrac - i0; // 0..1 entre os dois pontos-hora vizinhos
+  const interp = (vals) => vals[i0] + (vals[i1]-vals[i0])*t;
+
+  const totalMin = Math.round(hFrac*60);
+  const hh = String(Math.floor(totalMin/60)).padStart(2,'0');
+  const mm = String(totalMin%60).padStart(2,'0');
+  const horaLabel = `${hh}:${mm}`;
+
+  const px = PAD + hFrac*stepX;
   const yNorm = v => H-22 - v*(H-38);
 
   const guide = document.getElementById('adh-chart-guide');
@@ -1224,15 +1244,16 @@ function adhChartHover(e, svgEl) {
 
   data.series.forEach((s, si) => {
     const dot = document.getElementById('adh-chart-dot-'+si);
-    if (dot) { dot.setAttribute('cx', px); dot.setAttribute('cy', yNorm(s.values[i]/s.maxV)); dot.setAttribute('opacity', '1'); }
+    const vInterp = interp(s.values);
+    if (dot) { dot.setAttribute('cx', px); dot.setAttribute('cy', yNorm(vInterp/s.maxV)); dot.setAttribute('opacity', '1'); }
   });
 
   const tip = document.getElementById('adh-tooltip');
   if (tip) {
     tip.className = 'adh-tooltip adh-tooltip-compact';
-    tip.innerHTML = `<div style="font-weight:600;margin-bottom:6px;font-size:12px">${data.labels[i]}h</div>` +
+    tip.innerHTML = `<div style="font-weight:600;margin-bottom:6px;font-size:12px">${horaLabel}</div>` +
       data.series.map(s => {
-        const v = s.values[i];
+        const v = interp(s.values);
         const vFmt = v >= 10 ? Math.round(v) : Math.round(v*10)/10;
         return `<div style="display:flex;align-items:center;gap:6px;font-size:11px;padding:1px 0"><span style="width:8px;height:8px;border-radius:2px;background:${s.color};flex-shrink:0"></span>${s.label}: <b>${vFmt}</b></div>`;
       }).join('');
@@ -1244,10 +1265,10 @@ function adhChartHover(e, svgEl) {
   // essa instância tiver uma — o painel de voos/hora extra tem).
   const statHora = document.getElementById('adh-stat-hora');
   if (statHora) {
-    statHora.textContent = `${data.labels[i]}h`;
+    statHora.textContent = horaLabel;
     data.series.forEach((s, si) => {
       const cel = document.getElementById('adh-stat-'+si);
-      if (cel) cel.textContent = adhFmtStatValor(s.values[i]);
+      if (cel) cel.textContent = adhFmtStatValor(interp(s.values));
     });
   }
 }
@@ -1333,14 +1354,16 @@ function adhEscalaPorHora(base, mes) {
     somarIntervalos([[h.ent1,h.sai1],[h.ent2,h.sai2]], (hr) => { planejada[hr]++; });
   }
 
-  const numDias = diasComDado.size || 1;
+  const diasReais = diasComDado.size;
+  const numDias = diasReais || 1; // só pra dividir sem dar NaN — a exibição usa diasReais de verdade
   const numDiasPlanejado = diasComPlanejado.size || 1;
   return {
     realizadaMedia: realizada.map(v => v / numDias),
     horaExtraMedia: horaExtra.map(v => v / numDias),
     planejadaMedia: planejada.map(v => v / numDiasPlanejado),
-    numDias,
+    numDias: diasReais,
     temPlanejado: diasComPlanejado.size > 0,
+    temMarcacao: diasReais > 0,
   };
 }
 
@@ -1381,7 +1404,7 @@ async function adhToggleGraficosHora(base) {
   const mes = window._adhMes || adhCurrentMonth();
   const horas = Array.from({length:24}, (_,i) => String(i).padStart(2,'0'));
 
-  const { realizadaMedia, horaExtraMedia, planejadaMedia, numDias, temPlanejado } = adhEscalaPorHora(base, mes);
+  const { realizadaMedia, horaExtraMedia, planejadaMedia, numDias, temPlanejado, temMarcacao } = adhEscalaPorHora(base, mes);
   const voos = await adhVoosPorHora(base, mes);
 
   if (btn) btn.disabled = false;
@@ -1410,7 +1433,7 @@ async function adhToggleGraficosHora(base) {
   painel.innerHTML = `
     <div class="hc-panel" style="padding:14px 16px">
       ${legenda}
-      <p style="font-size:10px;color:var(--text-muted);margin:0 0 6px">Média de ${numDias} dia${numDias===1?'':'s'} do mês · cada linha na sua própria escala${semPlanejado ? ' · sem horário planejado (Horarios.xlsx) carregado pra essa base/mês ainda' : ''}</p>
+      <p style="font-size:10px;color:var(--text-muted);margin:0 0 6px">${temMarcacao ? `Média de ${numDias} dia${numDias===1?'':'s'} do mês` : 'Sem marcação de ponto carregada pra essa base/mês ainda'} · cada linha na sua própria escala${semPlanejado ? ' · sem horário planejado (Horarios.xlsx) carregado pra essa base/mês ainda' : ''}</p>
       <div id="adh-chart-container">${adhBuildUnifiedChartSVG(horas, seriesInfo)}</div>
       <div id="adh-chart-stats" style="display:flex;align-items:center;gap:18px;margin-top:8px;padding-top:10px;border-top:1px solid var(--border);flex-wrap:wrap">
         <div style="font-size:10px;color:var(--text-muted);min-width:32px" id="adh-stat-hora">${horas[horaPico]}h</div>
