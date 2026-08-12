@@ -1405,22 +1405,32 @@ function adhEscalaPorHora(base, mes) {
 // Voos previstos por hora (média do mês) — vem da malha, reaproveitando o
 // mesmo buscador paginado já usado na Escala Online (escalaFetchMalha, em
 // pages.js) pra não duplicar a mesma correção do limite de 1000 linhas.
+// Voos previstos por hora — pega o PIOR dia do mês em cada horário (não a
+// média), pra dimensionar staff pro dia mais cheio, não pro "dia comum".
+// Ex.: se às 16h a maioria dos dias tem 6 voos mas teve um dia com 10, o
+// gráfico mostra 10 — é isso que decide quanta gente precisa nesse
+// horário pra nunca faltar, mesmo no pico.
 async function adhVoosPorHora(base, mes) {
   const [ano, mesNum] = mes.split('-').map(Number);
   const diasNoMes = new Date(ano, mesNum, 0).getDate();
   const dataIni = `${ano}-${String(mesNum).padStart(2,'0')}-01`;
   const dataFim = `${ano}-${String(mesNum).padStart(2,'0')}-${String(diasNoMes).padStart(2,'0')}`;
-  if (typeof escalaFetchMalha !== 'function') return new Array(24).fill(0);
+  if (typeof escalaFetchMalha !== 'function') return { pico: new Array(24).fill(0), numDiasComVoo: 0 };
   const voos = await escalaFetchMalha(base, dataIni, dataFim, 'data,hora_chegada');
-  const porHora = new Array(24).fill(0);
-  const diasComVoo = new Set();
+
+  const porHoraPorDia = new Map(); // data (string) -> array[24] de contagem naquele dia
   voos.forEach(v => {
-    if (v.data) diasComVoo.add(v.data);
+    if (!v.data) return;
+    if (!porHoraPorDia.has(v.data)) porHoraPorDia.set(v.data, new Array(24).fill(0));
     const h = parseInt(String(v.hora_chegada||'').split(':')[0], 10);
-    if (!isNaN(h) && h >= 0 && h < 24) porHora[h]++;
+    if (!isNaN(h) && h >= 0 && h < 24) porHoraPorDia.get(v.data)[h]++;
   });
-  const numDias = diasComVoo.size || diasNoMes;
-  return porHora.map(v => v / numDias);
+
+  const pico = new Array(24).fill(0);
+  for (const contagemDoDia of porHoraPorDia.values()) {
+    for (let h = 0; h < 24; h++) pico[h] = Math.max(pico[h], contagemDoDia[h]);
+  }
+  return { pico, numDiasComVoo: porHoraPorDia.size };
 }
 
 async function adhToggleGraficosHora(base) {
@@ -1440,7 +1450,7 @@ async function adhToggleGraficosHora(base) {
   const horas = Array.from({length:24}, (_,i) => String(i).padStart(2,'0'));
 
   const { realizadaMedia, horaExtraMedia, planejadaMedia, numDias, temPlanejado, temMarcacao } = adhEscalaPorHora(base, mes);
-  const voos = await adhVoosPorHora(base, mes);
+  const { pico: voosPico, numDiasComVoo } = await adhVoosPorHora(base, mes);
 
   if (btn) btn.disabled = false;
   painel.dataset.carregado = `${base}|${mes}`;
@@ -1454,7 +1464,7 @@ async function adhToggleGraficosHora(base) {
 
   const semPlanejado = !temPlanejado;
   const seriesVoo = [
-    { key: 'voo', label: 'Voo previsto', color: ADH_COR_VOO, values: voos, grupo: 'voos', area: true },
+    { key: 'voo', label: 'Voo previsto (pico)', color: ADH_COR_VOO, values: voosPico, grupo: 'voos', area: true },
   ];
   const seriesInfo = [
     { key: 'realizada', label: 'Escala realizada', color: ADH_COR_REALIZADA, values: realizadaMedia, grupo: 'pessoas' },
@@ -1469,7 +1479,7 @@ async function adhToggleGraficosHora(base) {
   painel.innerHTML = `
     <div class="hc-panel" style="padding:14px 16px;margin-bottom:14px">
       <p style="font-size:11px;font-weight:600;color:var(--text-primary);margin:0 0 2px">Voos em atendimento</p>
-      <p style="font-size:10px;color:var(--text-muted);margin:0 0 8px">Média de voos previstos por hora, ao longo do mês</p>
+      <p style="font-size:10px;color:var(--text-muted);margin:0 0 8px">Pico por hora — o dia mais cheio do mês em cada horário${numDiasComVoo?` (${numDiasComVoo} dia${numDiasComVoo===1?'':'s'} com voo)`:''}</p>
       <div id="adh-chart-container-voo">${adhBuildUnifiedChartSVG(horas, seriesVoo, null, { mostrarEixo: true, mostrarPico: true, idPrefix: 'voo' })}</div>
     </div>
     <div class="hc-panel" style="padding:14px 16px">
