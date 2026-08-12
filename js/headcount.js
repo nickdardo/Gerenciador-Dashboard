@@ -1891,12 +1891,23 @@ function hcMovChartHTML() {
   const totalDesl = meses.reduce((s,m) => s+porMes.get(m).desligados, 0);
   const saldo = totalAdm - totalDesl;
 
+  // FTE (Full-Time Equivalent) do saldo — mesma convenção já usada no
+  // Staff (1 FTE = 180h, confirmado com o cliente). Soma a carga horária
+  // de quem entrou, subtrai a de quem saiu, divide por 180 — dá uma ideia
+  // melhor da capacidade real de mão de obra do que só contar cabeças,
+  // já que gente com CH diferente (90h a 210h) não representa a mesma
+  // "quantidade de trabalho".
+  const chAdm  = rows.filter(r => r.tipo === 'Admissão').reduce((s,r) => s + (r.ch||0), 0);
+  const chDesl = rows.filter(r => r.tipo !== 'Admissão').reduce((s,r) => s + (r.ch||0), 0);
+  const fteSaldo = Math.round((chAdm - chDesl) / 180 * 10) / 10;
+
   return `
     <div class="hc-panel" style="margin-bottom:16px">
       <div style="display:flex;gap:14px;font-size:11px;color:var(--text-secondary);margin-bottom:12px;align-items:center">
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#5fa87a;margin-right:5px"></span>Admissões</span>
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#b56666;margin-right:5px"></span>Desligados</span>
         <span style="margin-left:auto;color:${saldo>=0?'#5fa87a':'#b56666'};font-weight:700">Saldo: ${saldo>=0?'+':''}${saldo}</span>
+        <span style="color:${fteSaldo>=0?'#5fa87a':'#b56666'};font-weight:700" title="1 FTE = 180h/mês">FTE: ${fteSaldo>=0?'+':''}${fteSaldo}</span>
       </div>
       <div style="display:flex;align-items:flex-end;gap:10px;height:100px">
         ${meses.map(m => {
