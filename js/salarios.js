@@ -31,6 +31,30 @@ function salFmtReal(v) {
   return 'R$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+// Só uma pessoa (por e-mail, não por papel) pode ver e mexer no
+// interruptor de mostrar nomes — mesmo outro admin não vê o checkbox.
+function salEhEduardo() {
+  return (typeof currentUser !== 'undefined' && currentUser?.email) === 'eduardo.oliveira@dnata.com.br';
+}
+
+async function salFetchMostrarNomes() {
+  const { data, error } = await db.from('app_config').select('valor').eq('chave', 'salarios_mostrar_nomes').maybeSingle();
+  if (error) { console.warn('[salarios] app_config:', error.message); return false; }
+  return data?.valor === 'true';
+}
+
+async function salToggleMostrarNomes(marcado) {
+  window._salMostrarNomes = marcado; // atualiza a tela na hora, não espera o banco responder
+  salRenderPainel(document.getElementById('page-content'));
+  const { error } = await db.from('app_config')
+    .update({ valor: marcado ? 'true' : 'false', updated_at: new Date(), updated_by: currentUser?.email || null })
+    .eq('chave', 'salarios_mostrar_nomes');
+  if (error) {
+    console.error('[salarios] falha ao salvar preferência de nomes:', error.message);
+    alert('Não consegui salvar essa preferência no banco (rodou o SQL da tabela app_config?). O que está na tela agora pode não persistir.');
+  }
+}
+
 async function pageSalarios(el) {
   el.innerHTML = `
     <div class="page-header"><div>
@@ -55,7 +79,9 @@ async function pageSalarios(el) {
     return;
   }
 
-  const linhas = await salFetchTodos();
+  const [linhas, mostrarNomes] = await Promise.all([salFetchTodos(), salFetchMostrarNomes()]);
+  window._salMostrarNomes = mostrarNomes;
+
   if (!linhas.length) {
     el.innerHTML = `
       <div class="page-header"><div>
@@ -72,6 +98,20 @@ async function pageSalarios(el) {
   salRenderPainel(el);
 }
 
+// Colunas usadas nas duas exportações — "Nome" só entra se o interruptor
+// de privacidade estiver ligado. Centralizado aqui pra garantir que as
+// duas exportações (por base e "tudo") nunca fiquem dessincronizadas.
+function salColunasExport(comBase) {
+  const cols = [];
+  if (comBase) cols.push({ header: 'Base', field: 'base' });
+  cols.push({ header: 'Matrícula', field: 'matricula' });
+  if (window._salMostrarNomes) cols.push({ header: 'Nome', field: 'nome' });
+  cols.push({ header: 'Função', field: 'funcao' });
+  cols.push({ header: 'CH', field: 'ch', fmt: v => v ? v+'h' : '' });
+  cols.push({ header: 'Salário', field: 'salario', fmt: v => salFmtReal(v) });
+  return cols;
+}
+
 function salExportarTudo() {
   if (typeof hcExportarExcel !== 'function') { alert('Exportação indisponível — recarregue a página.'); return; }
   const linhas = (window._salLinhas || []).map(r => ({
@@ -80,14 +120,7 @@ function salExportarTudo() {
     funcao: window.eoColabs?.get(r.matricula)?.funcao || '—',
     ch: window.eoColabs?.get(r.matricula)?.ch || null,
   })).sort((a,b) => a.base.localeCompare(b.base) || b.salario - a.salario);
-  hcExportarExcel(linhas, [
-    { header: 'Base', field: 'base' },
-    { header: 'Matrícula', field: 'matricula' },
-    { header: 'Nome', field: 'nome' },
-    { header: 'Função', field: 'funcao' },
-    { header: 'CH', field: 'ch', fmt: v => v ? v+'h' : '' },
-    { header: 'Salário', field: 'salario', fmt: v => salFmtReal(v) },
-  ], `salarios_todas_as_bases.xlsx`);
+  hcExportarExcel(linhas, salColunasExport(true), `salarios_todas_as_bases.xlsx`);
 }
 
 function salRenderPainel(el) {
@@ -114,7 +147,14 @@ function salRenderPainel(el) {
         <h1 class="page-title">Salários</h1>
         <p class="page-sub">Restrito — só Admin · ${linhas.length.toLocaleString('pt-BR')} colaboradores · ${porBase.size} bases</p>
       </div>
-      <button onclick="salExportarTudo()" class="adh-refresh-btn">Exportar tudo (${porBase.size} bases)</button>
+      <div style="display:flex;align-items:center;gap:14px">
+        ${salEhEduardo() ? `
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);cursor:pointer">
+            <input type="checkbox" ${window._salMostrarNomes ? 'checked' : ''} onchange="salToggleMostrarNomes(this.checked)">
+            Mostrar nomes
+          </label>` : ''}
+        <button onclick="salExportarTudo()" class="adh-refresh-btn">Exportar tudo (${porBase.size} bases)</button>
+      </div>
     </div>
 
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">
@@ -224,13 +264,7 @@ function salExportarBase() {
   if (!base) return;
   const linhas = salListaFiltradaOrdenada();
   if (typeof hcExportarExcel !== 'function') { alert('Exportação indisponível — recarregue a página.'); return; }
-  hcExportarExcel(linhas, [
-    { header: 'Matrícula', field: 'matricula' },
-    { header: 'Nome', field: 'nome' },
-    { header: 'Função', field: 'funcao' },
-    { header: 'CH', field: 'ch', fmt: v => v ? v+'h' : '' },
-    { header: 'Salário', field: 'salario', fmt: v => salFmtReal(v) },
-  ], `salarios_${base}.xlsx`);
+  hcExportarExcel(linhas, salColunasExport(false), `salarios_${base}.xlsx`);
 }
 
 // Monta a lista já com nome/função/CH cruzados, filtrada (função + CH +
@@ -254,7 +288,7 @@ function salListaFiltradaOrdenada() {
   let lista = todosDaBase;
   if (filtroFuncao) lista = lista.filter(r => r.funcao === filtroFuncao);
   if (filtroCh) lista = lista.filter(r => r.ch === filtroCh);
-  if (busca) lista = lista.filter(r => r.nome.toLowerCase().includes(busca) || r.matricula.includes(busca));
+  if (busca) lista = lista.filter(r => (window._salMostrarNomes && r.nome.toLowerCase().includes(busca)) || r.matricula.includes(busca));
 
   const coluna = window._salModalOrdemColuna || 'salario';
   const direcao = window._salModalOrdemDirecao === 'asc' ? 1 : -1;
@@ -301,7 +335,7 @@ function salRenderModalBase() {
           <div style="display:flex;align-items:center;gap:8px;margin-left:auto;flex-shrink:0">
             <div style="position:relative">
               <i class="ti ti-search" style="position:absolute;left:9px;top:50%;transform:translateY(-50%);font-size:14px;color:var(--text-muted)" aria-hidden="true"></i>
-              <input type="text" id="sal-busca-input" placeholder="Buscar por nome ou matrícula..." value="${busca}" oninput="salFiltrarModalPorBusca(this.value)" style="width:170px;padding:7px 10px 7px 30px;background:var(--bg-hover);border:1px solid var(--border-strong);border-radius:8px;color:var(--text-primary);font-size:12px">
+              <input type="text" id="sal-busca-input" placeholder="${window._salMostrarNomes ? 'Buscar por nome ou matrícula...' : 'Buscar por matrícula...'}" value="${busca}" oninput="salFiltrarModalPorBusca(this.value)" style="width:170px;padding:7px 10px 7px 30px;background:var(--bg-hover);border:1px solid var(--border-strong);border-radius:8px;color:var(--text-primary);font-size:12px">
             </div>
             <button onclick="salExportarBase()" aria-label="Exportar para Excel" title="Exportar para Excel" style="flex-shrink:0;width:auto;padding:0 10px;font-size:11px;font-weight:600">Exportar</button>
             <button onclick="salFecharModal()" aria-label="Fechar" style="flex-shrink:0;font-size:16px;line-height:1">✕</button>
@@ -335,14 +369,14 @@ function salRenderModalBase() {
           </div>
 
           <div style="flex:1;min-height:0;display:flex;flex-direction:column;margin-top:14px">
-            <div style="display:grid;grid-template-columns:100px 1.2fr 1.4fr 90px 150px;padding:8px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid var(--border);flex-shrink:0">
-              ${th('matricula','Matrícula')}${th('nome','Nome')}${th('funcao','Função')}${th('ch','CH')}${th('salario','Salário','right')}
+            <div style="display:grid;grid-template-columns:${window._salMostrarNomes ? '100px 1.2fr 1.4fr 90px 150px' : '120px 1.6fr 90px 150px'};padding:8px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid var(--border);flex-shrink:0">
+              ${th('matricula','Matrícula')}${window._salMostrarNomes ? th('nome','Nome') : ''}${th('funcao','Função')}${th('ch','CH')}${th('salario','Salário','right')}
             </div>
             <div style="flex:1;min-height:0;overflow-y:auto">
               ${lista.map((r,i) => `
-                <div style="display:grid;grid-template-columns:100px 1.2fr 1.4fr 90px 150px;padding:12px 10px;font-size:13px;align-items:center;background:${i%2?'var(--bg-hover)':'transparent'}">
+                <div style="display:grid;grid-template-columns:${window._salMostrarNomes ? '100px 1.2fr 1.4fr 90px 150px' : '120px 1.6fr 90px 150px'};padding:12px 10px;font-size:13px;align-items:center;background:${i%2?'var(--bg-hover)':'transparent'}">
                   <span style="font-family:monospace;color:var(--text-secondary)">${r.matricula}</span>
-                  <span style="color:var(--text-primary);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-right:12px">${r.nome||'—'}</span>
+                  ${window._salMostrarNomes ? `<span style="color:var(--text-primary);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-right:12px">${r.nome||'—'}</span>` : ''}
                   <span style="color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-right:12px">${r.funcao}</span>
                   <span style="color:var(--text-secondary)">${r.ch ? r.ch+'h' : '—'}</span>
                   <span style="text-align:right;font-weight:600">${salFmtReal(r.salario)}</span>
