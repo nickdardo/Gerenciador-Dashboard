@@ -275,15 +275,15 @@ function salRenderModalBase() {
   root.innerHTML = `
     <div class="adm-overlay" onclick="if(event.target===this) salFecharModal()">
       <div class="adm-modal" style="max-width:940px;height:78vh;display:flex;flex-direction:column;overflow:hidden">
-        <div class="adm-modal-header" style="flex-shrink:0;gap:10px">
-          <span style="white-space:nowrap">${base} — ${todosDaBase.length} colaborador${todosDaBase.length===1?'':'es'}${filtrosAtivos ? ` · ${lista.length} em ${filtrosAtivos}` : ''}</span>
-          <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
+        <div class="adm-modal-header" style="flex-shrink:0;gap:10px;flex-wrap:wrap">
+          <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${base} — ${todosDaBase.length} colaborador${todosDaBase.length===1?'':'es'}${filtrosAtivos ? ` · ${lista.length} em ${filtrosAtivos}` : ''}</span>
+          <div style="display:flex;align-items:center;gap:8px;margin-left:auto;flex-shrink:0">
             <div style="position:relative">
               <i class="ti ti-search" style="position:absolute;left:9px;top:50%;transform:translateY(-50%);font-size:14px;color:var(--text-muted)" aria-hidden="true"></i>
-              <input type="text" id="sal-busca-input" placeholder="Buscar por nome ou matrícula..." value="${busca}" oninput="salFiltrarModalPorBusca(this.value)" style="width:220px;padding:7px 10px 7px 30px;background:var(--bg-hover);border:1px solid var(--border-strong);border-radius:8px;color:var(--text-primary);font-size:12px">
+              <input type="text" id="sal-busca-input" placeholder="Buscar por nome ou matrícula..." value="${busca}" oninput="salFiltrarModalPorBusca(this.value)" style="width:170px;padding:7px 10px 7px 30px;background:var(--bg-hover);border:1px solid var(--border-strong);border-radius:8px;color:var(--text-primary);font-size:12px">
             </div>
-            <button onclick="salExportarBase()" aria-label="Exportar para Excel" title="Exportar para Excel"><i class="ti ti-download" aria-hidden="true"></i></button>
-            <button onclick="salFecharModal()" aria-label="Fechar"><i class="ti ti-x" aria-hidden="true"></i></button>
+            <button onclick="salExportarBase()" aria-label="Exportar para Excel" title="Exportar para Excel" style="flex-shrink:0"><i class="ti ti-download" aria-hidden="true"></i></button>
+            <button onclick="salFecharModal()" aria-label="Fechar" style="flex-shrink:0"><i class="ti ti-x" aria-hidden="true"></i></button>
           </div>
         </div>
         <div class="adm-modal-body" style="flex:1;min-height:0;overflow:hidden">
