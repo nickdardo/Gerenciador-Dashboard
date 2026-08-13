@@ -28,7 +28,7 @@ function salMediana(valores) {
 }
 
 function salFmtReal(v) {
-  return 'R$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  return 'R$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 async function pageSalarios(el) {
@@ -189,7 +189,7 @@ function salRenderModalBase() {
 
   root.innerHTML = `
     <div class="adm-overlay" onclick="if(event.target===this) salFecharModal()">
-      <div class="adm-modal" style="max-width:720px">
+      <div class="adm-modal" style="max-width:940px">
         <div class="adm-modal-header">
           <span>${base} — ${todosDaBase.length} colaborador${todosDaBase.length===1?'':'es'}${filtro ? ` · ${lista.length} em "${filtro}"` : ''}</span>
           <button onclick="salFecharModal()" aria-label="Fechar"><i class="ti ti-x" aria-hidden="true"></i></button>
@@ -197,22 +197,22 @@ function salRenderModalBase() {
         <div class="adm-modal-body">
           <div style="display:flex;align-items:center;gap:10px">
             <label style="font-size:11px;color:var(--text-muted)">Filtrar por função</label>
-            <select onchange="salFiltrarModalPorFuncao(this.value)" style="flex:1;max-width:280px;padding:6px 10px;background:var(--bg-hover);border:1px solid var(--border-strong);border-radius:8px;color:var(--text-primary);font-size:12px">
+            <select onchange="salFiltrarModalPorFuncao(this.value)" style="flex:1;max-width:320px;padding:7px 12px;background:var(--bg-hover);border:1px solid var(--border-strong);border-radius:8px;color:var(--text-primary);font-size:12px">
               <option value="">Todas as funções (${funcoesDaBase.length})</option>
               ${funcoesDaBase.map(f => `<option value="${f}" ${filtro===f?'selected':''}>${f}</option>`).join('')}
             </select>
           </div>
 
           <div>
-            <div style="display:grid;grid-template-columns:90px 1fr 1fr 100px;padding:6px 4px;font-size:10px;text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid var(--border)">
+            <div style="display:grid;grid-template-columns:100px 1.3fr 1.5fr 150px;padding:8px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid var(--border)">
               ${th('matricula','Matrícula')}${th('nome','Nome')}${th('funcao','Função')}${th('salario','Salário','right')}
             </div>
-            <div style="max-height:400px;overflow-y:auto">
-              ${lista.map(r => `
-                <div style="display:grid;grid-template-columns:90px 1fr 1fr 100px;padding:7px 4px;font-size:12px;border-bottom:1px solid var(--border)">
+            <div style="max-height:460px;overflow-y:auto">
+              ${lista.map((r,i) => `
+                <div style="display:grid;grid-template-columns:100px 1.3fr 1.5fr 150px;padding:12px 10px;font-size:13px;align-items:center;background:${i%2?'var(--bg-hover)':'transparent'}">
                   <span style="font-family:monospace;color:var(--text-secondary)">${r.matricula}</span>
-                  <span style="color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.nome||'—'}</span>
-                  <span style="color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.funcao}</span>
+                  <span style="color:var(--text-primary);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-right:12px">${r.nome||'—'}</span>
+                  <span style="color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-right:12px">${r.funcao}</span>
                   <span style="text-align:right;font-weight:600">${salFmtReal(r.salario)}</span>
                 </div>`).join('')}
               ${!lista.length ? `<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:12px">Ninguém encontrado com esse filtro.</div>` : ''}
