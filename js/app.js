@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { id: 'gerador',    icon: 'settings',   label: 'Gerador',        i18nKey: 'nav.gerador',    roles: ['admin','gerente','coordenador','supervisor','lideranca'] },
   { id: 'comparador', icon: 'bar-chart',  label: 'Comparador',     i18nKey: 'nav.comparador', roles: ['admin','gerente','coordenador','supervisor'] },
   { id: 'admin',      icon: 'shield',     label: 'Admin',          i18nKey: 'nav.admin',      roles: ['admin'] },
+  { id: 'salarios',   icon: 'currency-real', label: 'Salários',    i18nKey: 'nav.salarios',   roles: ['admin'] },
 ];
 
 let currentUserProfile = null;
@@ -56,7 +57,7 @@ async function appInit(user) {
 
   if (!_appInitialized) {
     _appInitialized = true;
-    const paginasValidas = ['escala','gerador','comparador','aderencia','headcount','admin'];
+    const paginasValidas = ['escala','gerador','comparador','aderencia','headcount','admin','salarios'];
     let ultimaPagina = null;
     try { ultimaPagina = localStorage.getItem('gde_ultima_pagina'); } catch(_) {}
     navigateTo(paginasValidas.includes(ultimaPagina) ? ultimaPagina : 'escala');
@@ -173,6 +174,7 @@ function navigateTo(pageId) {
     case 'aderencia':  pageAderencia(content);  break;
     case 'headcount':  pageHeadcount(content);  break;
     case 'admin':      pageAdmin(content);      break;
+    case 'salarios':   pageSalarios(content);   break;
     default: content.innerHTML = '<div class="page-empty">Em breve</div>';
   }
 }
@@ -193,6 +195,7 @@ function sbIcon(name) {
     clock:     `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`,
     shield:    `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`,
     users:     `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
+    'currency-real': `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 8h3.5a2 2 0 0 1 0 4H9V8Zm0 4h3l3 5"/></svg>`,
   };
   return `<span class="sb-icon">${icons[name] || ''}</span>`;
 }

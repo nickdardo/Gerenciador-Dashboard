@@ -280,6 +280,7 @@ const ADM_BATCH_PATTERNS = [
   { fn: 'adminLoadMarcacao',  label: 'Marcação de ponto', test: n => n.includes('marcac') },
   { fn: 'adminLoadMalha',     label: 'Malha aérea',       test: n => n.includes('rvpe') || n.includes('malha') },
   { fn: 'adminLoadHorasExtrasFolha', label: 'Horas Extras (Folha)', test: n => n.includes('horasextras') },
+  { fn: 'adminLoadSalarios', label: 'Salários', test: n => n.includes('salario') },
   // "hrcl107" saiu daqui de propósito — ver ADM_HRCL107_SNIFF logo abaixo,
   // esse nome sozinho é ambíguo entre Férias e Absenteísmo.
   { fn: 'adminLoadFerias',    label: 'Férias',            test: n => n.includes('feria') },
@@ -429,6 +430,18 @@ function adminFilesTab() {
       fn: 'adminLoadHorasExtrasFolha',
       info: adminFiles.horasextrasfolha
         ? `${adminFiles.horasextrasfolha.count.toLocaleString()} colaboradores · ${adminFiles.horasextrasfolha.mes}`
+        : null,
+    },
+    {
+      key: 'salarios',
+      icon: 'ti-currency-real',
+      color: '#fc8181',
+      name: 'Salários',
+      desc: 'Salarios.xls/.xlsx · matrícula, base, salário — sensível, só Admin enxerga em qualquer tela',
+      accept: '.xls,.xlsx',
+      fn: 'adminLoadSalarios',
+      info: adminFiles.salarios
+        ? `${adminFiles.salarios.count.toLocaleString()} colaboradores`
         : null,
     },
   ];
@@ -932,6 +945,67 @@ async function adminLoadHorasExtrasFolha(input) {
     } catch(err) {
       adminSetFileStatus('horasextrasfolha', 'Erro: ' + err.message, 'err');
       console.error('[adminLoadHorasExtrasFolha]', err);
+    }
+  };
+  r.readAsArrayBuffer(file);
+}
+
+// ── Salários (folha) — Salarios.xls/.xlsx ──────────────
+// Só 3 colunas, sem cabeçalho: matrícula, base, salário. Dado sensível —
+// só existe RLS liberando leitura pro papel 'admin' (nem gerente,
+// coordenador etc. conseguem ler essa tabela, diferente das outras). É
+// "foto atual": todo upload novo apaga o que tinha antes e grava do zero,
+// pra nunca sobrar matrícula de uma folha antiga que já não bate mais.
+async function adminLoadSalarios(input) {
+  const file = input.files[0];
+  if (!file) return;
+  adminSetFileStatus('salarios', 'Lendo arquivo...', 'load');
+
+  const r = new FileReader();
+  r.onload = async e => {
+    try {
+      const wb   = XLSX.read(e.target.result, { type:'array' });
+      const ws   = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:true });
+
+      // Sem linha de cabeçalho nesse arquivo — toda linha é dado de verdade.
+      const records = [];
+      rows.forEach(row => {
+        if (!row || row[0] == null) return;
+        const matRaw = String(row[0]).trim();
+        if (!matRaw || isNaN(parseInt(matRaw))) return;
+        const mat = matRaw.padStart(6, '0');
+        const base = String(row[1]||'').trim().toUpperCase();
+        const salario = parseFloat(row[2]);
+        if (!base || isNaN(salario)) return;
+        records.push({ matricula: mat, base, salario, updated_at: new Date() });
+      });
+
+      const total = records.length;
+      if (!total) throw new Error('Nenhuma linha válida — confere se as 3 primeiras colunas são matrícula, base e salário.');
+
+      adminSetFileStatus('salarios', 'Substituindo dado anterior...', 'load');
+      const { error: delErr } = await db.from('folha_salarios').delete().gte('matricula', '');
+      if (delErr) throw new Error(delErr.message);
+
+      adminSetFileStatus('salarios', `Gravando ${total.toLocaleString()} no banco...`, 'load');
+      const BATCH = 1000;
+      let saved = 0;
+      for (let i = 0; i < records.length; i += BATCH) {
+        const batch = records.slice(i, i + BATCH);
+        const { error } = await db.from('folha_salarios').insert(batch);
+        if (error) throw new Error(error.message);
+        saved += batch.length;
+        adminSetFileStatus('salarios', `Gravando... ${saved}/${total}`, 'load');
+      }
+
+      adminFiles.salarios = { count: total, date: new Date().toLocaleDateString('pt-BR') };
+      adminSetFileStatus('salarios', `✓ ${total.toLocaleString()} colaboradores`, 'ok');
+      adminAddHistory('salarios', file.name);
+      input.value = '';
+    } catch(err) {
+      adminSetFileStatus('salarios', 'Erro: ' + err.message, 'err');
+      console.error('[adminLoadSalarios]', err);
     }
   };
   r.readAsArrayBuffer(file);
