@@ -151,6 +151,15 @@ function salOrdenarModalPorColuna(coluna) {
 
 function salToggleFuncaoPainel() {
   const painel = document.getElementById('sal-funcao-painel');
+  const outro = document.getElementById('sal-ch-painel');
+  if (outro) outro.style.display = 'none';
+  if (painel) painel.style.display = painel.style.display === 'none' ? 'block' : 'none';
+}
+
+function salToggleChPainel() {
+  const painel = document.getElementById('sal-ch-painel');
+  const outro = document.getElementById('sal-funcao-painel');
+  if (outro) outro.style.display = 'none';
   if (painel) painel.style.display = painel.style.display === 'none' ? 'block' : 'none';
 }
 
@@ -159,10 +168,16 @@ function salFiltrarModalPorFuncao(funcao) {
   salRenderModalBase();
 }
 
+function salFiltrarModalPorCh(ch) {
+  window._salModalChFiltro = ch || null;
+  salRenderModalBase();
+}
+
 function salValorColuna(r, coluna) {
   if (coluna === 'matricula') return r.matricula;
   if (coluna === 'nome') return r.nome || '';
   if (coluna === 'funcao') return r.funcao || '';
+  if (coluna === 'ch') return r.ch || 0;
   return r.salario;
 }
 
@@ -173,12 +188,21 @@ function salRenderModalBase() {
 
   const todosDaBase = (window._salLinhas || [])
     .filter(r => r.base === base)
-    .map(r => ({ ...r, nome: window.eoColabs?.get(r.matricula)?.nome || '', funcao: window.eoColabs?.get(r.matricula)?.funcao || '—' }));
+    .map(r => ({
+      ...r,
+      nome: window.eoColabs?.get(r.matricula)?.nome || '',
+      funcao: window.eoColabs?.get(r.matricula)?.funcao || '—',
+      ch: window.eoColabs?.get(r.matricula)?.ch || null,
+    }));
 
   const funcoesDaBase = [...new Set(todosDaBase.map(r => r.funcao))].sort((a,b) => a.localeCompare(b));
+  const chsDaBase = [...new Set(todosDaBase.map(r => r.ch).filter(Boolean))].sort((a,b) => a-b);
 
-  const filtro = window._salModalFuncaoFiltro;
-  let lista = filtro ? todosDaBase.filter(r => r.funcao === filtro) : todosDaBase;
+  const filtroFuncao = window._salModalFuncaoFiltro;
+  const filtroCh = window._salModalChFiltro;
+  let lista = todosDaBase;
+  if (filtroFuncao) lista = lista.filter(r => r.funcao === filtroFuncao);
+  if (filtroCh) lista = lista.filter(r => r.ch === filtroCh);
 
   const coluna = window._salModalOrdemColuna || 'salario';
   const direcao = window._salModalOrdemDirecao === 'asc' ? 1 : -1;
@@ -188,6 +212,8 @@ function salRenderModalBase() {
     return direcao * String(va).localeCompare(String(vb), 'pt-BR');
   });
 
+  const filtrosAtivos = [filtroFuncao ? `"${filtroFuncao}"` : null, filtroCh ? `${filtroCh}h` : null].filter(Boolean).join(' + ');
+
   const setaColuna = (c) => window._salModalOrdemColuna === c ? (window._salModalOrdemDirecao==='desc'?' ↓':' ↑') : '';
   const corColuna = (c) => window._salModalOrdemColuna === c ? 'var(--blue)' : 'var(--text-muted)';
   const th = (c, label, alinhamento) => `<span onclick="salOrdenarModalPorColuna('${c}')" style="cursor:pointer;user-select:none;color:${corColuna(c)}${alinhamento?';text-align:'+alinhamento:''}">${label}${setaColuna(c)}</span>`;
@@ -196,32 +222,47 @@ function salRenderModalBase() {
     <div class="adm-overlay" onclick="if(event.target===this) salFecharModal()">
       <div class="adm-modal" style="max-width:940px">
         <div class="adm-modal-header">
-          <span>${base} — ${todosDaBase.length} colaborador${todosDaBase.length===1?'':'es'}${filtro ? ` · ${lista.length} em "${filtro}"` : ''}</span>
+          <span>${base} — ${todosDaBase.length} colaborador${todosDaBase.length===1?'':'es'}${filtrosAtivos ? ` · ${lista.length} em ${filtrosAtivos}` : ''}</span>
           <button onclick="salFecharModal()" aria-label="Fechar"><i class="ti ti-x" aria-hidden="true"></i></button>
         </div>
         <div class="adm-modal-body">
-          <div style="display:flex;align-items:center;gap:10px;position:relative">
-            <label style="font-size:11px;color:var(--text-muted)">Filtrar por função</label>
-            <button onclick="salToggleFuncaoPainel()" class="adh-refresh-btn" style="justify-content:space-between;flex:1;max-width:320px">
-              <span>${filtro || `Todas as funções (${funcoesDaBase.length})`}</span>
-              <i class="ti ti-chevron-down" style="font-size:14px" aria-hidden="true"></i>
-            </button>
-            <div id="sal-funcao-painel" style="display:none;position:absolute;top:calc(100% + 4px);left:88px;right:0;max-width:320px;max-height:260px;overflow-y:auto;background:#141b2c;border:1px solid var(--border-strong);border-radius:8px;padding:4px;z-index:30;box-shadow:var(--adh-shadow-card)">
-              <div onclick="salFiltrarModalPorFuncao('')" style="padding:7px 10px;font-size:12px;border-radius:6px;cursor:pointer;color:${!filtro?'var(--blue)':'var(--text-primary)'};font-weight:${!filtro?'600':'400'}" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'">Todas as funções (${funcoesDaBase.length})</div>
-              ${funcoesDaBase.map(f => `<div onclick="salFiltrarModalPorFuncao('${f}')" style="padding:7px 10px;font-size:12px;border-radius:6px;cursor:pointer;color:${filtro===f?'var(--blue)':'var(--text-primary)'};font-weight:${filtro===f?'600':'400'}" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'">${f}</div>`).join('')}
+          <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:10px;position:relative">
+              <label style="font-size:11px;color:var(--text-muted)">Função</label>
+              <button onclick="salToggleFuncaoPainel()" class="adh-refresh-btn" style="justify-content:space-between;min-width:230px">
+                <span>${filtroFuncao || `Todas (${funcoesDaBase.length})`}</span>
+                <i class="ti ti-chevron-down" style="font-size:14px" aria-hidden="true"></i>
+              </button>
+              <div id="sal-funcao-painel" style="display:none;position:absolute;top:calc(100% + 4px);left:56px;width:260px;max-height:260px;overflow-y:auto;background:#141b2c;border:1px solid var(--border-strong);border-radius:8px;padding:4px;z-index:30;box-shadow:var(--adh-shadow-card)">
+                <div onclick="salFiltrarModalPorFuncao('')" style="padding:7px 10px;font-size:12px;border-radius:6px;cursor:pointer;color:${!filtroFuncao?'var(--blue)':'var(--text-primary)'};font-weight:${!filtroFuncao?'600':'400'}" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'">Todas as funções (${funcoesDaBase.length})</div>
+                ${funcoesDaBase.map(f => `<div onclick="salFiltrarModalPorFuncao('${f}')" style="padding:7px 10px;font-size:12px;border-radius:6px;cursor:pointer;color:${filtroFuncao===f?'var(--blue)':'var(--text-primary)'};font-weight:${filtroFuncao===f?'600':'400'}" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'">${f}</div>`).join('')}
+              </div>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:10px;position:relative">
+              <label style="font-size:11px;color:var(--text-muted)">Carga horária</label>
+              <button onclick="salToggleChPainel()" class="adh-refresh-btn" style="justify-content:space-between;min-width:150px">
+                <span>${filtroCh ? filtroCh+'h' : `Todas (${chsDaBase.length})`}</span>
+                <i class="ti ti-chevron-down" style="font-size:14px" aria-hidden="true"></i>
+              </button>
+              <div id="sal-ch-painel" style="display:none;position:absolute;top:calc(100% + 4px);left:90px;width:140px;max-height:260px;overflow-y:auto;background:#141b2c;border:1px solid var(--border-strong);border-radius:8px;padding:4px;z-index:30;box-shadow:var(--adh-shadow-card)">
+                <div onclick="salFiltrarModalPorCh('')" style="padding:7px 10px;font-size:12px;border-radius:6px;cursor:pointer;color:${!filtroCh?'var(--blue)':'var(--text-primary)'};font-weight:${!filtroCh?'600':'400'}" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'">Todas (${chsDaBase.length})</div>
+                ${chsDaBase.map(c => `<div onclick="salFiltrarModalPorCh(${c})" style="padding:7px 10px;font-size:12px;border-radius:6px;cursor:pointer;color:${filtroCh===c?'var(--blue)':'var(--text-primary)'};font-weight:${filtroCh===c?'600':'400'}" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'">${c}h</div>`).join('')}
+              </div>
             </div>
           </div>
 
           <div>
-            <div style="display:grid;grid-template-columns:100px 1.3fr 1.5fr 150px;padding:8px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid var(--border)">
-              ${th('matricula','Matrícula')}${th('nome','Nome')}${th('funcao','Função')}${th('salario','Salário','right')}
+            <div style="display:grid;grid-template-columns:100px 1.2fr 1.4fr 90px 150px;padding:8px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid var(--border)">
+              ${th('matricula','Matrícula')}${th('nome','Nome')}${th('funcao','Função')}${th('ch','CH')}${th('salario','Salário','right')}
             </div>
             <div style="max-height:460px;overflow-y:auto">
               ${lista.map((r,i) => `
-                <div style="display:grid;grid-template-columns:100px 1.3fr 1.5fr 150px;padding:12px 10px;font-size:13px;align-items:center;background:${i%2?'var(--bg-hover)':'transparent'}">
+                <div style="display:grid;grid-template-columns:100px 1.2fr 1.4fr 90px 150px;padding:12px 10px;font-size:13px;align-items:center;background:${i%2?'var(--bg-hover)':'transparent'}">
                   <span style="font-family:monospace;color:var(--text-secondary)">${r.matricula}</span>
                   <span style="color:var(--text-primary);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-right:12px">${r.nome||'—'}</span>
                   <span style="color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-right:12px">${r.funcao}</span>
+                  <span style="color:var(--text-secondary)">${r.ch ? r.ch+'h' : '—'}</span>
                   <span style="text-align:right;font-weight:600">${salFmtReal(r.salario)}</span>
                 </div>`).join('')}
               ${!lista.length ? `<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:12px">Ninguém encontrado com esse filtro.</div>` : ''}
