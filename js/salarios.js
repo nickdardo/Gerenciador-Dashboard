@@ -220,13 +220,13 @@ function salRenderModalBase() {
 
   root.innerHTML = `
     <div class="adm-overlay" onclick="if(event.target===this) salFecharModal()">
-      <div class="adm-modal" style="max-width:940px">
-        <div class="adm-modal-header">
+      <div class="adm-modal" style="max-width:940px;height:78vh;display:flex;flex-direction:column;overflow:hidden">
+        <div class="adm-modal-header" style="flex-shrink:0">
           <span>${base} — ${todosDaBase.length} colaborador${todosDaBase.length===1?'':'es'}${filtrosAtivos ? ` · ${lista.length} em ${filtrosAtivos}` : ''}</span>
           <button onclick="salFecharModal()" aria-label="Fechar"><i class="ti ti-x" aria-hidden="true"></i></button>
         </div>
-        <div class="adm-modal-body">
-          <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+        <div class="adm-modal-body" style="flex:1;min-height:0;overflow:hidden">
+          <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;flex-shrink:0">
             <div style="display:flex;align-items:center;gap:10px;position:relative">
               <label style="font-size:11px;color:var(--text-muted)">Função</label>
               <button onclick="salToggleFuncaoPainel()" class="adh-refresh-btn" style="justify-content:space-between;min-width:230px">
@@ -252,11 +252,11 @@ function salRenderModalBase() {
             </div>
           </div>
 
-          <div>
-            <div style="display:grid;grid-template-columns:100px 1.2fr 1.4fr 90px 150px;padding:8px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid var(--border)">
+          <div style="flex:1;min-height:0;display:flex;flex-direction:column;margin-top:14px">
+            <div style="display:grid;grid-template-columns:100px 1.2fr 1.4fr 90px 150px;padding:8px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid var(--border);flex-shrink:0">
               ${th('matricula','Matrícula')}${th('nome','Nome')}${th('funcao','Função')}${th('ch','CH')}${th('salario','Salário','right')}
             </div>
-            <div style="max-height:460px;overflow-y:auto">
+            <div style="flex:1;min-height:0;overflow-y:auto">
               ${lista.map((r,i) => `
                 <div style="display:grid;grid-template-columns:100px 1.2fr 1.4fr 90px 150px;padding:12px 10px;font-size:13px;align-items:center;background:${i%2?'var(--bg-hover)':'transparent'}">
                   <span style="font-family:monospace;color:var(--text-secondary)">${r.matricula}</span>
