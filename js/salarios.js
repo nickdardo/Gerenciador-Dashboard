@@ -72,6 +72,24 @@ async function pageSalarios(el) {
   salRenderPainel(el);
 }
 
+function salExportarTudo() {
+  if (typeof hcExportarExcel !== 'function') { alert('Exportação indisponível — recarregue a página.'); return; }
+  const linhas = (window._salLinhas || []).map(r => ({
+    ...r,
+    nome: window.eoColabs?.get(r.matricula)?.nome || '',
+    funcao: window.eoColabs?.get(r.matricula)?.funcao || '—',
+    ch: window.eoColabs?.get(r.matricula)?.ch || null,
+  })).sort((a,b) => a.base.localeCompare(b.base) || b.salario - a.salario);
+  hcExportarExcel(linhas, [
+    { header: 'Base', field: 'base' },
+    { header: 'Matrícula', field: 'matricula' },
+    { header: 'Nome', field: 'nome' },
+    { header: 'Função', field: 'funcao' },
+    { header: 'CH', field: 'ch', fmt: v => v ? v+'h' : '' },
+    { header: 'Salário', field: 'salario', fmt: v => salFmtReal(v) },
+  ], `salarios_todas_as_bases.xlsx`);
+}
+
 function salRenderPainel(el) {
   const linhas = window._salLinhas || [];
   const salarios = linhas.map(r => r.salario);
@@ -91,10 +109,13 @@ function salRenderPainel(el) {
   }).sort((a,b) => b.media - a.media);
 
   el.innerHTML = `
-    <div class="page-header"><div>
-      <h1 class="page-title">Salários</h1>
-      <p class="page-sub">Restrito — só Admin · ${linhas.length.toLocaleString('pt-BR')} colaboradores · ${porBase.size} bases</p>
-    </div></div>
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Salários</h1>
+        <p class="page-sub">Restrito — só Admin · ${linhas.length.toLocaleString('pt-BR')} colaboradores · ${porBase.size} bases</p>
+      </div>
+      <button onclick="salExportarTudo()" class="adh-refresh-btn">Exportar tudo (${porBase.size} bases)</button>
+    </div>
 
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">
       <div class="hc-panel"><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Folha total</div><div style="font-size:22px;font-weight:700">${salFmtReal(total)}</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px">${linhas.length.toLocaleString('pt-BR')} colaboradores</div></div>
@@ -282,8 +303,8 @@ function salRenderModalBase() {
               <i class="ti ti-search" style="position:absolute;left:9px;top:50%;transform:translateY(-50%);font-size:14px;color:var(--text-muted)" aria-hidden="true"></i>
               <input type="text" id="sal-busca-input" placeholder="Buscar por nome ou matrícula..." value="${busca}" oninput="salFiltrarModalPorBusca(this.value)" style="width:170px;padding:7px 10px 7px 30px;background:var(--bg-hover);border:1px solid var(--border-strong);border-radius:8px;color:var(--text-primary);font-size:12px">
             </div>
-            <button onclick="salExportarBase()" aria-label="Exportar para Excel" title="Exportar para Excel" style="flex-shrink:0"><i class="ti ti-download" aria-hidden="true"></i></button>
-            <button onclick="salFecharModal()" aria-label="Fechar" style="flex-shrink:0"><i class="ti ti-x" aria-hidden="true"></i></button>
+            <button onclick="salExportarBase()" aria-label="Exportar para Excel" title="Exportar para Excel" style="flex-shrink:0;width:auto;padding:0 10px;font-size:11px;font-weight:600">Exportar</button>
+            <button onclick="salFecharModal()" aria-label="Fechar" style="flex-shrink:0;font-size:16px;line-height:1">✕</button>
           </div>
         </div>
         <div class="adm-modal-body" style="flex:1;min-height:0;overflow:hidden">
