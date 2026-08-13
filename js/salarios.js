@@ -130,6 +130,8 @@ function salAbrirBase(base) {
   window._salModalOrdemColuna = 'salario';
   window._salModalOrdemDirecao = 'desc';
   window._salModalFuncaoFiltro = null;
+  window._salModalChFiltro = null;
+  window._salModalBusca = '';
   salRenderModalBase();
 }
 
@@ -181,6 +183,67 @@ function salValorColuna(r, coluna) {
   return r.salario;
 }
 
+function salFiltrarModalPorBusca(texto) {
+  window._salModalBusca = texto || '';
+  const input = document.getElementById('sal-busca-input');
+  const cursorPos = input ? input.selectionStart : null;
+  salRenderModalBase();
+  // Restaura o foco e a posição do cursor no campo de busca — sem isso,
+  // reconstruir o HTML a cada letra digitada tira o foco do campo e o
+  // usuário precisaria clicar de novo pra continuar digitando.
+  const novoInput = document.getElementById('sal-busca-input');
+  if (novoInput) {
+    novoInput.focus();
+    if (cursorPos != null) novoInput.setSelectionRange(cursorPos, cursorPos);
+  }
+}
+
+function salExportarBase() {
+  const base = window._salModalBase;
+  if (!base) return;
+  const linhas = salListaFiltradaOrdenada();
+  if (typeof hcExportarExcel !== 'function') { alert('Exportação indisponível — recarregue a página.'); return; }
+  hcExportarExcel(linhas, [
+    { header: 'Matrícula', field: 'matricula' },
+    { header: 'Nome', field: 'nome' },
+    { header: 'Função', field: 'funcao' },
+    { header: 'CH', field: 'ch', fmt: v => v ? v+'h' : '' },
+    { header: 'Salário', field: 'salario', fmt: v => salFmtReal(v) },
+  ], `salarios_${base}.xlsx`);
+}
+
+// Monta a lista já com nome/função/CH cruzados, filtrada (função + CH +
+// busca por nome/matrícula) e ordenada — usada tanto pra desenhar a
+// tabela quanto pra exportar, garantindo que o Excel exportado é
+// exatamente o que está na tela (mesmos filtros, mesma ordem).
+function salListaFiltradaOrdenada() {
+  const base = window._salModalBase;
+  const todosDaBase = (window._salLinhas || [])
+    .filter(r => r.base === base)
+    .map(r => ({
+      ...r,
+      nome: window.eoColabs?.get(r.matricula)?.nome || '',
+      funcao: window.eoColabs?.get(r.matricula)?.funcao || '—',
+      ch: window.eoColabs?.get(r.matricula)?.ch || null,
+    }));
+
+  const filtroFuncao = window._salModalFuncaoFiltro;
+  const filtroCh = window._salModalChFiltro;
+  const busca = (window._salModalBusca || '').trim().toLowerCase();
+  let lista = todosDaBase;
+  if (filtroFuncao) lista = lista.filter(r => r.funcao === filtroFuncao);
+  if (filtroCh) lista = lista.filter(r => r.ch === filtroCh);
+  if (busca) lista = lista.filter(r => r.nome.toLowerCase().includes(busca) || r.matricula.includes(busca));
+
+  const coluna = window._salModalOrdemColuna || 'salario';
+  const direcao = window._salModalOrdemDirecao === 'asc' ? 1 : -1;
+  return [...lista].sort((a,b) => {
+    const va = salValorColuna(a, coluna), vb = salValorColuna(b, coluna);
+    if (typeof va === 'number') return direcao * (va - vb);
+    return direcao * String(va).localeCompare(String(vb), 'pt-BR');
+  });
+}
+
 function salRenderModalBase() {
   const base = window._salModalBase;
   const root = document.getElementById('sal-modal-root');
@@ -200,19 +263,10 @@ function salRenderModalBase() {
 
   const filtroFuncao = window._salModalFuncaoFiltro;
   const filtroCh = window._salModalChFiltro;
-  let lista = todosDaBase;
-  if (filtroFuncao) lista = lista.filter(r => r.funcao === filtroFuncao);
-  if (filtroCh) lista = lista.filter(r => r.ch === filtroCh);
+  const busca = window._salModalBusca || '';
+  const lista = salListaFiltradaOrdenada();
 
-  const coluna = window._salModalOrdemColuna || 'salario';
-  const direcao = window._salModalOrdemDirecao === 'asc' ? 1 : -1;
-  lista = [...lista].sort((a,b) => {
-    const va = salValorColuna(a, coluna), vb = salValorColuna(b, coluna);
-    if (typeof va === 'number') return direcao * (va - vb);
-    return direcao * String(va).localeCompare(String(vb), 'pt-BR');
-  });
-
-  const filtrosAtivos = [filtroFuncao ? `"${filtroFuncao}"` : null, filtroCh ? `${filtroCh}h` : null].filter(Boolean).join(' + ');
+  const filtrosAtivos = [filtroFuncao ? `"${filtroFuncao}"` : null, filtroCh ? `${filtroCh}h` : null, busca ? `busca "${busca}"` : null].filter(Boolean).join(' + ');
 
   const setaColuna = (c) => window._salModalOrdemColuna === c ? (window._salModalOrdemDirecao==='desc'?' ↓':' ↑') : '';
   const corColuna = (c) => window._salModalOrdemColuna === c ? 'var(--blue)' : 'var(--text-muted)';
@@ -221,9 +275,16 @@ function salRenderModalBase() {
   root.innerHTML = `
     <div class="adm-overlay" onclick="if(event.target===this) salFecharModal()">
       <div class="adm-modal" style="max-width:940px;height:78vh;display:flex;flex-direction:column;overflow:hidden">
-        <div class="adm-modal-header" style="flex-shrink:0">
-          <span>${base} — ${todosDaBase.length} colaborador${todosDaBase.length===1?'':'es'}${filtrosAtivos ? ` · ${lista.length} em ${filtrosAtivos}` : ''}</span>
-          <button onclick="salFecharModal()" aria-label="Fechar"><i class="ti ti-x" aria-hidden="true"></i></button>
+        <div class="adm-modal-header" style="flex-shrink:0;gap:10px">
+          <span style="white-space:nowrap">${base} — ${todosDaBase.length} colaborador${todosDaBase.length===1?'':'es'}${filtrosAtivos ? ` · ${lista.length} em ${filtrosAtivos}` : ''}</span>
+          <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
+            <div style="position:relative">
+              <i class="ti ti-search" style="position:absolute;left:9px;top:50%;transform:translateY(-50%);font-size:14px;color:var(--text-muted)" aria-hidden="true"></i>
+              <input type="text" id="sal-busca-input" placeholder="Buscar por nome ou matrícula..." value="${busca}" oninput="salFiltrarModalPorBusca(this.value)" style="width:220px;padding:7px 10px 7px 30px;background:var(--bg-hover);border:1px solid var(--border-strong);border-radius:8px;color:var(--text-primary);font-size:12px">
+            </div>
+            <button onclick="salExportarBase()" aria-label="Exportar para Excel" title="Exportar para Excel"><i class="ti ti-file-spreadsheet" aria-hidden="true"></i></button>
+            <button onclick="salFecharModal()" aria-label="Fechar"><i class="ti ti-x" aria-hidden="true"></i></button>
+          </div>
         </div>
         <div class="adm-modal-body" style="flex:1;min-height:0;overflow:hidden">
           <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;flex-shrink:0">
