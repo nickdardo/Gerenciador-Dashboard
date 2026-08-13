@@ -90,8 +90,6 @@ function salRenderPainel(el) {
     return { base, media: vals.reduce((s,v)=>s+v,0)/vals.length, mediana: salMediana(vals), n: lista.length };
   }).sort((a,b) => b.media - a.media);
 
-  const baseAtiva = window._salBaseAtiva || null;
-
   el.innerHTML = `
     <div class="page-header"><div>
       <h1 class="page-title">Salários</h1>
@@ -114,7 +112,7 @@ function salRenderPainel(el) {
         <span>Base</span><span>Média</span><span>Mediana</span><span style="text-align:right">Pessoas</span>
       </div>
       ${ranking.map(r => `
-        <div onclick="salAbrirBase('${r.base}')" style="display:grid;grid-template-columns:70px 1fr 1fr 1fr;padding:8px 4px;font-size:13px;border-top:1px solid var(--border);align-items:center;cursor:pointer;border-radius:6px;background:${baseAtiva===r.base?'var(--bg-hover)':'transparent'}" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='${baseAtiva===r.base?'var(--bg-hover)':'transparent'}'">
+        <div onclick="salAbrirBase('${r.base}')" style="display:grid;grid-template-columns:70px 1fr 1fr 1fr;padding:8px 4px;font-size:13px;border-top:1px solid var(--border);align-items:center;cursor:pointer;border-radius:6px" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'">
           <span style="color:var(--blue);font-weight:600">${r.base}</span>
           <span>${salFmtReal(r.media)}</span>
           <span style="color:var(--text-muted)">${salFmtReal(r.mediana)}</span>
@@ -122,39 +120,105 @@ function salRenderPainel(el) {
         </div>`).join('')}
     </div>
 
-    <div id="sal-detalhe-base"></div>
+    <div id="sal-modal-root"></div>
   `;
-
-  if (baseAtiva) salRenderDetalheBase(baseAtiva);
 }
 
+// ── Modal de detalhe por base (igual o card de detalhe da Aderência) ──
 function salAbrirBase(base) {
-  window._salBaseAtiva = window._salBaseAtiva === base ? null : base;
-  salRenderPainel(document.getElementById('page-content'));
+  window._salModalBase = base;
+  window._salModalOrdemColuna = 'salario';
+  window._salModalOrdemDirecao = 'desc';
+  window._salModalFuncaoFiltro = null;
+  salRenderModalBase();
 }
 
-function salRenderDetalheBase(base) {
-  const container = document.getElementById('sal-detalhe-base');
-  if (!container) return;
-  const lista = (window._salLinhas || [])
-    .filter(r => r.base === base)
-    .map(r => ({ ...r, nome: window.eoColabs?.get(r.matricula)?.nome || '', funcao: window.eoColabs?.get(r.matricula)?.funcao || '—' }))
-    .sort((a,b) => b.salario - a.salario);
+function salFecharModal() {
+  window._salModalBase = null;
+  const root = document.getElementById('sal-modal-root');
+  if (root) root.innerHTML = '';
+}
 
-  container.innerHTML = `
-    <div class="hc-panel">
-      <div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:10px">${base} — ${lista.length} colaboradores</div>
-      <div style="display:grid;grid-template-columns:90px 1fr 1fr 100px;padding:6px 4px;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid var(--border)">
-        <span>Matrícula</span><span>Nome</span><span>Função</span><span style="text-align:right">Salário</span>
-      </div>
-      <div style="max-height:400px;overflow-y:auto">
-        ${lista.map(r => `
-          <div style="display:grid;grid-template-columns:90px 1fr 1fr 100px;padding:7px 4px;font-size:12px;border-bottom:1px solid var(--border)">
-            <span style="font-family:monospace;color:var(--text-secondary)">${r.matricula}</span>
-            <span style="color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.nome||'—'}</span>
-            <span style="color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.funcao}</span>
-            <span style="text-align:right;font-weight:600">${salFmtReal(r.salario)}</span>
-          </div>`).join('')}
+function salOrdenarModalPorColuna(coluna) {
+  if (window._salModalOrdemColuna === coluna) {
+    window._salModalOrdemDirecao = window._salModalOrdemDirecao === 'desc' ? 'asc' : 'desc';
+  } else {
+    window._salModalOrdemColuna = coluna;
+    window._salModalOrdemDirecao = coluna === 'salario' ? 'desc' : 'asc';
+  }
+  salRenderModalBase();
+}
+
+function salFiltrarModalPorFuncao(funcao) {
+  window._salModalFuncaoFiltro = funcao || null;
+  salRenderModalBase();
+}
+
+function salValorColuna(r, coluna) {
+  if (coluna === 'matricula') return r.matricula;
+  if (coluna === 'nome') return r.nome || '';
+  if (coluna === 'funcao') return r.funcao || '';
+  return r.salario;
+}
+
+function salRenderModalBase() {
+  const base = window._salModalBase;
+  const root = document.getElementById('sal-modal-root');
+  if (!base || !root) return;
+
+  const todosDaBase = (window._salLinhas || [])
+    .filter(r => r.base === base)
+    .map(r => ({ ...r, nome: window.eoColabs?.get(r.matricula)?.nome || '', funcao: window.eoColabs?.get(r.matricula)?.funcao || '—' }));
+
+  const funcoesDaBase = [...new Set(todosDaBase.map(r => r.funcao))].sort((a,b) => a.localeCompare(b));
+
+  const filtro = window._salModalFuncaoFiltro;
+  let lista = filtro ? todosDaBase.filter(r => r.funcao === filtro) : todosDaBase;
+
+  const coluna = window._salModalOrdemColuna || 'salario';
+  const direcao = window._salModalOrdemDirecao === 'asc' ? 1 : -1;
+  lista = [...lista].sort((a,b) => {
+    const va = salValorColuna(a, coluna), vb = salValorColuna(b, coluna);
+    if (typeof va === 'number') return direcao * (va - vb);
+    return direcao * String(va).localeCompare(String(vb), 'pt-BR');
+  });
+
+  const setaColuna = (c) => window._salModalOrdemColuna === c ? (window._salModalOrdemDirecao==='desc'?' ↓':' ↑') : '';
+  const corColuna = (c) => window._salModalOrdemColuna === c ? 'var(--blue)' : 'var(--text-muted)';
+  const th = (c, label, alinhamento) => `<span onclick="salOrdenarModalPorColuna('${c}')" style="cursor:pointer;user-select:none;color:${corColuna(c)}${alinhamento?';text-align:'+alinhamento:''}">${label}${setaColuna(c)}</span>`;
+
+  root.innerHTML = `
+    <div class="adm-overlay" onclick="if(event.target===this) salFecharModal()">
+      <div class="adm-modal" style="max-width:720px">
+        <div class="adm-modal-header">
+          <span>${base} — ${todosDaBase.length} colaborador${todosDaBase.length===1?'':'es'}${filtro ? ` · ${lista.length} em "${filtro}"` : ''}</span>
+          <button onclick="salFecharModal()" aria-label="Fechar"><i class="ti ti-x" aria-hidden="true"></i></button>
+        </div>
+        <div class="adm-modal-body">
+          <div style="display:flex;align-items:center;gap:10px">
+            <label style="font-size:11px;color:var(--text-muted)">Filtrar por função</label>
+            <select onchange="salFiltrarModalPorFuncao(this.value)" style="flex:1;max-width:280px;padding:6px 10px;background:var(--bg-hover);border:1px solid var(--border-strong);border-radius:8px;color:var(--text-primary);font-size:12px">
+              <option value="">Todas as funções (${funcoesDaBase.length})</option>
+              ${funcoesDaBase.map(f => `<option value="${f}" ${filtro===f?'selected':''}>${f}</option>`).join('')}
+            </select>
+          </div>
+
+          <div>
+            <div style="display:grid;grid-template-columns:90px 1fr 1fr 100px;padding:6px 4px;font-size:10px;text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid var(--border)">
+              ${th('matricula','Matrícula')}${th('nome','Nome')}${th('funcao','Função')}${th('salario','Salário','right')}
+            </div>
+            <div style="max-height:400px;overflow-y:auto">
+              ${lista.map(r => `
+                <div style="display:grid;grid-template-columns:90px 1fr 1fr 100px;padding:7px 4px;font-size:12px;border-bottom:1px solid var(--border)">
+                  <span style="font-family:monospace;color:var(--text-secondary)">${r.matricula}</span>
+                  <span style="color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.nome||'—'}</span>
+                  <span style="color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.funcao}</span>
+                  <span style="text-align:right;font-weight:600">${salFmtReal(r.salario)}</span>
+                </div>`).join('')}
+              ${!lista.length ? `<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:12px">Ninguém encontrado com esse filtro.</div>` : ''}
+            </div>
+          </div>
+        </div>
       </div>
     </div>`;
 }
