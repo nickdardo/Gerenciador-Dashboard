@@ -222,3 +222,12 @@ function salRenderModalBase() {
       </div>
     </div>`;
 }
+
+// Fecha o modal apertando Esc, além de clicar fora / no X. Registrado uma
+// vez só (não em toda renderização) pra não empilhar listener repetido.
+if (!window._salEscRegistrado) {
+  window._salEscRegistrado = true;
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && window._salModalBase) salFecharModal();
+  });
+}
