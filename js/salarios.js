@@ -282,7 +282,7 @@ function salRenderModalBase() {
               <i class="ti ti-search" style="position:absolute;left:9px;top:50%;transform:translateY(-50%);font-size:14px;color:var(--text-muted)" aria-hidden="true"></i>
               <input type="text" id="sal-busca-input" placeholder="Buscar por nome ou matrícula..." value="${busca}" oninput="salFiltrarModalPorBusca(this.value)" style="width:220px;padding:7px 10px 7px 30px;background:var(--bg-hover);border:1px solid var(--border-strong);border-radius:8px;color:var(--text-primary);font-size:12px">
             </div>
-            <button onclick="salExportarBase()" aria-label="Exportar para Excel" title="Exportar para Excel"><i class="ti ti-file-spreadsheet" aria-hidden="true"></i></button>
+            <button onclick="salExportarBase()" aria-label="Exportar para Excel" title="Exportar para Excel"><i class="ti ti-download" aria-hidden="true"></i></button>
             <button onclick="salFecharModal()" aria-label="Fechar"><i class="ti ti-x" aria-hidden="true"></i></button>
           </div>
         </div>
@@ -294,7 +294,7 @@ function salRenderModalBase() {
                 <span>${filtroFuncao || `Todas (${funcoesDaBase.length})`}</span>
                 <i class="ti ti-chevron-down" style="font-size:14px" aria-hidden="true"></i>
               </button>
-              <div id="sal-funcao-painel" style="display:none;position:absolute;top:calc(100% + 4px);left:56px;width:260px;max-height:260px;overflow-y:auto;background:#141b2c;border:1px solid var(--border-strong);border-radius:8px;padding:4px;z-index:30;box-shadow:var(--adh-shadow-card)">
+              <div id="sal-funcao-painel" style="display:none;position:absolute;top:calc(100% + 4px);left:56px;width:260px;max-height:260px;overflow-y:auto;background:var(--bg-surface);border:1px solid var(--border-strong);border-radius:8px;padding:4px;z-index:30;box-shadow:var(--adh-shadow-card)">
                 <div onclick="salFiltrarModalPorFuncao('')" style="padding:7px 10px;font-size:12px;border-radius:6px;cursor:pointer;color:${!filtroFuncao?'var(--blue)':'var(--text-primary)'};font-weight:${!filtroFuncao?'600':'400'}" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'">Todas as funções (${funcoesDaBase.length})</div>
                 ${funcoesDaBase.map(f => `<div onclick="salFiltrarModalPorFuncao('${f}')" style="padding:7px 10px;font-size:12px;border-radius:6px;cursor:pointer;color:${filtroFuncao===f?'var(--blue)':'var(--text-primary)'};font-weight:${filtroFuncao===f?'600':'400'}" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'">${f}</div>`).join('')}
               </div>
@@ -306,7 +306,7 @@ function salRenderModalBase() {
                 <span>${filtroCh ? filtroCh+'h' : `Todas (${chsDaBase.length})`}</span>
                 <i class="ti ti-chevron-down" style="font-size:14px" aria-hidden="true"></i>
               </button>
-              <div id="sal-ch-painel" style="display:none;position:absolute;top:calc(100% + 4px);left:90px;width:140px;max-height:260px;overflow-y:auto;background:#141b2c;border:1px solid var(--border-strong);border-radius:8px;padding:4px;z-index:30;box-shadow:var(--adh-shadow-card)">
+              <div id="sal-ch-painel" style="display:none;position:absolute;top:calc(100% + 4px);left:90px;width:140px;max-height:260px;overflow-y:auto;background:var(--bg-surface);border:1px solid var(--border-strong);border-radius:8px;padding:4px;z-index:30;box-shadow:var(--adh-shadow-card)">
                 <div onclick="salFiltrarModalPorCh('')" style="padding:7px 10px;font-size:12px;border-radius:6px;cursor:pointer;color:${!filtroCh?'var(--blue)':'var(--text-primary)'};font-weight:${!filtroCh?'600':'400'}" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'">Todas (${chsDaBase.length})</div>
                 ${chsDaBase.map(c => `<div onclick="salFiltrarModalPorCh(${c})" style="padding:7px 10px;font-size:12px;border-radius:6px;cursor:pointer;color:${filtroCh===c?'var(--blue)':'var(--text-primary)'};font-weight:${filtroCh===c?'600':'400'}" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'">${c}h</div>`).join('')}
               </div>
