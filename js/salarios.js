@@ -149,6 +149,11 @@ function salOrdenarModalPorColuna(coluna) {
   salRenderModalBase();
 }
 
+function salToggleFuncaoPainel() {
+  const painel = document.getElementById('sal-funcao-painel');
+  if (painel) painel.style.display = painel.style.display === 'none' ? 'block' : 'none';
+}
+
 function salFiltrarModalPorFuncao(funcao) {
   window._salModalFuncaoFiltro = funcao || null;
   salRenderModalBase();
@@ -195,12 +200,16 @@ function salRenderModalBase() {
           <button onclick="salFecharModal()" aria-label="Fechar"><i class="ti ti-x" aria-hidden="true"></i></button>
         </div>
         <div class="adm-modal-body">
-          <div style="display:flex;align-items:center;gap:10px">
+          <div style="display:flex;align-items:center;gap:10px;position:relative">
             <label style="font-size:11px;color:var(--text-muted)">Filtrar por função</label>
-            <select onchange="salFiltrarModalPorFuncao(this.value)" style="flex:1;max-width:320px;padding:7px 12px;background:var(--bg-hover);border:1px solid var(--border-strong);border-radius:8px;color:var(--text-primary);font-size:12px">
-              <option value="">Todas as funções (${funcoesDaBase.length})</option>
-              ${funcoesDaBase.map(f => `<option value="${f}" ${filtro===f?'selected':''}>${f}</option>`).join('')}
-            </select>
+            <button onclick="salToggleFuncaoPainel()" class="adh-refresh-btn" style="justify-content:space-between;flex:1;max-width:320px">
+              <span>${filtro || `Todas as funções (${funcoesDaBase.length})`}</span>
+              <i class="ti ti-chevron-down" style="font-size:14px" aria-hidden="true"></i>
+            </button>
+            <div id="sal-funcao-painel" style="display:none;position:absolute;top:calc(100% + 4px);left:88px;right:0;max-width:320px;max-height:260px;overflow-y:auto;background:#141b2c;border:1px solid var(--border-strong);border-radius:8px;padding:4px;z-index:30;box-shadow:var(--adh-shadow-card)">
+              <div onclick="salFiltrarModalPorFuncao('')" style="padding:7px 10px;font-size:12px;border-radius:6px;cursor:pointer;color:${!filtro?'var(--blue)':'var(--text-primary)'};font-weight:${!filtro?'600':'400'}" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'">Todas as funções (${funcoesDaBase.length})</div>
+              ${funcoesDaBase.map(f => `<div onclick="salFiltrarModalPorFuncao('${f}')" style="padding:7px 10px;font-size:12px;border-radius:6px;cursor:pointer;color:${filtro===f?'var(--blue)':'var(--text-primary)'};font-weight:${filtro===f?'600':'400'}" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='transparent'">${f}</div>`).join('')}
+            </div>
           </div>
 
           <div>
