@@ -229,7 +229,7 @@ function salRenderModalBase() {
           <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;flex-shrink:0">
             <div style="display:flex;align-items:center;gap:10px;position:relative">
               <label style="font-size:11px;color:var(--text-muted)">Função</label>
-              <button onclick="salToggleFuncaoPainel()" class="adh-refresh-btn" style="justify-content:space-between;min-width:230px">
+              <button id="sal-funcao-btn" onclick="salToggleFuncaoPainel()" class="adh-refresh-btn" style="justify-content:space-between;min-width:230px">
                 <span>${filtroFuncao || `Todas (${funcoesDaBase.length})`}</span>
                 <i class="ti ti-chevron-down" style="font-size:14px" aria-hidden="true"></i>
               </button>
@@ -241,7 +241,7 @@ function salRenderModalBase() {
 
             <div style="display:flex;align-items:center;gap:10px;position:relative">
               <label style="font-size:11px;color:var(--text-muted)">Carga horária</label>
-              <button onclick="salToggleChPainel()" class="adh-refresh-btn" style="justify-content:space-between;min-width:150px">
+              <button id="sal-ch-btn" onclick="salToggleChPainel()" class="adh-refresh-btn" style="justify-content:space-between;min-width:150px">
                 <span>${filtroCh ? filtroCh+'h' : `Todas (${chsDaBase.length})`}</span>
                 <i class="ti ti-chevron-down" style="font-size:14px" aria-hidden="true"></i>
               </button>
@@ -279,5 +279,24 @@ if (!window._salEscRegistrado) {
   window._salEscRegistrado = true;
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && window._salModalBase) salFecharModal();
+  });
+}
+
+// Fecha o dropdown de Função/Carga horária ao clicar em qualquer lugar
+// fora dele (fora do painel e fora do próprio botão que abre) — antes só
+// fechava clicando de novo no botão.
+if (!window._salClickForaRegistrado) {
+  window._salClickForaRegistrado = true;
+  document.addEventListener('click', (e) => {
+    const funcaoPainel = document.getElementById('sal-funcao-painel');
+    const funcaoBtn = document.getElementById('sal-funcao-btn');
+    if (funcaoPainel && funcaoPainel.style.display !== 'none' && !funcaoPainel.contains(e.target) && !(funcaoBtn && funcaoBtn.contains(e.target))) {
+      funcaoPainel.style.display = 'none';
+    }
+    const chPainel = document.getElementById('sal-ch-painel');
+    const chBtn = document.getElementById('sal-ch-btn');
+    if (chPainel && chPainel.style.display !== 'none' && !chPainel.contains(e.target) && !(chBtn && chBtn.contains(e.target))) {
+      chPainel.style.display = 'none';
+    }
   });
 }
