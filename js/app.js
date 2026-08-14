@@ -14,7 +14,6 @@ const NAV_ITEMS = [
   { id: 'gerador',    icon: 'settings',   label: 'Gerador',        i18nKey: 'nav.gerador',    roles: ['admin','gerente','coordenador','supervisor','lideranca'] },
   { id: 'comparador', icon: 'bar-chart',  label: 'Comparador',     i18nKey: 'nav.comparador', roles: ['admin','gerente','coordenador','supervisor'] },
   { id: 'admin',      icon: 'shield',     label: 'Admin',          i18nKey: 'nav.admin',      roles: ['admin'] },
-  { id: 'salarios',   icon: 'currency-real', label: 'Salários',    i18nKey: 'nav.salarios',   roles: ['admin'] },
 ];
 
 let currentUserProfile = null;
@@ -57,7 +56,7 @@ async function appInit(user) {
 
   if (!_appInitialized) {
     _appInitialized = true;
-    const paginasValidas = ['escala','gerador','comparador','aderencia','headcount','admin','salarios'];
+    const paginasValidas = ['escala','gerador','comparador','aderencia','headcount','admin'];
     let ultimaPagina = null;
     try { ultimaPagina = localStorage.getItem('gde_ultima_pagina'); } catch(_) {}
     navigateTo(paginasValidas.includes(ultimaPagina) ? ultimaPagina : 'escala');
@@ -174,7 +173,6 @@ function navigateTo(pageId) {
     case 'aderencia':  pageAderencia(content);  break;
     case 'headcount':  pageHeadcount(content);  break;
     case 'admin':      pageAdmin(content);      break;
-    case 'salarios':   pageSalarios(content);   break;
     default: content.innerHTML = '<div class="page-empty">Em breve</div>';
   }
 }

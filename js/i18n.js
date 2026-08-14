@@ -41,7 +41,6 @@ const I18N = {
     'nav.gerador': 'Gerador',
     'nav.comparador': 'Comparador',
     'nav.admin': 'Admin',
-    'nav.salarios': 'Salários',
     'sb.modoClaro': 'Modo claro',
     'sb.modoEscuro': 'Modo escuro',
     'sb.sair': 'Sair',
@@ -78,7 +77,6 @@ const I18N = {
     'nav.gerador': 'Generator',
     'nav.comparador': 'Comparator',
     'nav.admin': 'Admin',
-    'nav.salarios': 'Salaries',
 
     'sb.atualizarDados': 'Refresh data',
     'sb.modoClaro': 'Light mode',
