@@ -18,6 +18,8 @@ function escalaIcone(nome) {
     layers: `<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>`,
     lock: `<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>`,
     unlock: `<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/>`,
+    columns: `<rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="18" rx="1"/>`,
+    moreHorizontal: `<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>`,
   };
   return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px" aria-hidden="true">${icones[nome]||''}</svg>`;
 }
@@ -92,6 +94,11 @@ async function pageEscala(el) {
     let recolhidoLocal = null;
     try { recolhidoLocal = localStorage.getItem('gde_escala_blocos_recolhidos'); } catch (_) {}
     window._escalaBlocosRecolhidos = recolhidoLocal === '1';
+  }
+  if (window._escalaColunasSecundarias === undefined) {
+    let secLocal = null;
+    try { secLocal = localStorage.getItem('gde_escala_colunas_secundarias'); } catch (_) {}
+    window._escalaColunasSecundarias = secLocal !== '0'; // mostrado por padrão, só esconde se a pessoa já escolheu esconder antes
   }
 
   await escalaRenderGrade(el);
@@ -716,20 +723,27 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
         <div style="position:relative;flex:1 1 60px;min-width:60px">
           <input id="escala-busca" class="adh-search-input" ${dis} style="width:100%;box-sizing:border-box;padding:9px 12px;background:var(--bg-hover);border:1px solid var(--border-strong);border-radius:8px;color:var(--text-primary)"
             oninput="escalaBuscarColab(this.value)" placeholder="Buscar por matrícula ou nome pra adicionar...">
-          <div id="escala-busca-resultados" style="position:absolute;top:calc(100% + 4px);left:0;right:0;background:#141b2c;border:1px solid var(--border-strong);border-radius:8px;z-index:20;display:none;max-height:220px;overflow-y:auto;box-shadow:var(--adh-shadow-card)"></div>
+          <div id="escala-busca-resultados" style="position:absolute;top:calc(100% + 4px);left:0;right:0;background:var(--bg-surface);border:1px solid var(--border-strong);border-radius:8px;z-index:20;display:none;max-height:220px;overflow-y:auto;box-shadow:var(--adh-shadow-card)"></div>
         </div>
         <button class="adh-refresh-btn" ${dis} style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600" onclick="escalaPreencherTodoStaff()">${escalaIcone('users')}Preencher com Staff</button>
         <button class="adh-refresh-btn" ${dis} style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600" onclick="escalaGerarFolgasAuto()">${escalaIcone('zap')}Gerar folgas automáticas</button>
-        <button class="adh-refresh-btn" ${dis} style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600" onclick="escalaPreencherHorarioMesAnterior()">${escalaIcone('calclock')}Horário do mês anterior</button>
-        <button class="adh-refresh-btn" ${dis} onclick="escalaAdicionarFeriado()">${escalaIcone('calendarPlus')}+ Feriado dessa base</button>
-        <button class="adh-refresh-btn" onclick="escalaBaixarModeloCursos()">${escalaIcone('download')}Modelo de Cursos</button>
-        <button class="adh-refresh-btn" ${dis} onclick="document.getElementById('escala-cursos-input').click()">${escalaIcone('upload')}Importar Cursos</button>
-        <input type="file" id="escala-cursos-input" ${dis} accept=".xlsx,.xls" style="display:none" onchange="escalaImportarCursos(this)">
-        <button class="adh-refresh-btn" ${dis} style="color:#fc8181" onclick="escalaLimparStatus()">${escalaIcone('trash')}Limpar folgas/status</button>
-        <button class="adh-refresh-btn" ${dis} style="color:#fc8181" onclick="escalaLimparColaboradores()">${escalaIcone('trash')}Limpar colaboradores</button>
-        <button id="escala-btn-remover-sel" class="adh-refresh-btn" ${dis} style="color:#fc8181;display:none" onclick="escalaRemoverSelecionados()">${escalaIcone('trash')}Remover selecionados (0)</button>
-        <button class="adh-refresh-btn" ${dis} onclick="escalaLimparOrdemManual()" title="Volta a ordenar sozinho por função + horário de entrada">${escalaIcone('sort')}Ordenar automático</button>
         <button class="adh-refresh-btn" style="${window._escalaAgruparPorTurno?'background:var(--blue);color:#0b0f1a;border:none;font-weight:600':''}" onclick="escalaToggleAgruparTurno()" title="Agrupa a lista por grupo (função) e depois por setor, com contagem por bloco">${escalaIcone('layers')}Agrupar por grupo/setor</button>
+        <button id="escala-btn-colunas-sec" class="adh-refresh-btn" style="${window._escalaColunasSecundarias===false?'background:var(--blue);color:#0b0f1a;border:none;font-weight:600':''}" onclick="escalaToggleColunasSecundarias()" title="Esconde Setor/Turno/Bloco/Intervalos — sobra mais espaço pra grade de dias">${escalaIcone('columns')}${window._escalaColunasSecundarias===false?'Mostrar colunas':'Colunas essenciais'}</button>
+        <button id="escala-btn-remover-sel" class="adh-refresh-btn" ${dis} style="color:#fc8181;display:none" onclick="escalaRemoverSelecionados()">${escalaIcone('trash')}Remover selecionados (0)</button>
+        <div style="position:relative">
+          <button class="adh-refresh-btn" onclick="escalaToggleMaisAcoes()">${escalaIcone('moreHorizontal')}Mais ações</button>
+          <div id="escala-mais-acoes-painel" style="display:none;position:absolute;top:calc(100% + 4px);right:0;background:var(--bg-surface);border:1px solid var(--border-strong);border-radius:8px;padding:6px;z-index:30;min-width:230px;box-shadow:var(--adh-shadow-card)">
+            <button class="adh-refresh-btn" ${dis} style="width:100%;justify-content:flex-start;margin-bottom:4px" onclick="escalaPreencherHorarioMesAnterior()">${escalaIcone('calclock')}Horário do mês anterior</button>
+            <button class="adh-refresh-btn" ${dis} style="width:100%;justify-content:flex-start;margin-bottom:4px" onclick="escalaAdicionarFeriado()">${escalaIcone('calendarPlus')}+ Feriado dessa base</button>
+            <button class="adh-refresh-btn" style="width:100%;justify-content:flex-start;margin-bottom:4px" onclick="escalaBaixarModeloCursos()">${escalaIcone('download')}Modelo de Cursos</button>
+            <button class="adh-refresh-btn" ${dis} style="width:100%;justify-content:flex-start;margin-bottom:4px" onclick="document.getElementById('escala-cursos-input').click()">${escalaIcone('upload')}Importar Cursos</button>
+            <button class="adh-refresh-btn" ${dis} style="width:100%;justify-content:flex-start;margin-bottom:4px" onclick="escalaLimparOrdemManual()" title="Volta a ordenar sozinho por função + horário de entrada">${escalaIcone('sort')}Ordenar automático</button>
+            <div style="border-top:1px solid var(--border);margin:4px 0"></div>
+            <button class="adh-refresh-btn" ${dis} style="width:100%;justify-content:flex-start;margin-bottom:4px;color:#fc8181" onclick="escalaLimparStatus()">${escalaIcone('trash')}Limpar folgas/status</button>
+            <button class="adh-refresh-btn" ${dis} style="width:100%;justify-content:flex-start;color:#fc8181" onclick="escalaLimparColaboradores()">${escalaIcone('trash')}Limpar colaboradores</button>
+          </div>
+        </div>
+        <input type="file" id="escala-cursos-input" ${dis} accept=".xlsx,.xls" style="display:none" onchange="escalaImportarCursos(this)">
       </div>
       <div id="escala-grupo-organizacao" style="display:flex;gap:16px;align-items:flex-end;flex-wrap:nowrap;overflow-x:auto;margin-top:10px;padding-bottom:2px">
         <div style="position:relative">
@@ -1066,6 +1080,38 @@ function escalaSetBlocosRecolhidos(valor) {
   escalaGradeAtualiza();
 }
 
+// Esconde/mostra as colunas Setor/Turno/Bloco/Intervalos — úteis pra
+// configurar uma vez, mas não pra olhar no dia a dia. Escondidas, sobra
+// mais espaço pra grade de dias (que é o que se usa o tempo todo).
+function escalaToggleColunasSecundarias() {
+  window._escalaColunasSecundarias = !window._escalaColunasSecundarias;
+  try { localStorage.setItem('gde_escala_colunas_secundarias', window._escalaColunasSecundarias ? '1' : '0'); } catch (_) {}
+  escalaGradeAtualiza();
+  const btn = document.getElementById('escala-btn-colunas-sec');
+  if (btn) {
+    btn.style.background = window._escalaColunasSecundarias ? '' : 'var(--blue)';
+    btn.style.color = window._escalaColunasSecundarias ? '' : '#0b0f1a';
+  }
+}
+
+function escalaToggleMaisAcoes() {
+  const painel = document.getElementById('escala-mais-acoes-painel');
+  if (painel) painel.style.display = painel.style.display === 'none' ? 'block' : 'none';
+}
+
+// Fecha o menu "Mais ações" ao clicar em qualquer lugar fora dele —
+// registrado uma vez só (não em toda renderização) pra não empilhar
+// listener repetido a cada vez que a grade é redesenhada.
+if (!window._escalaMaisAcoesClickForaRegistrado) {
+  window._escalaMaisAcoesClickForaRegistrado = true;
+  document.addEventListener('click', (e) => {
+    const painel = document.getElementById('escala-mais-acoes-painel');
+    if (!painel || painel.style.display === 'none') return;
+    const wrap = painel.parentElement;
+    if (wrap && !wrap.contains(e.target)) painel.style.display = 'none';
+  });
+}
+
 // Salva o turno digitado/selecionado pro colaborador — igual qualquer outro
 // campo manual da escala (update simples, nunca upsert, pra não sobrescrever
 // o resto da linha que já existe).
@@ -1116,7 +1162,7 @@ async function escalaEditarBloco(matricula, valorSelecionado) {
 // Linha de um colaborador — extraída pra função própria porque é usada tanto
 // na lista simples quanto dentro de cada bloco de função/turno agrupado.
 function escalaLinhaColabHTML(c, ci, ctx) {
-  const { ano, mesNum, diasNoMes, leftMat, leftNome, BORDA, turnosExistentes, blocosExistentes } = ctx;
+  const { ano, mesNum, diasNoMes, leftMat, leftNome, BORDA, turnosExistentes, blocosExistentes, secOn } = ctx;
   const travada = !!window._escalaTravada;
   const dis = travada ? 'disabled' : '';
   const info = window.eoColabs?.get(c.matricula);
@@ -1142,25 +1188,29 @@ function escalaLinhaColabHTML(c, ci, ctx) {
   </td>`;
   html += `<td style="padding:2px 10px;position:sticky;left:${leftMat}px;background:inherit;border:${BORDA}"><input type="text" ${dis} value="${c.matricula}" onchange="escalaEditarMatricula('${c.matricula}',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-primary);font-weight:500;text-overflow:ellipsis;padding:6px 0" title="Editar matrícula"></td>`;
   html += `<td style="padding:8px 10px;color:var(--text-primary);font-weight:500;position:sticky;left:${leftNome}px;background:inherit;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:${BORDA}" title="${c.nome||''}">${c.nome||''}</td>`;
-  html += `<td style="padding:8px 10px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;border:${BORDA}">${setor}</td>`;
-  html += `<td style="padding:2px 6px;border:${BORDA}">
-    <select ${dis} onchange="escalaEditarTurno('${c.matricula}', this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-secondary);font-size:11px;padding:4px 0;cursor:pointer">
-      <option value="">—</option>
-      ${turnosExistentes.map(t => `<option value="${escalaEscapeAttr(t)}" ${c.turno===t?'selected':''}>${escalaEscapeAttr(t)}</option>`).join('')}
-      <option value="__novo__">+ novo turno...</option>
-    </select>
-  </td>`;
-  html += `<td style="padding:2px 6px;border:${BORDA}">
-    <select ${dis} onchange="escalaEditarBloco('${c.matricula}', this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-secondary);font-size:11px;padding:4px 0;cursor:pointer">
-      <option value="">—</option>
-      ${blocosExistentes.map(b => `<option value="${escalaEscapeAttr(b)}" ${c.bloco_horario===b?'selected':''}>${escalaEscapeAttr(b)}</option>`).join('')}
-      <option value="__novo__">+ novo bloco...</option>
-    </select>
-  </td>`;
+  if (secOn) {
+    html += `<td style="padding:8px 10px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;border:${BORDA}">${setor}</td>`;
+    html += `<td style="padding:2px 6px;border:${BORDA}">
+      <select ${dis} onchange="escalaEditarTurno('${c.matricula}', this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-secondary);font-size:11px;padding:4px 0;cursor:pointer">
+        <option value="">—</option>
+        ${turnosExistentes.map(t => `<option value="${escalaEscapeAttr(t)}" ${c.turno===t?'selected':''}>${escalaEscapeAttr(t)}</option>`).join('')}
+        <option value="__novo__">+ novo turno...</option>
+      </select>
+    </td>`;
+    html += `<td style="padding:2px 6px;border:${BORDA}">
+      <select ${dis} onchange="escalaEditarBloco('${c.matricula}', this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-secondary);font-size:11px;padding:4px 0;cursor:pointer">
+        <option value="">—</option>
+        ${blocosExistentes.map(b => `<option value="${escalaEscapeAttr(b)}" ${c.bloco_horario===b?'selected':''}>${escalaEscapeAttr(b)}</option>`).join('')}
+        <option value="__novo__">+ novo bloco...</option>
+      </select>
+    </td>`;
+  }
   html += `<td style="padding:8px 10px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:${BORDA}" title="${funcao}">${funcao}</td>`;
   html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" ${dis} value="${entrada}" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" onchange="escalaEditarHorario('${c.matricula}','entrada',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-secondary);text-align:center;font-size:12px;padding:4px"></td>`;
-  html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" ${dis} value="${intInicio}" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" onchange="escalaEditarHorario('${c.matricula}','intervalo_inicio',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-muted);text-align:center;font-size:12px;padding:4px" title="Início do intervalo"></td>`;
-  html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" ${dis} value="${intFim}" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" onchange="escalaEditarHorario('${c.matricula}','intervalo_fim',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-muted);text-align:center;font-size:12px;padding:4px" title="Fim do intervalo"></td>`;
+  if (secOn) {
+    html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" ${dis} value="${intInicio}" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" onchange="escalaEditarHorario('${c.matricula}','intervalo_inicio',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-muted);text-align:center;font-size:12px;padding:4px" title="Início do intervalo"></td>`;
+    html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" ${dis} value="${intFim}" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" onchange="escalaEditarHorario('${c.matricula}','intervalo_fim',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-muted);text-align:center;font-size:12px;padding:4px" title="Fim do intervalo"></td>`;
+  }
   html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" ${dis} value="${saida}" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" onchange="escalaEditarHorario('${c.matricula}','saida',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-secondary);text-align:center;font-size:12px;padding:4px"></td>`;
   html += `<td style="text-align:center;color:var(--text-secondary);border:${BORDA}">${ch}</td>`;
   conteudo.forEach((item, i) => {
@@ -1257,7 +1307,8 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     });
   }
   const temOrdemManual = colabs.some(c => c.ordem_manual != null);
-  const NCOLS_FIXAS = 11; // Remover, Matrícula, Nome, Setor, Turno, Função, Entrada, Intervalo início, Intervalo fim, Saída, CH
+  const secOn = window._escalaColunasSecundarias !== false; // Setor/Turno/Bloco/Intervalos — ocultáveis
+  const NCOLS_FIXAS = secOn ? 11 : 6; // Remover, Matrícula, Nome, [Setor, Turno, Bloco], Função, Entrada, [Interv. início, Interv. fim], Saída, CH
   const NCOLS = NCOLS_FIXAS + diasNoMes;
   const BORDA = '1px solid var(--border-strong)';
   const turnosExistentes = [...new Set(colabs.map(c => c.turno).filter(Boolean))].sort((a,b) => a.localeCompare(b));
@@ -1272,24 +1323,28 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   // espaço disponível (table-layout:fixed distribui esse espaço extra
   // proporcionalmente entre todas as colunas); em telas estreitas, mantém a
   // largura mínima exata e rola horizontalmente.
-  const larguraFixas = LARG.remover + LARG.mat + LARG.nome + LARG.setor + LARG.turno + LARG.funcao + LARG.entrada + LARG.intInicio + LARG.intFim + LARG.saida + LARG.ch;
+  const larguraFixas = LARG.remover + LARG.mat + LARG.nome + (secOn ? LARG.setor + LARG.turno : 0) + LARG.funcao + LARG.entrada + (secOn ? LARG.intInicio + LARG.intFim : 0) + LARG.saida + LARG.ch;
   const larguraTotal = larguraFixas + LARG.dia * diasNoMes;
 
   let html = `<table style="border-collapse:collapse;font-size:13px;width:max(100%, ${larguraTotal}px);table-layout:fixed"><colgroup>
-    <col style="width:${LARG.remover}px"><col style="width:${LARG.mat}px"><col style="width:${LARG.nome}px"><col style="width:${LARG.setor}px"><col style="width:${LARG.turno}px"><col style="width:${LARG.funcao}px">
-    <col style="width:${LARG.entrada}px"><col style="width:${LARG.intInicio}px"><col style="width:${LARG.intFim}px"><col style="width:${LARG.saida}px"><col style="width:${LARG.ch}px">
+    <col style="width:${LARG.remover}px"><col style="width:${LARG.mat}px"><col style="width:${LARG.nome}px">${secOn?`<col style="width:${LARG.setor}px"><col style="width:${LARG.turno}px">`:''}<col style="width:${LARG.funcao}px">
+    <col style="width:${LARG.entrada}px">${secOn?`<col style="width:${LARG.intInicio}px"><col style="width:${LARG.intFim}px">`:''}<col style="width:${LARG.saida}px"><col style="width:${LARG.ch}px">
     ${Array(diasNoMes).fill(`<col style="width:${LARG.dia}px">`).join('')}
   </colgroup><thead><tr>`;
   html += `<th style="text-align:center;padding:8px 2px;position:sticky;top:0;left:0;background:var(--bg-surface);z-index:3;border:${BORDA}"><input type="checkbox" onchange="escalaSelecionarTodos(this.checked)" title="Selecionar todos" style="margin:0"></th>`;
   html += `<th style="text-align:left;padding:8px 10px;color:${window._escalaOrdemColuna==='matricula'?'var(--blue)':'var(--text-muted)'};font-size:11px;text-transform:uppercase;position:sticky;top:0;left:${leftMat}px;background:var(--bg-surface);z-index:3;border:${BORDA};cursor:pointer;user-select:none" onclick="escalaOrdenarPorColuna('matricula')" title="Clique pra ordenar por matrícula">Matrícula${window._escalaOrdemColuna==='matricula'?(window._escalaOrdemDirecao==='desc'?' ↓':' ↑'):''}</th>`;
   html += `<th style="text-align:left;padding:8px 10px;color:${window._escalaOrdemColuna==='nome'?'var(--blue)':'var(--text-muted)'};font-size:11px;text-transform:uppercase;position:sticky;top:0;left:${leftNome}px;background:var(--bg-surface);z-index:3;border:${BORDA};cursor:pointer;user-select:none" onclick="escalaOrdenarPorColuna('nome')" title="Clique pra ordenar por nome">Nome${window._escalaOrdemColuna==='nome'?(window._escalaOrdemDirecao==='desc'?' ↓':' ↑'):''}</th>`;
-  html += `<th style="text-align:left;padding:8px 10px;color:${window._escalaOrdemColuna==='turno'?'var(--blue)':'var(--text-muted)'};font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA};cursor:pointer;user-select:none" onclick="escalaOrdenarPorColuna('turno')" title="Calculado sozinho pelo horário de entrada — clique pra ordenar">Turno${window._escalaOrdemColuna==='turno'?(window._escalaOrdemDirecao==='desc'?' ↓':' ↑'):''}</th>`;
-  html += `<th style="text-align:left;padding:8px 10px;color:${window._escalaOrdemColuna==='setor'?'var(--blue)':'var(--text-muted)'};font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA};cursor:pointer;user-select:none" onclick="escalaOrdenarPorColuna('setor')" title="Campo manual, particular de cada base — clique pra ordenar">Setor${window._escalaOrdemColuna==='setor'?(window._escalaOrdemDirecao==='desc'?' ↓':' ↑'):''}</th>`;
-  html += `<th style="text-align:left;padding:8px 10px;color:${window._escalaOrdemColuna==='bloco'?'var(--blue)':'var(--text-muted)'};font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA};cursor:pointer;user-select:none" onclick="escalaOrdenarPorColuna('bloco')" title="Campo manual — junta quem entra em horários diferentes mas é o mesmo bloco (ex.: 23:00 com 00:00) — clique pra ordenar">Bloco${window._escalaOrdemColuna==='bloco'?(window._escalaOrdemDirecao==='desc'?' ↓':' ↑'):''}</th>`;
+  if (secOn) {
+    html += `<th style="text-align:left;padding:8px 10px;color:${window._escalaOrdemColuna==='turno'?'var(--blue)':'var(--text-muted)'};font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA};cursor:pointer;user-select:none" onclick="escalaOrdenarPorColuna('turno')" title="Calculado sozinho pelo horário de entrada — clique pra ordenar">Turno${window._escalaOrdemColuna==='turno'?(window._escalaOrdemDirecao==='desc'?' ↓':' ↑'):''}</th>`;
+    html += `<th style="text-align:left;padding:8px 10px;color:${window._escalaOrdemColuna==='setor'?'var(--blue)':'var(--text-muted)'};font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA};cursor:pointer;user-select:none" onclick="escalaOrdenarPorColuna('setor')" title="Campo manual, particular de cada base — clique pra ordenar">Setor${window._escalaOrdemColuna==='setor'?(window._escalaOrdemDirecao==='desc'?' ↓':' ↑'):''}</th>`;
+    html += `<th style="text-align:left;padding:8px 10px;color:${window._escalaOrdemColuna==='bloco'?'var(--blue)':'var(--text-muted)'};font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA};cursor:pointer;user-select:none" onclick="escalaOrdenarPorColuna('bloco')" title="Campo manual — junta quem entra em horários diferentes mas é o mesmo bloco (ex.: 23:00 com 00:00) — clique pra ordenar">Bloco${window._escalaOrdemColuna==='bloco'?(window._escalaOrdemDirecao==='desc'?' ↓':' ↑'):''}</th>`;
+  }
   html += `<th style="text-align:left;padding:8px 10px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA}">Função</th>`;
   html += `<th style="text-align:center;padding:8px 4px;color:${window._escalaOrdemColuna==='entrada'?'var(--blue)':'var(--text-muted)'};font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA};cursor:pointer;user-select:none" onclick="escalaOrdenarPorColuna('entrada')" title="Clique pra ordenar por horário de entrada">Entrada${window._escalaOrdemColuna==='entrada'?(window._escalaOrdemDirecao==='desc'?' ↓':' ↑'):''}</th>`;
-  html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:10px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA}" title="Início do intervalo">Interv. ↓</th>`;
-  html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:10px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA}" title="Fim do intervalo">Interv. ↑</th>`;
+  if (secOn) {
+    html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:10px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA}" title="Início do intervalo">Interv. ↓</th>`;
+    html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:10px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA}" title="Fim do intervalo">Interv. ↑</th>`;
+  }
   html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA}">Saída</th>`;
   html += `<th style="text-align:center;padding:8px 4px;color:var(--text-muted);font-size:11px;text-transform:uppercase;position:sticky;top:0;background:var(--bg-surface);z-index:2;border:${BORDA}">CH</th>`;
   for (let d = 1; d <= diasNoMes; d++) {
@@ -1331,7 +1386,7 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     html += `<tr><td colspan="${NCOLS}" style="padding:24px;text-align:center;color:var(--text-muted);font-size:12.5px;border:${BORDA}">Nenhum colaborador ativo encontrado pra essa base+mês — busque por matrícula ou nome acima.</td></tr>`;
   }
 
-  const ctxLinha = { ano, mesNum, diasNoMes, leftMat, leftNome, BORDA, turnosExistentes, blocosExistentes };
+  const ctxLinha = { ano, mesNum, diasNoMes, leftMat, leftNome, BORDA, turnosExistentes, blocosExistentes, secOn };
 
   if (!window._escalaAgruparPorTurno) {
     // Lista simples (comportamento de sempre) — ordem manual de arrastar
