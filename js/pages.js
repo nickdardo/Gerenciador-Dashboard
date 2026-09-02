@@ -795,19 +795,6 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
     </div>
   `;
   escalaAjustarStickyOffset();
-  escalaAjustarLarguraDias(ano, mesNum, diasNoMes);
-
-  // Recalcula a largura dos dias se a janela for redimensionada depois
-  // (não só no carregamento) — registrado uma vez só.
-  if (!window._escalaResizeRegistrado) {
-    window._escalaResizeRegistrado = true;
-    window.addEventListener('resize', () => {
-      if (!window._escalaMes) return;
-      const [a, m] = window._escalaMes.split('-').map(Number);
-      const dias = new Date(a, m, 0).getDate();
-      escalaAjustarLarguraDias(a, m, dias);
-    });
-  }
 }
 
 function escalaGradeAtualiza() {
@@ -821,30 +808,6 @@ function escalaGradeAtualiza() {
     contador.textContent = `${n} colaborador${n===1?'':'es'}`;
   }
   escalaAjustarStickyOffset();
-  escalaAjustarLarguraDias(ano, mesNum, diasNoMes);
-}
-
-// Mede a largura REAL do painel na tela (depois de já ter renderizado uma
-// vez com a largura mínima de dia) e, se sobrar espaço, recalcula a
-// largura de cada coluna de dia pra ocupar esse espaço igualmente — em vez
-// de deixar o navegador "esticar" sozinho, que em alguns tamanhos de tela
-// jogava toda a sobra na ÚLTIMA coluna só (bug visual real, não só estética).
-// Nunca deixa menor que o mínimo (30px) — telas estreitas continuam
-// rolando horizontalmente normalmente.
-function escalaAjustarLarguraDias(ano, mesNum, diasNoMes) {
-  const wrap = document.getElementById('escala-grade-wrap');
-  if (!wrap || !window._escalaUltimaLarguraFixas) return;
-  const larguraDisponivel = wrap.clientWidth;
-  if (!larguraDisponivel) return;
-
-  const larguraParaDias = larguraDisponivel - window._escalaUltimaLarguraFixas;
-  const larguraIdeal = Math.floor(larguraParaDias / diasNoMes);
-  const LARG_MIN = 30;
-
-  if (larguraIdeal > LARG_MIN) {
-    wrap.innerHTML = escalaGradeTabelaHTML(ano, mesNum, diasNoMes, larguraIdeal);
-    escalaAjustarStickyOffset();
-  }
 }
 
 // Mede a altura de verdade do cabeçalho (varia um pouco conforme zoom/fonte
@@ -1326,7 +1289,7 @@ function escalaBlocoSubtotalHTML(label, colabsDoBloco, ano, mesNum, diasNoMes, N
   </tr>`;
 }
 
-function escalaGradeTabelaHTML(ano, mesNum, diasNoMes, larguraDiaOverride) {
+function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   const entradaDoColab = (c) => escalaEntradaEfetivaDoColab(c, ano, mesNum, diasNoMes);
 
   // Valor de cada colaborador pra uma coluna clicável específica — mesmo
@@ -1377,22 +1340,18 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes, larguraDiaOverride) {
   const turnosExistentes = [...new Set(colabs.map(c => c.turno).filter(Boolean))].sort((a,b) => a.localeCompare(b));
   const blocosExistentes = [...new Set(colabs.map(c => c.bloco_horario).filter(Boolean))].sort((a,b) => a.localeCompare(b));
 
-  const LARG = { remover:36, mat:80, nome:210, setor:100, turno:110, funcao:190, entrada:60, intInicio:60, intFim:60, saida:60, ch:46, dia:larguraDiaOverride || 30 };
+  const LARG = { remover:36, mat:80, nome:210, setor:100, turno:110, funcao:190, entrada:60, intInicio:60, intFim:60, saida:60, ch:46, dia:38 };
   const leftMat  = LARG.remover;
   const leftNome = LARG.remover + LARG.mat;
   // Largura total exata (colunas fixas + dias, todos com pixel fixo — nada
   // de calc() por coluna, que estava causando erro de arredondamento e
-  // cortando o último dia). A largura da coluna de dia (LARG.dia) vem
-  // calculada de fora (escalaAjustarLarguraDias, depois de medir o espaço
-  // real disponível) — NÃO usamos mais "width:max(100%,...)" pra deixar o
-  // navegador esticar sozinho: em telas largas isso jogava toda a sobra na
-  // ÚLTIMA coluna em vez de distribuir entre os dias (bug real do
-  // table-layout:fixed em algumas larguras). Calculando aqui em JS e
-  // aplicando o MESMO valor em toda coluna de dia, o resultado é sempre
-  // uniforme.
+  // cortando o último dia). Largura de dia FIXA (38px, mais generosa que
+  // antes) — chegamos a tentar calcular isso dinamicamente medindo o
+  // espaço disponível na tela, mas essa abordagem causou um bug visual real
+  // (rendering quebrado no fim do mês); voltamos pro simples e confiável:
+  // tamanho fixo pra todo mundo, rola horizontalmente se não couber tudo.
   const larguraFixas = LARG.remover + LARG.mat + LARG.nome + (secOn ? LARG.setor + LARG.turno : 0) + LARG.funcao + LARG.entrada + (secOn ? LARG.intInicio + LARG.intFim : 0) + LARG.saida + LARG.ch;
   const larguraTotal = larguraFixas + LARG.dia * diasNoMes;
-  window._escalaUltimaLarguraFixas = larguraFixas; // lido por escalaAjustarLarguraDias, pra não duplicar essa soma em dois lugares
 
   let html = `<table style="border-collapse:collapse;font-size:13px;width:${larguraTotal}px;table-layout:fixed"><colgroup>
     <col style="width:${LARG.remover}px"><col style="width:${LARG.mat}px"><col style="width:${LARG.nome}px">${secOn?`<col style="width:${LARG.setor}px"><col style="width:${LARG.turno}px">`:''}<col style="width:${LARG.funcao}px">
