@@ -785,7 +785,7 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#fb923c;margin-right:5px"></span>CH · Folga compensa (tecla C)</span>
         <span style="color:var(--text-muted)">clique numa célula vazia ou de trabalho pra marcar F/J/K/C/A · fim de semana e feriado ficam destacados nas colunas · <span style="color:#f6ad55">laranja</span>/<span style="color:#fc8181">vermelho</span> na linha "Trabalhando no dia" = bem abaixo da média do mês</span>
       </div>
-      <div id="escala-grade-wrap" class="${window._escalaDensidade==='compacto'?'escala-compacto':''}" style="flex:1;min-height:120px;overflow:auto;border-radius:8px">${escalaGradeTabelaHTML(ano, mesNum, diasNoMes)}</div>
+      <div id="escala-grade-wrap" class="${window._escalaDensidade==='compacto'?'escala-compacto':''}" style="flex:1;min-height:120px;overflow:auto;border-radius:8px;background:var(--bg-app)">${escalaGradeTabelaHTML(ano, mesNum, diasNoMes)}</div>
     </div>
   `;
   escalaAjustarStickyOffset();
