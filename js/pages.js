@@ -100,6 +100,11 @@ async function pageEscala(el) {
     try { secLocal = localStorage.getItem('gde_escala_colunas_secundarias'); } catch (_) {}
     window._escalaColunasSecundarias = secLocal !== '0'; // mostrado por padrão, só esconde se a pessoa já escolheu esconder antes
   }
+  if (window._escalaDensidade === undefined) {
+    let densLocal = null;
+    try { densLocal = localStorage.getItem('gde_escala_densidade'); } catch (_) {}
+    window._escalaDensidade = densLocal === 'compacto' ? 'compacto' : 'confortavel';
+  }
 
   await escalaRenderGrade(el);
 }
@@ -753,7 +758,7 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
             <option value="__sup_lider__">Só Supervisores e Líderes</option>
             <option value="__escolher__">Escolher grupos...</option>
           </select>
-          <div id="escala-grupos-painel" style="display:none;position:absolute;top:calc(100% + 4px);left:0;background:#141b2c;border:1px solid var(--border-strong);border-radius:8px;padding:8px 10px;z-index:30;min-width:190px;box-shadow:var(--adh-shadow-card)">
+          <div id="escala-grupos-painel" style="display:none;position:absolute;top:calc(100% + 4px);left:0;background:var(--bg-surface);border:1px solid var(--border-strong);border-radius:8px;padding:8px 10px;z-index:30;min-width:190px;box-shadow:var(--adh-shadow-card)">
             ${ESCALA_GRUPOS.map(g => `<label style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:11.5px;color:var(--text-secondary);white-space:nowrap"><input type="checkbox" value="${g}" onchange="escalaAtualizarGruposEscolhidos()" ${(!window._escalaGruposVisiveis||window._escalaGruposVisiveis.has(g))?'checked':''}>${g}</label>`).join('')}
           </div>
         </div>
@@ -764,7 +769,14 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
             <option value="__recolhido__" ${window._escalaBlocosRecolhidos?'selected':''}>Recolhido (só cabeçalho e total)</option>
           </select>
         </div>
-        ${Array(5).fill('<button class="adh-refresh-btn" disabled style="min-width:90px;opacity:.35" title="Reservado pra uma função futura"></button>').join('')}
+        <div>
+          <label style="font-size:10.5px;color:var(--text-muted);display:block;margin-bottom:3px">Densidade</label>
+          <select class="adh-month-select" onchange="escalaSetDensidade(this.value)">
+            <option value="confortavel" ${window._escalaDensidade!=='compacto'?'selected':''}>Confortável</option>
+            <option value="compacto" ${window._escalaDensidade==='compacto'?'selected':''}>Compacto (cabe mais na tela)</option>
+          </select>
+        </div>
+        ${Array(4).fill('<button class="adh-refresh-btn" disabled style="min-width:90px;opacity:.35" title="Reservado pra uma função futura"></button>').join('')}
       </div>
       <div id="escala-status-msg" style="font-size:11px;color:var(--text-muted);margin-top:8px;min-height:14px"></div>
     </div>
@@ -777,9 +789,9 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#fc8181;margin-right:5px"></span>J · Afastado</span>
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#38bdf8;margin-right:5px"></span>K · Cursos</span>
         <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#fb923c;margin-right:5px"></span>CH · Folga compensa (tecla C)</span>
-        <span style="color:var(--text-muted)">clique numa célula vazia ou de trabalho pra marcar F/J/K/C/A · fim de semana e feriado ficam destacados nas colunas</span>
+        <span style="color:var(--text-muted)">clique numa célula vazia ou de trabalho pra marcar F/J/K/C/A · fim de semana e feriado ficam destacados nas colunas · <span style="color:#f6ad55">laranja</span>/<span style="color:#fc8181">vermelho</span> na linha "Trabalhando no dia" = bem abaixo da média do mês</span>
       </div>
-      <div id="escala-grade-wrap" style="flex:1;min-height:120px;overflow:auto;border-radius:8px">${escalaGradeTabelaHTML(ano, mesNum, diasNoMes)}</div>
+      <div id="escala-grade-wrap" class="${window._escalaDensidade==='compacto'?'escala-compacto':''}" style="flex:1;min-height:120px;overflow:auto;border-radius:8px">${escalaGradeTabelaHTML(ano, mesNum, diasNoMes)}</div>
     </div>
   `;
   escalaAjustarStickyOffset();
@@ -1117,6 +1129,16 @@ function escalaSetBlocosRecolhidos(valor) {
   escalaGradeAtualiza();
 }
 
+// Densidade da grade — "compacto" reduz padding e fonte via classe CSS
+// (.escala-compacto no wrap), pra caber mais gente na tela sem rolar,
+// sem precisar duplicar cada estilo inline de célula em dois tamanhos.
+function escalaSetDensidade(valor) {
+  window._escalaDensidade = valor === 'compacto' ? 'compacto' : 'confortavel';
+  try { localStorage.setItem('gde_escala_densidade', window._escalaDensidade); } catch (_) {}
+  const wrap = document.getElementById('escala-grade-wrap');
+  if (wrap) wrap.classList.toggle('escala-compacto', window._escalaDensidade === 'compacto');
+}
+
 // Esconde/mostra as colunas Setor/Turno/Bloco/Intervalos — úteis pra
 // configurar uma vez, mas não pra olhar no dia a dia. Escondidas, sobra
 // mais espaço pra grade de dias (que é o que se usa o tempo todo).
@@ -1292,11 +1314,15 @@ function escalaBlocoTrabalhandoPorDia(colabsDoBloco, ano, mesNum, diasNoMes) {
 }
 function escalaBlocoSubtotalHTML(label, colabsDoBloco, ano, mesNum, diasNoMes, NCOLS_FIXAS, forte, BORDA) {
   const porDia = escalaBlocoTrabalhandoPorDia(colabsDoBloco, ano, mesNum, diasNoMes);
-  const bg = forte ? 'var(--bg-surface)' : 'var(--bg-hover)';
-  const peso = forte ? '600' : '500';
-  return `<tr style="background:${bg}">
-    <td colspan="${NCOLS_FIXAS}" style="padding:4px 10px;color:var(--text-secondary);font-size:11px;text-align:right;font-weight:${peso};border:${BORDA}">${label} — trabalhando no dia →</td>
-    ${porDia.map(n => `<td style="text-align:center;border:${BORDA};color:var(--text-secondary);font-weight:${peso};font-size:11px">${n}</td>`).join('')}
+  // Antes usava var(--bg-hover), quase invisível (3% de opacidade) — trocado
+  // por um tom com um pouco mais de presença, pra separar visualmente
+  // "linha de resumo" de "linha de pessoa" ao escanear a tela rápido.
+  const bg = forte ? 'rgba(0,160,210,.10)' : 'rgba(255,255,255,.045)';
+  const peso = forte ? '700' : '600';
+  const borda = forte ? 'border-top:1px solid rgba(0,160,210,.25);border-bottom:1px solid rgba(0,160,210,.25)' : 'border-top:1px solid var(--border)';
+  return `<tr style="background:${bg};${borda}">
+    <td colspan="${NCOLS_FIXAS}" style="padding:5px 10px;color:${forte?'var(--blue)':'var(--text-secondary)'};font-size:11px;text-align:right;font-weight:${peso};border:${BORDA}">${label} — trabalhando no dia →</td>
+    ${porDia.map(n => `<td style="text-align:center;border:${BORDA};color:${forte?'var(--blue)':'var(--text-secondary)'};font-weight:${peso};font-size:11px">${n}</td>`).join('')}
   </tr>`;
 }
 
@@ -1410,9 +1436,23 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes, larguraDiaOverride) {
     const conteudo = escalaConteudoDoMes(c, ano, mesNum, diasNoMes);
     conteudo.forEach((item, i) => { if (!item.status) contagemPorDia[i]++; }); // sem status = trabalhando
   });
+  // Destaca dias com pouca gente escalada em relação à média do mês — só
+  // um alerta visual, não impede nada. <90% da média = laranja, <80% =
+  // vermelho (mesmas cores já usadas em outros avisos da tela).
+  const mediaContagem = contagemPorDia.reduce((s,v) => s+v, 0) / (contagemPorDia.length || 1);
+  const corDoDia = (n) => {
+    if (!mediaContagem) return { bg: 'var(--bg-surface)', cor: 'var(--text-primary)', aviso: '' };
+    const razao = n / mediaContagem;
+    if (razao < 0.8) return { bg: 'rgba(252,129,129,.16)', cor: '#fc8181', aviso: ` — ${Math.round((1-razao)*100)}% abaixo da média do mês (${Math.round(mediaContagem)})` };
+    if (razao < 0.9) return { bg: 'rgba(246,173,85,.14)', cor: '#f6ad55', aviso: ` — ${Math.round((1-razao)*100)}% abaixo da média do mês (${Math.round(mediaContagem)})` };
+    return { bg: 'var(--bg-surface)', cor: 'var(--text-primary)', aviso: '' };
+  };
   html += `<tr style="background:rgba(0,160,210,.06)">
     <td colspan="${NCOLS_FIXAS}" style="border:${BORDA};padding:6px 10px;color:var(--text-secondary);font-size:11px;text-align:right;font-weight:600;position:sticky;top:var(--escala-thead-h, 36px);left:0;z-index:1;background:var(--bg-surface);white-space:nowrap">Trabalhando no dia →</td>
-    ${contagemPorDia.map(n => `<td style="text-align:center;border:${BORDA};color:var(--text-primary);font-weight:700;font-size:12px;position:sticky;top:var(--escala-thead-h, 36px);z-index:1;background:var(--bg-surface)">${n}</td>`).join('')}
+    ${contagemPorDia.map(n => {
+      const { bg, cor, aviso } = corDoDia(n);
+      return `<td style="text-align:center;border:${BORDA};color:${cor};font-weight:700;font-size:12px;position:sticky;top:var(--escala-thead-h, 36px);z-index:1;background:${bg}" title="${n} trabalhando${aviso}">${n}</td>`;
+    }).join('')}
   </tr>`;
 
   html += `<tr>
@@ -1478,7 +1518,8 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes, larguraDiaOverride) {
 
       setoresOrdenados.forEach(([setorLabel, blocosMap], si) => {
         const todosDoSetor = [...blocosMap.values()].flat();
-        html += escalaBlocoHeaderHTML(setorLabel, todosDoSetor.length, si % 2 === 0 ? 'turno-a' : 'turno-b', NCOLS);
+        const temMaisDeUmSetor = grupo.setores.size > 1;
+        if (temMaisDeUmSetor) html += escalaBlocoHeaderHTML(setorLabel, todosDoSetor.length, si % 2 === 0 ? 'turno-a' : 'turno-b', NCOLS);
 
         const temMaisDeUmBloco = blocosMap.size > 1;
         const blocosOrdenados = [...blocosMap.entries()].sort((a, b) => {
@@ -1495,7 +1536,7 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes, larguraDiaOverride) {
           if (temMaisDeUmBloco) html += escalaBlocoSubtotalHTML(blocoLabel, colabsDoBloco, ano, mesNum, diasNoMes, NCOLS_FIXAS, false, BORDA);
         });
 
-        html += escalaBlocoSubtotalHTML(setorLabel, todosDoSetor, ano, mesNum, diasNoMes, NCOLS_FIXAS, false, BORDA);
+        if (temMaisDeUmSetor) html += escalaBlocoSubtotalHTML(setorLabel, todosDoSetor, ano, mesNum, diasNoMes, NCOLS_FIXAS, false, BORDA);
       });
 
       if (grupo.setores.size > 1) {
