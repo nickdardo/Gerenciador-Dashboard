@@ -1316,21 +1316,27 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   const turnosExistentes = [...new Set(colabs.map(c => c.turno).filter(Boolean))].sort((a,b) => a.localeCompare(b));
   const blocosExistentes = [...new Set(colabs.map(c => c.bloco_horario).filter(Boolean))].sort((a,b) => a.localeCompare(b));
 
-  const LARG = { remover:36, mat:80, nome:210, setor:100, turno:110, funcao:190, entrada:60, intInicio:60, intFim:60, saida:60, ch:46 };
+  const LARG = { remover:36, mat:80, nome:210, setor:100, turno:110, funcao:190, entrada:60, intInicio:60, intFim:60, saida:60, ch:46, diaMin:30 };
   const leftMat  = LARG.remover;
   const leftNome = LARG.remover + LARG.mat;
-  // Largura total NÃO é mais fixada em pixel nem calculada em JavaScript —
-  // as colunas de dia usam a classe .escala-col-dia (largura definida só
-  // em CSS, com @media pra ficar um pouco mais larga em monitor grande) e
-  // o <table> fica com "width:auto" (sem forçar 100% nem um valor fixo),
-  // deixando o navegador somar as larguras das colunas sozinho. Isso evita
-  // de vez os dois bugs anteriores: sem cálculo dinâmico em JS (que quebrou
-  // o fim do mês) e sem "esticar pra 100%" (que jogava a sobra na última
-  // coluna). Cada coluna simplesmente tem a largura que a CSS diz, ponto.
-  let html = `<table style="border-collapse:collapse;font-size:13px;width:auto;table-layout:fixed"><colgroup>
+  // Preenche a tela toda usando o próprio comportamento padrão do HTML pra
+  // tabelas (table-layout:fixed): as colunas de identidade (matrícula,
+  // nome etc.) têm largura EXPLÍCITA em pixel; as colunas de dia NÃO têm
+  // nenhuma largura declarada — pela especificação do CSS, colunas sem
+  // largura "dividem igualmente o espaço que sobrar" depois de descontar
+  // as que já têm largura fixa. Isso é o navegador fazendo a divisão
+  // igual sozinho, sem nenhum JavaScript medindo nada (as duas tentativas
+  // anteriores com cálculo em JS quebraram o layout). Um min-width no
+  // <table> garante que, se a tela for estreita demais, ele para de
+  // encolher os dias (no mínimo 30px cada) e passa a rolar horizontalmente
+  // em vez de espremer até ficar ilegível.
+  const larguraFixas = LARG.remover + LARG.mat + LARG.nome + (secOn ? LARG.setor + LARG.turno : 0) + LARG.funcao + LARG.entrada + (secOn ? LARG.intInicio + LARG.intFim : 0) + LARG.saida + LARG.ch;
+  const larguraMinima = larguraFixas + LARG.diaMin * diasNoMes;
+
+  let html = `<table style="border-collapse:collapse;font-size:13px;width:100%;min-width:${larguraMinima}px;table-layout:fixed"><colgroup>
     <col style="width:${LARG.remover}px"><col style="width:${LARG.mat}px"><col style="width:${LARG.nome}px">${secOn?`<col style="width:${LARG.setor}px"><col style="width:${LARG.turno}px">`:''}<col style="width:${LARG.funcao}px">
     <col style="width:${LARG.entrada}px">${secOn?`<col style="width:${LARG.intInicio}px"><col style="width:${LARG.intFim}px">`:''}<col style="width:${LARG.saida}px"><col style="width:${LARG.ch}px">
-    ${Array(diasNoMes).fill(`<col class="escala-col-dia">`).join('')}
+    ${Array(diasNoMes).fill(`<col>`).join('')}
   </colgroup><thead><tr>`;
   html += `<th style="text-align:center;padding:8px 2px;position:sticky;top:0;left:0;background:var(--bg-surface);z-index:3;border:${BORDA}"><input type="checkbox" onchange="escalaSelecionarTodos(this.checked)" title="Selecionar todos" style="margin:0"></th>`;
   html += `<th style="text-align:left;padding:8px 10px;color:${window._escalaOrdemColuna==='matricula'?'var(--blue)':'var(--text-muted)'};font-size:11px;text-transform:uppercase;position:sticky;top:0;left:${leftMat}px;background:var(--bg-surface);z-index:3;border:${BORDA};cursor:pointer;user-select:none" onclick="escalaOrdenarPorColuna('matricula')" title="Clique pra ordenar por matrícula">Matrícula${window._escalaOrdemColuna==='matricula'?(window._escalaOrdemDirecao==='desc'?' ↓':' ↑'):''}</th>`;
