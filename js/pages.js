@@ -724,31 +724,25 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
     </div>` : ''}
 
     <div class="hc-panel" style="margin-bottom:16px">
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:nowrap;overflow-x:auto;padding-bottom:2px">
-        <div style="position:relative;flex:1 1 60px;min-width:60px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding-bottom:2px">
+        <div style="position:relative;flex:1 1 220px;min-width:220px">
           <input id="escala-busca" class="adh-search-input" ${dis} style="width:100%;box-sizing:border-box;padding:9px 12px;background:var(--bg-hover);border:1px solid var(--border-strong);border-radius:8px;color:var(--text-primary)"
             oninput="escalaBuscarColab(this.value)" placeholder="Buscar por matrícula ou nome pra adicionar...">
           <div id="escala-busca-resultados" style="position:absolute;top:calc(100% + 4px);left:0;right:0;background:var(--bg-surface);border:1px solid var(--border-strong);border-radius:8px;z-index:20;display:none;max-height:220px;overflow-y:auto;box-shadow:var(--adh-shadow-card)"></div>
         </div>
         <button class="adh-refresh-btn" ${dis} style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600" onclick="escalaPreencherTodoStaff()">${escalaIcone('users')}Preencher com Staff</button>
         <button class="adh-refresh-btn" ${dis} style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600" onclick="escalaGerarFolgasAuto()">${escalaIcone('zap')}Gerar folgas automáticas</button>
+        <button class="adh-refresh-btn" ${dis} onclick="escalaPreencherHorarioMesAnterior()">${escalaIcone('calclock')}Horário do mês anterior</button>
+        <button class="adh-refresh-btn" ${dis} onclick="escalaAdicionarFeriado()">${escalaIcone('calendarPlus')}+ Feriado dessa base</button>
+        <button class="adh-refresh-btn" onclick="escalaBaixarModeloCursos()">${escalaIcone('download')}Modelo de Cursos</button>
+        <button class="adh-refresh-btn" ${dis} onclick="document.getElementById('escala-cursos-input').click()">${escalaIcone('upload')}Importar Cursos</button>
+        <input type="file" id="escala-cursos-input" ${dis} accept=".xlsx,.xls" style="display:none" onchange="escalaImportarCursos(this)">
+        <button class="adh-refresh-btn" ${dis} style="color:#fc8181" onclick="escalaLimparStatus()">${escalaIcone('trash')}Limpar folgas/status</button>
+        <button class="adh-refresh-btn" ${dis} style="color:#fc8181" onclick="escalaLimparColaboradores()">${escalaIcone('trash')}Limpar colaboradores</button>
+        <button id="escala-btn-remover-sel" class="adh-refresh-btn" ${dis} style="color:#fc8181;display:none" onclick="escalaRemoverSelecionados()">${escalaIcone('trash')}Remover selecionados (0)</button>
+        <button class="adh-refresh-btn" ${dis} onclick="escalaLimparOrdemManual()" title="Volta a ordenar sozinho por função + horário de entrada">${escalaIcone('sort')}Ordenar automático</button>
         <button class="adh-refresh-btn" style="${window._escalaAgruparPorTurno?'background:var(--blue);color:#0b0f1a;border:none;font-weight:600':''}" onclick="escalaToggleAgruparTurno()" title="Agrupa a lista por grupo (função) e depois por setor, com contagem por bloco">${escalaIcone('layers')}Agrupar por grupo/setor</button>
         <button id="escala-btn-colunas-sec" class="adh-refresh-btn" style="${window._escalaColunasSecundarias===false?'background:var(--blue);color:#0b0f1a;border:none;font-weight:600':''}" onclick="escalaToggleColunasSecundarias()" title="Esconde Setor/Turno/Bloco/Intervalos — sobra mais espaço pra grade de dias">${escalaIcone('columns')}${window._escalaColunasSecundarias===false?'Mostrar colunas':'Colunas essenciais'}</button>
-        <button id="escala-btn-remover-sel" class="adh-refresh-btn" ${dis} style="color:#fc8181;display:none" onclick="escalaRemoverSelecionados()">${escalaIcone('trash')}Remover selecionados (0)</button>
-        <div style="position:relative">
-          <button class="adh-refresh-btn" onclick="escalaToggleMaisAcoes()">${escalaIcone('moreHorizontal')}Mais ações</button>
-          <div id="escala-mais-acoes-painel" style="display:none;position:absolute;top:calc(100% + 4px);right:0;background:var(--bg-surface);border:1px solid var(--border-strong);border-radius:8px;padding:6px;z-index:30;min-width:230px;box-shadow:var(--adh-shadow-card)">
-            <button class="adh-refresh-btn" ${dis} style="width:100%;justify-content:flex-start;margin-bottom:4px" onclick="escalaPreencherHorarioMesAnterior()">${escalaIcone('calclock')}Horário do mês anterior</button>
-            <button class="adh-refresh-btn" ${dis} style="width:100%;justify-content:flex-start;margin-bottom:4px" onclick="escalaAdicionarFeriado()">${escalaIcone('calendarPlus')}+ Feriado dessa base</button>
-            <button class="adh-refresh-btn" style="width:100%;justify-content:flex-start;margin-bottom:4px" onclick="escalaBaixarModeloCursos()">${escalaIcone('download')}Modelo de Cursos</button>
-            <button class="adh-refresh-btn" ${dis} style="width:100%;justify-content:flex-start;margin-bottom:4px" onclick="document.getElementById('escala-cursos-input').click()">${escalaIcone('upload')}Importar Cursos</button>
-            <button class="adh-refresh-btn" ${dis} style="width:100%;justify-content:flex-start;margin-bottom:4px" onclick="escalaLimparOrdemManual()" title="Volta a ordenar sozinho por função + horário de entrada">${escalaIcone('sort')}Ordenar automático</button>
-            <div style="border-top:1px solid var(--border);margin:4px 0"></div>
-            <button class="adh-refresh-btn" ${dis} style="width:100%;justify-content:flex-start;margin-bottom:4px;color:#fc8181" onclick="escalaLimparStatus()">${escalaIcone('trash')}Limpar folgas/status</button>
-            <button class="adh-refresh-btn" ${dis} style="width:100%;justify-content:flex-start;color:#fc8181" onclick="escalaLimparColaboradores()">${escalaIcone('trash')}Limpar colaboradores</button>
-          </div>
-        </div>
-        <input type="file" id="escala-cursos-input" ${dis} accept=".xlsx,.xls" style="display:none" onchange="escalaImportarCursos(this)">
       </div>
       <div id="escala-grupo-organizacao" style="display:flex;gap:16px;align-items:flex-end;flex-wrap:nowrap;overflow-x:auto;margin-top:10px;padding-bottom:2px">
         <div style="position:relative">
@@ -1114,24 +1108,6 @@ function escalaToggleColunasSecundarias() {
     btn.style.background = window._escalaColunasSecundarias ? '' : 'var(--blue)';
     btn.style.color = window._escalaColunasSecundarias ? '' : '#0b0f1a';
   }
-}
-
-function escalaToggleMaisAcoes() {
-  const painel = document.getElementById('escala-mais-acoes-painel');
-  if (painel) painel.style.display = painel.style.display === 'none' ? 'block' : 'none';
-}
-
-// Fecha o menu "Mais ações" ao clicar em qualquer lugar fora dele —
-// registrado uma vez só (não em toda renderização) pra não empilhar
-// listener repetido a cada vez que a grade é redesenhada.
-if (!window._escalaMaisAcoesClickForaRegistrado) {
-  window._escalaMaisAcoesClickForaRegistrado = true;
-  document.addEventListener('click', (e) => {
-    const painel = document.getElementById('escala-mais-acoes-painel');
-    if (!painel || painel.style.display === 'none') return;
-    const wrap = painel.parentElement;
-    if (wrap && !wrap.contains(e.target)) painel.style.display = 'none';
-  });
 }
 
 // Salva o turno digitado/selecionado pro colaborador — igual qualquer outro
