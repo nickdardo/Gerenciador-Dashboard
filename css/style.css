@@ -311,13 +311,18 @@ a { color: inherit; text-decoration: none; }
 /* ══════════════════════════════════════════════════════
    APP SHELL
 ════════════════════════════════════════════════════════ */
+/* Piso de largura: o painel é de uso exclusivo em computador (decisão do
+   cliente). Abaixo de 1280px a página rola na horizontal em vez de
+   espremer a grade até ficar ilegível. */
 #app-shell {
   display: none;
   height: 100vh;
   overflow: hidden;
   width: 100vw;
+  min-width: 1280px;
   position: relative;
 }
+html, body:has(#app-shell) { overflow-x: auto; overflow-y: hidden; }
 
 /* ── Sidebar ──────────────────────────────────────── */
 #sidebar {
@@ -575,23 +580,67 @@ a { color: inherit; text-decoration: none; }
    removida na troca de página) — deixa o painel da grade (.escala-fill)
    esticar pra ocupar exatamente o espaço que sobra até o fim da tela,
    em vez de uma altura fixa "chutada" que sobra ou corta dependendo do
-   monitor. */
+   monitor.
+   O padding lateral vem daqui porque os painéis da Escala são filhos
+   diretos de #page-content (diferente do Admin, que tem wrapper próprio
+   com padding:0 20px 32px). Sem isso o .page-header ficava recuado 20px
+   e os painéis colavam na borda da tela. */
 #page-content.pc-flex {
   display: flex;
   flex-direction: column;
+  padding: 0 20px 16px;
 }
 #page-content.pc-flex > * { flex-shrink: 0; }
 #page-content.pc-flex > .escala-fill { flex: 1 1 auto; min-height: 0; }
+/* O .page-header já traz o próprio padding lateral pras outras telas —
+   aqui ele viria em dobro. */
+#page-content.pc-flex > .page-header { padding-left: 0; padding-right: 0; }
+
+/* ── Colunas congeladas da grade ─────────────────────
+   Antes as células fixas usavam background:inherit, herdando do <tr> um
+   "transparent" (linhas ímpares) ou um branco a 2% (linhas pares) — nos
+   dois casos o conteúdo dos dias aparecia POR BAIXO de Matrícula e Nome
+   ao rolar na horizontal. Agora cada linha declara a própria cor de
+   fundo numa variável e as células fixas pintam sólido com ela. */
+#escala-grade-wrap tbody tr           { --escala-row-bg: var(--bg-surface); }
+#escala-grade-wrap tbody tr.escala-zebra { --escala-row-bg: color-mix(in srgb, var(--bg-surface) 92%, #fff); }
+[data-theme="light"] #escala-grade-wrap tbody tr.escala-zebra { --escala-row-bg: #f7f8fa; }
+#escala-grade-wrap tbody tr > td      { background: var(--escala-row-bg); }
+#escala-grade-wrap tbody tr > td.escala-fixa {
+  background: var(--escala-row-bg);
+  z-index: 3;
+}
+/* Sombra na borda da última coluna congelada — deixa claro que o resto
+   da tabela passa por baixo. */
+#escala-grade-wrap .escala-fixa-borda {
+  box-shadow: 6px 0 12px -8px rgba(0,0,0,.75);
+}
 
 /* Densidade "compacto" da grade da Escala Online — reduz padding e fonte
    de toda célula (usa !important porque cada célula já define seu próprio
    padding inline; sem isso a classe não conseguiria vencer). Ligado via
    escalaSetDensidade(), guardado em localStorage. */
+#escala-grade-wrap { --escala-row-h: 32px; }
+#escala-grade-wrap.escala-compacto { --escala-row-h: 24px; }
 #escala-grade-wrap.escala-compacto table { font-size: 11.5px !important; }
 #escala-grade-wrap.escala-compacto td,
 #escala-grade-wrap.escala-compacto th { padding: 2px 5px !important; }
 #escala-grade-wrap.escala-compacto td input,
 #escala-grade-wrap.escala-compacto td select { padding: 2px 0 !important; font-size: 11px !important; }
+
+/* ── Seleção de célula ───────────────────────────────
+   Era outline inline aplicado por style.outline. Virou classe porque a
+   seleção agora pode ser um retângulo (Shift+setas), e não dá pra pintar
+   dezenas de células uma a uma no JavaScript sem ficar lento. */
+#escala-grade-wrap td.escala-cel-sel {
+  outline: 2px solid var(--blue);
+  outline-offset: -2px;
+  position: relative;
+  z-index: 2;
+}
+#escala-grade-wrap td.escala-cel-faixa {
+  box-shadow: inset 0 0 0 999px rgba(0,160,210,.16);
+}
 
 #btn-topo {
   position: fixed;
@@ -2645,4 +2694,73 @@ a { color: inherit; text-decoration: none; }
   border-top: 2px solid var(--border-strong);
   font-weight: 800;
   font-size: 11px;
+}
+
+/* ══════════════════════════════════════════════════════
+   IMPRESSÃO — Escala Online
+   Ligado por escalaImprimir(), que põe .escala-imprimindo no <body>.
+   Some com a moldura toda (sidebar, topo, barra de ações, legenda) e
+   deixa só a grade, aberta por inteiro em vez de dentro do scroll.
+   Não existia nenhum @media print no projeto — imprimir a escala saía
+   cortado na largura do monitor.
+════════════════════════════════════════════════════════ */
+@media print {
+  @page { size: A3 landscape; margin: 8mm; }
+
+  html, body { height: auto !important; overflow: visible !important; background: #fff !important; }
+  body.escala-imprimindo { color: #000; }
+
+  body.escala-imprimindo #sidebar,
+  body.escala-imprimindo #topbar,
+  body.escala-imprimindo #btn-topo,
+  body.escala-imprimindo #escala-voos-panel,
+  body.escala-imprimindo #escala-grupo-organizacao,
+  body.escala-imprimindo #escala-busca-resultados,
+  body.escala-imprimindo #escala-menu-acoes,
+  body.escala-imprimindo .adh-refresh-btn,
+  body.escala-imprimindo .adh-month-select,
+  body.escala-imprimindo .adh-search-input { display: none !important; }
+
+  body.escala-imprimindo #app-shell,
+  body.escala-imprimindo #main-area {
+    position: static !important;
+    height: auto !important;
+    min-width: 0 !important;
+    left: 0 !important;
+    overflow: visible !important;
+  }
+  body.escala-imprimindo #page-content,
+  body.escala-imprimindo #page-content.pc-flex {
+    display: block !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    height: auto !important;
+  }
+  body.escala-imprimindo .hc-panel {
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    background: #fff !important;
+  }
+  body.escala-imprimindo #escala-grade-wrap {
+    overflow: visible !important;
+    max-height: none !important;
+    background: #fff !important;
+  }
+  /* Sticky não faz sentido no papel — vira célula normal, e o <thead>
+     repete sozinho em cada página. */
+  body.escala-imprimindo #escala-grade-wrap th,
+  body.escala-imprimindo #escala-grade-wrap td { position: static !important; }
+  body.escala-imprimindo #escala-grade-wrap table { font-size: 8pt !important; }
+  body.escala-imprimindo #escala-grade-wrap thead { display: table-header-group; }
+  body.escala-imprimindo #escala-grade-wrap tr { break-inside: avoid; }
+  /* Inputs viram texto — no papel a borda de campo editável só polui. */
+  body.escala-imprimindo #escala-grade-wrap input,
+  body.escala-imprimindo #escala-grade-wrap select {
+    border: none !important;
+    background: none !important;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+  body.escala-imprimindo #escala-grade-wrap input[type="checkbox"] { display: none !important; }
 }
