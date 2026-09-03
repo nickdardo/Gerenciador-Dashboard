@@ -47,13 +47,17 @@ const colabs = Array.from({ length: 12 }, (_, i) => ({
   matricula: String(30100 + i), nome: `Colaborador de Teste ${i + 1}`,
   turno: i % 3 === 0 ? 'Setor Manhã' : null,
   bloco_horario: i % 4 === 0 ? 'Virada 22h' : null,
-  entrada_manual: ['04:00', '06:00', '12:00', '22:00'][i % 4],
-  saida_manual: ['11:20', '13:20', '19:20', '05:20'][i % 4],
+  // Espelha o caso real de BEL: cada grupo tem 2 pessoas na virada da
+  // noite (22:00 e 23:00 = Turno Delta) e 1 de manha (11:00 = Bravo).
+  // Assim o teste exercita sub-bloco com mais de um turno E com par
+  // dentro do mesmo turno (necessario pra validar o arrastar).
+  entrada_manual: ['22:00', '23:00', '11:00'][i % 3],
+  saida_manual: ['02:00', '03:00', '14:00'][i % 3],
   ordem_manual: null,
 }));
 
 const eoColabs = new Map(colabs.map((c, i) => [c.matricula,
-  { nome: c.nome, funcao: FUNCOES[i % FUNCOES.length], ch: i % 3 === 0 ? '180' : '210', station: 'BEL' }]));
+  { nome: c.nome, funcao: FUNCOES[Math.floor(i / 3)], ch: i % 3 === 0 ? '180' : '210', station: 'BEL' }]));
 
 const dias = new Map();
 colabs.forEach((c, i) => { for (let d = 1 + (i % 6); d <= DIAS; d += 7) dias.set(`${c.matricula}|${d}`, { status: 'F' }); });
@@ -106,6 +110,67 @@ tudoOk &= rodar('lista simples, colunas extras ligadas', { _escalaColunasSecunda
 tudoOk &= rodar('lista simples, colunas essenciais', { _escalaColunasSecundarias: false, _escalaAgruparPorTurno: false });
 tudoOk &= rodar('agrupado, colunas extras ligadas', { _escalaColunasSecundarias: true, _escalaAgruparPorTurno: true });
 tudoOk &= rodar('agrupado, colunas essenciais', { _escalaColunasSecundarias: false, _escalaAgruparPorTurno: true });
+
+// O colspan tem que continuar batendo em TODOS os critérios de sub-bloco —
+// é onde nascem as linhas novas de cabeçalho e de contagem.
+['turno', 'horario', 'setor', 'bloco', 'nenhum'].forEach(crit => {
+  tudoOk &= rodar(`agrupado, sub-bloco por "${crit}"`, {
+    _escalaColunasSecundarias: true, _escalaAgruparPorTurno: true, _escalaCriterioSubBloco: crit,
+  });
+});
+
+// ── Sub-blocos separam por horário e cada um traz sua contagem ──────────
+(function () {
+  Object.assign(sandbox.window, {
+    _escalaColunasSecundarias: true, _escalaAgruparPorTurno: true, _escalaCriterioSubBloco: 'turno',
+  });
+  const html = sandbox.escalaGradeTabelaHTML(ANO, MES, DIAS);
+
+  // Cabecalho de sub-bloco = o que traz "subBloco" no filtro dos botoes.
+  // Contar /Turno (Alpha|Bravo)/ pegaria tambem o valor da coluna Turno de
+  // cada linha de pessoa, inflando o numero.
+  const cabecalhosSub = (html.match(/&quot;subBloco&quot;|"subBloco":/g) || []).length / 2;
+  const linhasContagem = (html.match(/trabalhando no dia/g) || []).length;
+  const botoesGerar = (html.match(/escalaGerarFolgasAuto\(/g) || []).length;
+  const botoesRemover = (html.match(/escalaRemoverFolgas\(/g) || []).length;
+  const totaisGrupo = (html.match(/Total [^<]*trabalhando no dia/g) || []).length;
+
+  // Cada sub-bloco tem cabecalho + contagem propria; grupo com mais de um
+  // sub-bloco ganha ainda a linha "Total <grupo>".
+  const okSub = cabecalhosSub >= 4;
+  const okContagem = linhasContagem === cabecalhosSub + totaisGrupo;
+  const okPar = botoesGerar === botoesRemover && botoesGerar > 0;
+
+  console.log(`${okSub ? 'PASSOU' : 'FALHOU'}  sub-blocos por turno: ${cabecalhosSub} cabeçalhos de turno gerados`);
+  console.log(`${okContagem ? 'PASSOU' : 'FALHOU'}  contagem por dia: ${linhasContagem} linhas = ${cabecalhosSub} sub-blocos + ${totaisGrupo} totais de grupo`);
+  console.log(`${okPar ? 'PASSOU' : 'FALHOU'}  gerar/remover folgas em par: ${botoesGerar} gerar, ${botoesRemover} remover`);
+  tudoOk &= okSub && okContagem && okPar;
+})();
+
+// ── Ordem manual (arrastar) vence no modo agrupado ─────────────────────
+(function () {
+  const alvo = colabs[3], vizinho = colabs.find(c => c !== alvo
+    && sandbox.escalaSetorDoTurno(c.entrada_manual) === sandbox.escalaSetorDoTurno(alvo.entrada_manual)
+    && sandbox.escalaFuncaoGrupoDoColab(c).label === sandbox.escalaFuncaoGrupoDoColab(alvo).label);
+  if (!vizinho) { console.log('PULADO  ordem manual: sem par no mesmo sub-bloco'); return; }
+
+  const posicoes = (html) => [...html.matchAll(/data-escala-linha="(\d+)"/g)].map(m => m[1]);
+  Object.assign(sandbox.window, { _escalaAgruparPorTurno: true, _escalaCriterioSubBloco: 'turno', _escalaOrdemColuna: null });
+
+  colabs.forEach(c => { c.ordem_manual = null; });
+  const antes = posicoes(sandbox.escalaGradeTabelaHTML(ANO, MES, DIAS));
+
+  // Inverte os dois na ordem manual e confere se a tela obedece.
+  alvo.ordem_manual = 0; vizinho.ordem_manual = 1;
+  const depois = posicoes(sandbox.escalaGradeTabelaHTML(ANO, MES, DIAS));
+  const iAlvo = depois.indexOf(alvo.matricula), iViz = depois.indexOf(vizinho.matricula);
+  const ok = iAlvo !== -1 && iViz !== -1 && iAlvo < iViz;
+
+  console.log(`${ok ? 'PASSOU' : 'FALHOU'}  ordem manual respeitada no modo agrupado (${alvo.matricula} antes de ${vizinho.matricula})`);
+  if (!ok) console.log(`   antes: ${antes.slice(0,4).join(', ')} · depois: ${depois.slice(0,4).join(', ')}`);
+  tudoOk &= ok;
+  colabs.forEach(c => { c.ordem_manual = null; });
+})();
 
 // ── Largura mínima nos dois modos ───────────────────────
 [true, false].forEach(sec => {

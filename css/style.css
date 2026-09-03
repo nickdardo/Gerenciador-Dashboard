@@ -2764,3 +2764,18 @@ html, body:has(#app-shell) { overflow-x: auto; overflow-y: hidden; }
   }
   body.escala-imprimindo #escala-grade-wrap input[type="checkbox"] { display: none !important; }
 }
+
+/* ── Arrastar pra reordenar (Escala Online) ───────────
+   A alça era um <span> de 12px espremido ao lado do checkbox. Agora a
+   célula inteira da primeira coluna é a área de arraste, e a linha de
+   destino mostra onde a pessoa vai cair. */
+#escala-grade-wrap td.escala-alca[draggable="true"] { cursor: grab; }
+#escala-grade-wrap td.escala-alca[draggable="true"]:active { cursor: grabbing; }
+#escala-grade-wrap td.escala-alca[draggable="true"]:hover { background: rgba(0,160,210,.12); }
+
+#escala-grade-wrap tr.escala-arrastando > td { opacity: .45; }
+
+/* Linha-guia de destino. Usa box-shadow em vez de border pra não empurrar
+   as células e fazer a tabela inteira tremer durante o arraste. */
+#escala-grade-wrap tr.escala-alvo-acima > td { box-shadow: inset 0 2px 0 0 var(--blue); }
+#escala-grade-wrap tr.escala-alvo-abaixo > td { box-shadow: inset 0 -2px 0 0 var(--blue); }

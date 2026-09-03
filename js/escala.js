@@ -123,6 +123,12 @@ async function pageEscala(el) {
     try { secLocal = localStorage.getItem('gde_escala_colunas_secundarias'); } catch (_) {}
     window._escalaColunasSecundarias = secLocal !== '0'; // mostrado por padrão, só esconde se a pessoa já escolheu esconder antes
   }
+  if (window._escalaCriterioSubBloco === undefined) {
+    let critLocal = null;
+    try { critLocal = localStorage.getItem('gde_escala_criterio_subbloco'); } catch (_) {}
+    const valido = ESCALA_CRITERIOS_SUBBLOCO.some(c => c.valor === critLocal);
+    window._escalaCriterioSubBloco = valido ? critLocal : 'turno'; // Turno automático funciona sem ninguém cadastrar nada
+  }
   if (window._escalaDensidade === undefined) {
     let densLocal = null;
     try { densLocal = localStorage.getItem('gde_escala_densidade'); } catch (_) {}
@@ -800,6 +806,12 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
           </div>
         </div>
         <div>
+          <label style="font-size:10.5px;color:var(--text-muted);display:block;margin-bottom:3px">Dividir grupo por</label>
+          <select class="adh-month-select" onchange="escalaSetCriterioSubBloco(this.value)" title="Como quebrar cada grupo de função em sub-blocos — cada sub-bloco ganha a própria contagem de gente por dia">
+            ${ESCALA_CRITERIOS_SUBBLOCO.map(c => `<option value="${c.valor}" ${escalaCriterioSubBloco()===c.valor?'selected':''} title="${c.dica}">${c.label}</option>`).join('')}
+          </select>
+        </div>
+        <div>
           <label style="font-size:10.5px;color:var(--text-muted);display:block;margin-bottom:3px">Blocos</label>
           <select class="adh-month-select" onchange="escalaSetBlocosRecolhidos(this.value)">
             <option value="__expandido__" ${!window._escalaBlocosRecolhidos?'selected':''}>Expandido</option>
@@ -1255,11 +1267,15 @@ function escalaLinhaColabHTML(c, ci, ctx) {
   // congeladas precisam pintar SÓLIDO com a mesma cor — antes usavam
   // background:inherit e herdavam "transparent", deixando o conteúdo dos
   // dias passar por baixo de Matrícula e Nome na rolagem horizontal.
-  let html = `<tr class="${ci % 2 === 0 ? '' : 'escala-zebra'}" ondragover="event.preventDefault()" ondrop="escalaDrop(event,'${c.matricula}')">`;
-  html += `<td class="escala-fixa" style="text-align:center;position:sticky;left:0;border:${BORDA};padding:0">
-    <div style="display:flex;align-items:center;justify-content:center;gap:3px">
-      <span draggable="${!travada}" ondragstart="escalaDragStart(event,'${c.matricula}')" style="cursor:${travada?'default':'grab'};color:var(--text-muted);font-size:12px;user-select:none;opacity:${travada?.4:1}" title="Arrastar pra reordenar">⠿</span>
-      <input type="checkbox" data-escala-check="${c.matricula}" ${window._escalaSelecionados?.has(c.matricula)?'checked':''} onchange="escalaToggleSelecao('${c.matricula}',this.checked)" title="Selecionar" style="margin:0">
+  let html = `<tr class="${ci % 2 === 0 ? '' : 'escala-zebra'}" data-escala-linha="${c.matricula}"`
+    + ` data-grupo="${escalaEscapeAttr(ctx.grupoDaLinha || '')}" data-subbloco="${escalaEscapeAttr(ctx.subBlocoDaLinha || '')}"`
+    + ` ondragover="escalaDragOver(event,'${c.matricula}')" ondragleave="escalaDragLeave(event)" ondrop="escalaDrop(event,'${c.matricula}')">`;
+  html += `<td class="escala-fixa escala-alca" style="text-align:center;position:sticky;left:0;border:${BORDA};padding:0"
+      draggable="${!travada}" ondragstart="escalaDragStart(event,'${c.matricula}')" ondragend="escalaDragEnd(event)"
+      title="${travada ? 'Escala travada' : 'Arraste esta célula pra reordenar dentro do bloco'}">
+    <div style="display:flex;align-items:center;justify-content:center;gap:2px;height:100%;cursor:${travada?'default':'grab'}">
+      <span style="color:var(--text-muted);font-size:13px;line-height:1;user-select:none;opacity:${travada?.4:1}">⠿</span>
+      <input type="checkbox" data-escala-check="${c.matricula}" ${window._escalaSelecionados?.has(c.matricula)?'checked':''} onchange="escalaToggleSelecao('${c.matricula}',this.checked)" onclick="event.stopPropagation()" title="Selecionar" style="margin:0;cursor:pointer">
     </div>
   </td>`;
   html += `<td class="escala-fixa" style="padding:2px 8px;position:sticky;left:${leftMat}px;border:${BORDA}"><input type="text" ${dis} value="${c.matricula}" onchange="escalaEditarMatricula('${c.matricula}',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-primary);font-weight:500;text-overflow:ellipsis;padding:6px 0" title="Editar matrícula"></td>`;
@@ -1308,16 +1324,100 @@ function escalaLinhaColabHTML(c, ci, ctx) {
 // folgas por dia daquele bloco — mesma definição de "folga" usada no
 // restante do módulo (F/FA/J/CH conta, K não conta porque continua sendo
 // dia de trabalho).
-function escalaBlocoHeaderHTML(label, contagem, nivel, NCOLS, grupoBotao) {
+// ── Sub-bloco dentro do grupo ──────────────────────────
+// O agrupamento antes descia por Setor → Bloco, os dois campos MANUAIS.
+// Como quase ninguém preenche, todo mundo caía no mesmo balde: os 4
+// supervisores de BEL apareciam juntos mesmo sendo 2 de noite (22:00 e
+// 23:00) e 2 de manhã (10:00 e 11:00). Agora o critério é escolhido, e o
+// padrão é o Turno automático — que já separa esse caso sozinho, sem
+// depender de ninguém cadastrar nada.
+const ESCALA_CRITERIOS_SUBBLOCO = [
+  { valor: 'turno',   label: 'Turno (pelo horário)', dica: 'Alpha, Bravo, Charlie ou Delta, calculado pelo horário de entrada' },
+  { valor: 'horario', label: 'Horário exato',        dica: 'Separa 22:00 de 23:00 — cada horário de entrada/saída vira um sub-bloco' },
+  { valor: 'setor',   label: 'Setor (manual)',       dica: 'Usa o campo Setor preenchido na linha de cada pessoa' },
+  { valor: 'bloco',   label: 'Bloco (manual)',       dica: 'Usa o campo Bloco preenchido na linha de cada pessoa' },
+  { valor: 'nenhum',  label: 'Sem sub-bloco',        dica: 'Só o grupo de função, sem dividir por horário' },
+];
+
+function escalaCriterioSubBloco() {
+  return window._escalaCriterioSubBloco || 'turno';
+}
+
+// Rótulo do sub-bloco de um colaborador, no critério ativo. É a chave do
+// agrupamento e o texto do cabeçalho — por isso o horário exato já sai
+// formatado pra leitura ("22:00 às 02:00").
+function escalaSubBlocoDoColab(c, ano, mesNum, diasNoMes, criterio) {
+  const crit = criterio || escalaCriterioSubBloco();
+  if (crit === 'nenhum') return null;
+  if (crit === 'setor')  return c.turno || '(sem setor)';
+  if (crit === 'bloco')  return c.bloco_horario || '(sem bloco)';
+
+  const entrada = escalaEntradaEfetivaDoColab(c, ano, mesNum, diasNoMes);
+  if (crit === 'horario') {
+    if (!entrada) return '(sem horário)';
+    const horarioFixo = escalaHorarioFixoDoColab(c.matricula, ano, mesNum, diasNoMes);
+    const saidaCalc = horarioFixo ? horarioFixo.split('-')[1] : null;
+    const saida = c.saida_manual || saidaCalc;
+    return saida ? `${entrada} às ${saida}` : entrada;
+  }
+  return entrada ? escalaSetorDoTurno(entrada) : '(sem horário)';
+}
+
+function escalaSetCriterioSubBloco(valor) {
+  window._escalaCriterioSubBloco = valor;
+  try { localStorage.setItem('gde_escala_criterio_subbloco', valor); } catch (_) {}
+  escalaGradeAtualiza();
+}
+
+// Ordena os sub-blocos: primeiro pelo horário de entrada de quem está
+// dentro (Alpha antes de Bravo antes de Charlie antes de Delta, e 10:00
+// antes de 22:00), com os "sem X" sempre por último. Ordenar o rótulo
+// como texto puro colocaria "Turno Alpha" antes de "Turno Bravo" por
+// acaso, mas quebraria no critério de horário exato.
+function escalaOrdenarSubBlocos(entradas, ano, mesNum, diasNoMes) {
+  const chave = (lista) => {
+    const entradas = lista
+      .map(c => escalaEntradaEfetivaDoColab(c, ano, mesNum, diasNoMes))
+      .filter(Boolean)
+      .sort();
+    return entradas[0] || 'zz';
+  };
+  return [...entradas].sort((a, b) => {
+    const semA = /^\(sem /.test(a[0]), semB = /^\(sem /.test(b[0]);
+    if (semA !== semB) return semA ? 1 : -1;
+    return chave(a[1]).localeCompare(chave(b[1])) || a[0].localeCompare(b[0], 'pt-BR');
+  });
+}
+
+function escalaBlocoHeaderHTML(label, contagem, nivel, NCOLS, filtroBotoes) {
   const bg = nivel === 'funcao' ? 'var(--bg-surface)' : nivel === 'turno-a' ? 'rgba(0,160,210,.12)' : nivel === 'turno-b' ? 'rgba(159,122,234,.12)' : 'var(--bg-hover)';
   const cor = nivel === 'funcao' ? 'var(--text-primary)' : nivel === 'turno-a' ? 'var(--blue)' : nivel === 'turno-b' ? 'var(--purple)' : 'var(--text-secondary)';
   const paddingLeft = nivel === 'funcao' ? '10px' : nivel === 'bloco' ? '42px' : '26px';
-  const botaoHtml = grupoBotao ? `<button class="adh-refresh-btn" style="padding:3px 10px;font-size:10px;margin-left:12px" onclick="escalaGerarFolgasAuto('${escalaEscapeAttr(grupoBotao)}')" title="Gera folgas automáticas só pra esse grupo">${escalaIcone('zap')}Gerar folgas</button>` : '';
+
+  // "Gerar folgas" e "Remover folgas" andam em par: antes só dava pra
+  // gerar por grupo, e pra tirar era o "Limpar folgas/status" da barra de
+  // cima, que apaga a base+mês inteiros. Agora o mesmo recorte que gera
+  // também desfaz. Os dois aceitam o filtro de sub-bloco, então dá pra
+  // regerar só o turno da noite dos supervisores sem tocar no da manhã.
+  let botoesHtml = '';
+  if (filtroBotoes) {
+    // O onclick vai entre aspas SIMPLES porque o argumento é um JSON com
+    // aspas duplas. Por isso o escape precisa cobrir a apóstrofe também —
+    // escalaEscapeAttr sozinho não cobre, e um rótulo com apóstrofe
+    // fecharia o atributo no meio.
+    const arg = String(JSON.stringify(filtroBotoes))
+      .replace(/&/g, '&amp;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const alvo = escalaEscapeAttr(filtroBotoes.subBloco ? `${filtroBotoes.grupo} · ${filtroBotoes.subBloco}` : filtroBotoes.grupo);
+    botoesHtml = `
+      <button class="adh-refresh-btn" style="padding:3px 10px;font-size:10px;margin-left:12px" onclick='escalaGerarFolgasAuto(${arg})' title="Gera folgas automáticas só pra ${alvo}">${escalaIcone('zap')}Gerar folgas</button>
+      <button class="adh-refresh-btn" style="padding:3px 10px;font-size:10px;margin-left:6px;color:#fc8181" onclick='escalaRemoverFolgas(${arg})' title="Apaga as folgas (F e FA) só de ${alvo} — não mexe em férias, afastamento nem curso">${escalaIcone('trash')}Remover folgas</button>`;
+  }
+
   return `<tr><td colspan="${NCOLS}" style="padding:6px ${paddingLeft};background:${bg}">
     <div style="display:flex;align-items:center">
       <span style="font-weight:600;color:${cor};font-size:${nivel==='funcao'?'12.5px':'11.5px'}">${label}</span>
       <span style="color:${cor};opacity:.75;font-size:11px;margin-left:8px">${contagem} pessoa${contagem===1?'':'s'}</span>
-      ${botaoHtml}
+      ${botoesHtml}
     </div>
   </td></tr>`;
 }
@@ -1339,7 +1439,7 @@ function escalaBlocoSubtotalHTML(label, colabsDoBloco, ano, mesNum, diasNoMes, N
   const peso = forte ? '700' : '600';
   const borda = forte ? 'border-top:1px solid rgba(0,160,210,.25);border-bottom:1px solid rgba(0,160,210,.25)' : 'border-top:1px solid var(--border)';
   return `<tr style="background:${bg};${borda}">
-    <td colspan="${NCOLS_FIXAS}" style="padding:5px 10px;color:${forte?'var(--blue)':'var(--text-secondary)'};font-size:11px;text-align:right;font-weight:${peso};border:${BORDA}">${label} — trabalhando no dia →</td>
+    <td colspan="${NCOLS_FIXAS}" style="padding:5px 10px;color:${forte?'var(--blue)':'var(--text-secondary)'};font-size:11px;text-align:right;font-weight:${peso};border:${BORDA}">${label} — trabalhando no dia ${escalaIconeSolto('arrowRight', 11)}</td>
     ${porDia.map(n => `<td style="text-align:center;border:${BORDA};color:${forte?'var(--blue)':'var(--text-secondary)'};font-weight:${peso};font-size:11px">${n}</td>`).join('')}
   </tr>`;
 }
@@ -1473,8 +1573,8 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   html += th({ label:'Matrícula', col:'matricula', fixaLeft:leftMat, titulo:'Clique pra ordenar por matrícula', classe:'escala-fixa' });
   html += th({ label:'Nome', col:'nome', fixaLeft:leftNome, titulo:'Clique pra ordenar por nome', classe:'escala-fixa escala-fixa-borda' });
   if (secOn) {
-    html += th({ label:'Turno', col:'turno', titulo:'Calculado sozinho pelo horário de entrada — clique pra ordenar' });
-    html += th({ label:'Setor', col:'setor', titulo:'Campo manual, particular de cada base — clique pra ordenar' });
+    html += th({ label:'Turno auto', col:'turno', titulo:'Alpha/Bravo/Charlie/Delta, calculado sozinho pelo horário de entrada — clique pra ordenar' });
+    html += th({ label:'Setor', col:'setor', titulo:'Campo MANUAL, preenchido na linha de cada pessoa, particular de cada base — clique pra ordenar' });
     html += th({ label:'Bloco', col:'bloco', titulo:'Campo manual — junta quem entra em horários diferentes mas é o mesmo bloco (ex.: 23:00 com 00:00) — clique pra ordenar' });
   }
   html += th({ label:'Função' });
@@ -1570,25 +1670,23 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     // continua valendo aqui.
     colabs.forEach((c, ci) => { html += escalaLinhaColabHTML(c, ci, ctxLinha); });
   } else {
-    // Agrupado: Grupo (bloco maior, lista fechada) → Setor (subgrupo manual)
-    // → Bloco de horário (subgrupo manual dentro do setor, opcional — só
-    // aparece se tiver mais de um bloco naquele setor, pra não poluir quem
-    // ainda não usa). A ordem manual de arrastar não se aplica aqui — usa a
-    // mesma coluna/direção escolhida no clique do cabeçalho (padrão:
-    // Entrada, crescente).
+    // Agrupado: Grupo de função → sub-bloco (critério escolhido, padrão
+    // Turno automático) → linhas → contagem de gente trabalhando por dia.
+    //
+    // A contagem por dia agora sai SEMPRE. Antes ela dependia do grupo ter
+    // mais de um Setor ou mais de um Bloco (campos manuais, quase sempre
+    // vazios), então na prática nunca aparecia.
+    const criterio = escalaCriterioSubBloco();
     const colunaOrdemGrupo = colunaAtiva || 'entrada';
 
-    const gruposFuncao = new Map(); // grupoCodigo -> { label, setores: Map(setorLabel -> Map(blocoLabel -> colabs[])) }
+    const gruposFuncao = new Map(); // codigo -> { label, subBlocos: Map(label -> colabs[]) }
     colabs.forEach(c => {
       const { codigo, label } = escalaFuncaoGrupoDoColab(c);
-      if (!gruposFuncao.has(codigo)) gruposFuncao.set(codigo, { label, setores: new Map() });
+      if (!gruposFuncao.has(codigo)) gruposFuncao.set(codigo, { label, subBlocos: new Map() });
       const grupo = gruposFuncao.get(codigo);
-      const setorLabel = c.turno || '(sem setor)';
-      if (!grupo.setores.has(setorLabel)) grupo.setores.set(setorLabel, new Map());
-      const setorMap = grupo.setores.get(setorLabel);
-      const blocoLabel = c.bloco_horario || '(sem bloco)';
-      if (!setorMap.has(blocoLabel)) setorMap.set(blocoLabel, []);
-      setorMap.get(blocoLabel).push(c);
+      const sub = escalaSubBlocoDoColab(c, ano, mesNum, diasNoMes, criterio) || '__todos__';
+      if (!grupo.subBlocos.has(sub)) grupo.subBlocos.set(sub, []);
+      grupo.subBlocos.get(sub).push(c);
     });
 
     // "Mostrar grupos" — null/ausente = mostra todos (padrão)
@@ -1598,43 +1696,51 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
       funcoesOrdenadas = funcoesOrdenadas.filter(([, grupo]) => gruposVisiveis.has(grupo.label));
     }
     const recolhido = !!window._escalaBlocosRecolhidos;
-    const ordenarColabs = (lista) => [...lista].sort((a, b) =>
-      direcao * String(valorColuna(a, colunaOrdemGrupo)).localeCompare(String(valorColuna(b, colunaOrdemGrupo)), 'pt-BR', { numeric: true }));
+
+    // Dentro do sub-bloco, a ordem de arrastar manda — era isso que fazia
+    // o arrastar parecer quebrado no modo agrupado: ele salvava a ordem e
+    // a tela reordenava por Entrada logo em seguida, ignorando o que
+    // acabou de ser gravado.
+    const ordenarColabs = (lista) => {
+      const temManual = lista.some(c => c.ordem_manual != null);
+      if (temManual) {
+        return [...lista].sort((a, b) => {
+          const oa = a.ordem_manual, ob = b.ordem_manual;
+          if (oa != null && ob != null) return oa - ob;
+          if (oa != null) return -1;
+          if (ob != null) return 1;
+          return 0;
+        });
+      }
+      return [...lista].sort((a, b) =>
+        direcao * String(valorColuna(a, colunaOrdemGrupo)).localeCompare(String(valorColuna(b, colunaOrdemGrupo)), 'pt-BR', { numeric: true }));
+    };
 
     funcoesOrdenadas.forEach(([, grupo]) => {
-      const todosDoGrupo = [...grupo.setores.values()].flatMap(setorMap => [...setorMap.values()].flat());
-      html += escalaBlocoHeaderHTML(grupo.label, todosDoGrupo.length, 'funcao', NCOLS, grupo.label);
+      const todosDoGrupo = [...grupo.subBlocos.values()].flat();
+      const subBlocos = escalaOrdenarSubBlocos([...grupo.subBlocos.entries()], ano, mesNum, diasNoMes);
+      const semSubBloco = criterio === 'nenhum' || (subBlocos.length === 1 && subBlocos[0][0] === '__todos__');
 
-      const setoresOrdenados = [...grupo.setores.entries()].sort((a, b) => {
-        if (a[0] === '(sem setor)') return 1;
-        if (b[0] === '(sem setor)') return -1;
-        return a[0].localeCompare(b[0]);
+      html += escalaBlocoHeaderHTML(grupo.label, todosDoGrupo.length, 'funcao', NCOLS, { grupo: grupo.label });
+
+      subBlocos.forEach(([subLabel, colabsDoSub], si) => {
+        if (!semSubBloco) {
+          html += escalaBlocoHeaderHTML(subLabel, colabsDoSub.length, si % 2 === 0 ? 'turno-a' : 'turno-b', NCOLS,
+            { grupo: grupo.label, subBloco: subLabel, criterio });
+        }
+        if (!recolhido) {
+          ordenarColabs(colabsDoSub).forEach((c, ci) => {
+            html += escalaLinhaColabHTML(c, ci, { ...ctxLinha, grupoDaLinha: grupo.label, subBlocoDaLinha: subLabel });
+          });
+        }
+        // Contagem do sub-bloco. Se o grupo tem um sub-bloco só, essa linha
+        // já é o total do grupo — não repete embaixo.
+        html += escalaBlocoSubtotalHTML(
+          semSubBloco ? `Total ${grupo.label}` : subLabel,
+          colabsDoSub, ano, mesNum, diasNoMes, NCOLS_FIXAS, semSubBloco, BORDA);
       });
 
-      setoresOrdenados.forEach(([setorLabel, blocosMap], si) => {
-        const todosDoSetor = [...blocosMap.values()].flat();
-        const temMaisDeUmSetor = grupo.setores.size > 1;
-        if (temMaisDeUmSetor) html += escalaBlocoHeaderHTML(setorLabel, todosDoSetor.length, si % 2 === 0 ? 'turno-a' : 'turno-b', NCOLS);
-
-        const temMaisDeUmBloco = blocosMap.size > 1;
-        const blocosOrdenados = [...blocosMap.entries()].sort((a, b) => {
-          if (a[0] === '(sem bloco)') return 1;
-          if (b[0] === '(sem bloco)') return -1;
-          return a[0].localeCompare(b[0]);
-        });
-
-        blocosOrdenados.forEach(([blocoLabel, colabsDoBloco]) => {
-          if (temMaisDeUmBloco) html += escalaBlocoHeaderHTML(blocoLabel, colabsDoBloco.length, 'bloco', NCOLS);
-          if (!recolhido) {
-            ordenarColabs(colabsDoBloco).forEach((c, ci) => { html += escalaLinhaColabHTML(c, ci, ctxLinha); });
-          }
-          if (temMaisDeUmBloco) html += escalaBlocoSubtotalHTML(blocoLabel, colabsDoBloco, ano, mesNum, diasNoMes, NCOLS_FIXAS, false, BORDA);
-        });
-
-        if (temMaisDeUmSetor) html += escalaBlocoSubtotalHTML(setorLabel, todosDoSetor, ano, mesNum, diasNoMes, NCOLS_FIXAS, false, BORDA);
-      });
-
-      if (grupo.setores.size > 1) {
+      if (!semSubBloco && subBlocos.length > 1) {
         html += escalaBlocoSubtotalHTML(`Total ${grupo.label}`, todosDoGrupo, ano, mesNum, diasNoMes, NCOLS_FIXAS, true, BORDA);
       }
       html += `<tr><td colspan="${NCOLS}" style="height:8px;border:none"></td></tr>`;
@@ -2064,27 +2170,98 @@ async function escalaRemoverSelecionados() {
 // função + horário de entrada. Assim que arrasta uma vez, a ordem vira
 // manual (salva em ordem_manual) e passa a valer até clicar em "Ordenar
 // automático" de novo.
+//
+// Estava sem efeito visível por dois motivos, os dois de ordenação e
+// nenhum do arrastar em si: (1) no modo agrupado o desenho ignorava
+// ordem_manual de propósito e reordenava por Entrada; (2) com qualquer
+// coluna de ordenação ativa, a coluna vencia a ordem manual. O drop
+// gravava certo no banco e a tela redesenhava idêntica.
 function escalaDragStart(e, matricula) {
+  if (window._escalaTravada) { e.preventDefault(); return; }
+  window._escalaArrastando = matricula;
   e.dataTransfer.setData('text/plain', matricula);
   e.dataTransfer.effectAllowed = 'move';
+  document.querySelector(`tr[data-escala-linha="${matricula}"]`)?.classList.add('escala-arrastando');
+}
+
+function escalaDragEnd() {
+  window._escalaArrastando = null;
+  document.querySelectorAll('.escala-arrastando, .escala-alvo-acima, .escala-alvo-abaixo')
+    .forEach(el => el.classList.remove('escala-arrastando', 'escala-alvo-acima', 'escala-alvo-abaixo'));
+}
+
+// Só aceita soltar dentro do MESMO sub-bloco. Arrastar um supervisor da
+// noite pro meio dos da manhã não reordenaria nada de verdade — o
+// agrupamento é por horário, então ele voltaria pro lugar de origem no
+// próximo desenho. Melhor recusar na hora, com o cursor mostrando isso.
+function escalaMesmoBloco(origem, destino) {
+  if (!window._escalaAgruparPorTurno) return true;
+  const trO = document.querySelector(`tr[data-escala-linha="${origem}"]`);
+  const trD = document.querySelector(`tr[data-escala-linha="${destino}"]`);
+  if (!trO || !trD) return true;
+  return trO.dataset.grupo === trD.dataset.grupo && trO.dataset.subbloco === trD.dataset.subbloco;
+}
+
+function escalaDragOver(e, matriculaAlvo) {
+  const arrastada = window._escalaArrastando;
+  if (!arrastada || arrastada === matriculaAlvo) return;
+  if (!escalaMesmoBloco(arrastada, matriculaAlvo)) { e.dataTransfer.dropEffect = 'none'; return; }
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+
+  // Linha-guia em cima ou embaixo, conforme a metade da linha em que o
+  // cursor está — sem isso não dá pra saber onde a pessoa vai cair.
+  const tr = e.currentTarget;
+  const caixa = tr.getBoundingClientRect();
+  const acima = (e.clientY - caixa.top) < caixa.height / 2;
+  tr.classList.toggle('escala-alvo-acima', acima);
+  tr.classList.toggle('escala-alvo-abaixo', !acima);
+}
+
+function escalaDragLeave(e) {
+  e.currentTarget.classList.remove('escala-alvo-acima', 'escala-alvo-abaixo');
 }
 
 async function escalaDrop(e, matriculaAlvo) {
   e.preventDefault();
+  const tr = e.currentTarget;
+  const soltarAcima = tr.classList.contains('escala-alvo-acima');
+  escalaDragEnd();
   if (escalaVerificarTravada()) return;
+
   const matriculaArrastada = e.dataTransfer.getData('text/plain');
   if (!matriculaArrastada || matriculaArrastada === matriculaAlvo) return;
+  if (!escalaMesmoBloco(matriculaArrastada, matriculaAlvo)) {
+    escalaMsg('Só dá pra reordenar dentro do mesmo bloco. Pra mudar alguém de turno, ajuste o horário de entrada dessa pessoa.', true);
+    return;
+  }
 
+  // A ordem de referência é a que está NA TELA, não a do array bruto —
+  // senão soltar "antes do Fábio" no visual gravava uma posição diferente.
+  const naTela = escalaMatriculasNaTela();
   const lista = window._escalaColabs || [];
-  const idxArrastado = lista.findIndex(c => c.matricula === matriculaArrastada);
-  const idxAlvo = lista.findIndex(c => c.matricula === matriculaAlvo);
-  if (idxArrastado === -1 || idxAlvo === -1) return;
+  const porMat = new Map(lista.map(c => [c.matricula, c]));
+  const ordenada = naTela.map(m => porMat.get(m)).filter(Boolean);
+  lista.forEach(c => { if (!naTela.includes(c.matricula)) ordenada.push(c); });
 
-  const [item] = lista.splice(idxArrastado, 1);
-  lista.splice(idxAlvo, 0, item);
-  lista.forEach((c, i) => { c.ordem_manual = i; });
+  const idxArrastado = ordenada.findIndex(c => c.matricula === matriculaArrastada);
+  if (idxArrastado === -1) return;
+  const [item] = ordenada.splice(idxArrastado, 1);
+  let idxAlvo = ordenada.findIndex(c => c.matricula === matriculaAlvo);
+  if (idxAlvo === -1) return;
+  ordenada.splice(soltarAcima ? idxAlvo : idxAlvo + 1, 0, item);
 
-  const updates = lista.map((c, i) => ({
+  ordenada.forEach((c, i) => { c.ordem_manual = i; });
+  window._escalaColabs = ordenada;
+
+  // Ordenação por coluna venceria a ordem manual no próximo desenho —
+  // arrastar desliga ela, senão o arrasto some na frente do usuário.
+  if (window._escalaOrdemColuna) {
+    window._escalaOrdemColuna = null;
+    try { localStorage.removeItem('gde_escala_ordem_coluna'); } catch (_) {}
+  }
+
+  const updates = ordenada.map((c, i) => ({
     base: window._escalaBase, mes: window._escalaMes, matricula: c.matricula, nome: c.nome, ordem_manual: i,
   }));
   const BATCH = 200;
@@ -2093,7 +2270,7 @@ async function escalaDrop(e, matriculaAlvo) {
     if (error) { escalaMsg('Erro ao salvar a ordem: ' + error.message, true); return; }
   }
   escalaGradeAtualiza();
-  escalaMsg('Ordem atualizada — a lista não vai mais reordenar sozinha até você clicar em "Ordenar automático".');
+  escalaMsg(`${item.nome || item.matricula} movido. A lista não reordena mais sozinha até você clicar em "Ordenar automático".`);
 }
 
 async function escalaLimparOrdemManual() {
@@ -2468,13 +2645,66 @@ async function escalaDiasSeguidosNoFimDoMesAnterior(base, matricula, mesAtual) {
   return seq;
 }
 
+// Recorte de colaboradores usado por "Gerar folgas" e "Remover folgas".
+// Aceita string (só o grupo, formato antigo) ou {grupo, subBloco, criterio}.
+function escalaFiltrarColabs(filtro) {
+  let colabs = window._escalaColabs || [];
+  if (!filtro) return { colabs, rotulo: '' };
+
+  const f = typeof filtro === 'string' ? { grupo: filtro } : filtro;
+  if (f.grupo) colabs = colabs.filter(c => escalaFuncaoGrupoDoColab(c).label === f.grupo);
+  if (f.subBloco) {
+    const [ano, mesNum] = window._escalaMes.split('-').map(Number);
+    const diasNoMes = new Date(ano, mesNum, 0).getDate();
+    colabs = colabs.filter(c => escalaSubBlocoDoColab(c, ano, mesNum, diasNoMes, f.criterio) === f.subBloco);
+  }
+  const rotulo = [f.grupo, f.subBloco].filter(Boolean).join(' · ');
+  return { colabs, rotulo };
+}
+
+// Apaga só as folgas (F e FA) do recorte, deixando férias (L, que nem é
+// manual), afastamento (J) e curso (K) intactos. É o par do "Gerar
+// folgas": antes, pra desfazer uma geração era preciso usar o "Limpar
+// folgas/status" da barra de cima, que apaga a base+mês inteiros e leva
+// junto J, K e CH que alguém tinha marcado na mão.
+async function escalaRemoverFolgas(filtro) {
+  if (escalaVerificarTravada()) return;
+  const { colabs, rotulo } = escalaFiltrarColabs(filtro);
+  if (!colabs.length) { escalaMsg(rotulo ? `Não achei ninguém em "${rotulo}".` : 'Nenhum colaborador nessa escala.', true); return; }
+
+  const base = window._escalaBase, mes = window._escalaMes;
+  const matriculas = colabs.map(c => c.matricula);
+  const alvos = [];
+  for (const [chave, registro] of window._escalaDias) {
+    const mat = chave.split('|')[0];
+    if (matriculas.includes(mat) && (registro.status === 'F' || registro.status === 'FA')) alvos.push(chave);
+  }
+  if (!alvos.length) { escalaMsg(`Nenhuma folga marcada em ${rotulo || 'nesta escala'} pra remover.`); return; }
+
+  const onde = rotulo ? `de ${rotulo}` : 'de TODA a escala';
+  if (!confirm(`Remover ${alvos.length} folga(s) ${onde}?\n\nFérias, afastamento (J), curso (K) e compensação (CH) não são tocados.`)) return;
+
+  // Apaga em lotes por matrícula — o Supabase limita o tamanho do "in".
+  const LOTE = 100;
+  for (let i = 0; i < matriculas.length; i += LOTE) {
+    const { error } = await db.from('escala_dia').delete()
+      .eq('base', base).eq('mes', mes)
+      .in('matricula', matriculas.slice(i, i + LOTE))
+      .in('status', ['F', 'FA']);
+    if (error) { escalaMsg('Erro ao remover folgas: ' + error.message, true); return; }
+  }
+  alvos.forEach(chave => window._escalaDias.delete(chave));
+
+  escalaGradeAtualiza();
+  escalaMsg(`${alvos.length} folga(s) removida(s) ${onde}.`);
+}
+
 async function escalaGerarFolgasAuto(grupoFiltro) {
   if (escalaVerificarTravada()) return;
-  let colabs = window._escalaColabs || [];
-  if (grupoFiltro) colabs = colabs.filter(c => escalaFuncaoGrupoDoColab(c).label === grupoFiltro);
-  if (!colabs.length) { escalaMsg(grupoFiltro ? `Não achei ninguém no grupo "${grupoFiltro}".` : 'Adicione pelo menos um colaborador antes.', true); return; }
+  const { colabs, rotulo: rotuloFiltro } = escalaFiltrarColabs(grupoFiltro);
+  if (!colabs.length) { escalaMsg(grupoFiltro ? `Não achei ninguém em "${rotuloFiltro}".` : 'Adicione pelo menos um colaborador antes.', true); return; }
 
-  escalaMostrarLoading(`Calculando folgas para ${colabs.length} colaborador${colabs.length===1?'':'es'}${grupoFiltro?` (${grupoFiltro})`:''}...`);
+  escalaMostrarLoading(`Calculando folgas para ${colabs.length} colaborador${colabs.length===1?'':'es'}${rotuloFiltro?` (${rotuloFiltro})`:''}...`);
 
   const [ano, mesNum] = window._escalaMes.split('-').map(Number);
   const diasNoMes = new Date(ano, mesNum, 0).getDate();
