@@ -2779,3 +2779,55 @@ html, body:has(#app-shell) { overflow-x: auto; overflow-y: hidden; }
    as células e fazer a tabela inteira tremer durante o arraste. */
 #escala-grade-wrap tr.escala-alvo-acima > td { box-shadow: inset 0 2px 0 0 var(--blue); }
 #escala-grade-wrap tr.escala-alvo-abaixo > td { box-shadow: inset 0 -2px 0 0 var(--blue); }
+
+/* ══════════════════════════════════════════════════════
+   ESCALA ONLINE — bloco fixo do topo, saída calculada
+   e selo de fora do cadastro
+════════════════════════════════════════════════════════ */
+
+/* O topo da grade é uma pilha de 4 faixas presas: cabeçalho, "Trabalhando
+   no dia", "Pico da malha" e a linha de cadastro. Fundo SÓLIDO e próprio
+   (não o das linhas) — sem isso as linhas do corpo apareciam por baixo ao
+   rolar, que era a sensação de sobreposição. O offset vertical de cada
+   faixa é medido em escalaAjustarStickyOffset(). */
+#escala-grade-wrap thead th,
+#escala-grade-wrap tr.escala-linha-trabalhando > td,
+#escala-grade-wrap tr.escala-linha-pico > td,
+#escala-grade-wrap tr.escala-linha-add > td {
+  background: var(--escala-topo-bg, #16203a) !important;
+}
+[data-theme="light"] #escala-grade-wrap thead th,
+[data-theme="light"] #escala-grade-wrap tr.escala-linha-trabalhando > td,
+[data-theme="light"] #escala-grade-wrap tr.escala-linha-pico > td,
+[data-theme="light"] #escala-grade-wrap tr.escala-linha-add > td {
+  background: #eef2f7 !important;
+}
+
+#escala-grade-wrap tr.escala-linha-add > td {
+  position: sticky;
+  top: var(--escala-topo-add, 96px);
+  z-index: 12;
+}
+/* Borda grossa fechando a área fixa — deixa explícito onde acaba o que
+   está preso e começa o que rola. */
+#escala-grade-wrap tr.escala-linha-add > td {
+  border-bottom: 2px solid var(--blue) !important;
+}
+#escala-grade-wrap tr.escala-linha-add .escala-fixa { z-index: 22; }
+
+/* Saída é calculada, não editável — some o affordance de campo. */
+#escala-grade-wrap td.escala-calculado { cursor: default; user-select: text; }
+
+.escala-selo-fora {
+  display: inline-block;
+  margin-left: 7px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(246,173,85,.16);
+  color: var(--amber, #f6ad55);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+}

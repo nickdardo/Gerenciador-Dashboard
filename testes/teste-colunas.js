@@ -184,4 +184,90 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaColunasSecundarias: fal
   tudoOk &= (min <= uteis);
 });
 
+// ══════════════════════════════════════════════════════
+// REGRESSÃO — trava o comportamento acordado com o cliente.
+// Se algum destes quebrar, algo saiu do combinado.
+// ══════════════════════════════════════════════════════
+(function () {
+  const ok = (nome, cond, detalhe) => {
+    console.log(`${cond ? 'PASSOU' : 'FALHOU'}  ${nome}${detalhe ? ` · ${detalhe}` : ''}`);
+    tudoOk &= cond;
+  };
+
+  // ── Meta de folgas ──────────────────────────────────
+  // CH 120 segue a regra da 100 (decisão do cliente) e ninguém fica abaixo
+  // de um descanso semanal, seja qual for a CH.
+  const meta = (ch, dias) => sandbox.escalaMetaFolgasDoColab(ch, dias);
+  ok('CH 120 usa a regra da CH 100', meta(120, 31) === meta(100, 31), `120→${meta(120,31)}, 100→${meta(100,31)}`);
+  ok('CH 120 não devolve mais 1 folga no mês', meta(120, 31) >= 5, `meta = ${meta(120,31)}`);
+  const piso31 = Math.ceil(31 / 7);
+  ok('piso de descanso semanal em toda CH',
+    [60, 90, 100, 120, 180, 210, 999].every(ch => meta(ch, 31) >= piso31),
+    `piso = ${piso31}`);
+
+  // ── Saída calculada = entrada + jornada + intervalo ──
+  const saida = (e, ch) => sandbox.escalaSaidaCalculada(e, ch);
+  ok('CH 210 (7h + 1h intervalo) soma 8h', saida('22:00', 210) === '06:00', `22:00 → ${saida('22:00', 210)}`);
+  ok('CH 180 (6h + 15min) soma 6h15', saida('00:00', 180) === '06:15', `00:00 → ${saida('00:00', 180)}`);
+  ok('CH 100 (4h, sem intervalo) soma 4h', saida('08:00', 100) === '12:00', `08:00 → ${saida('08:00', 100)}`);
+  ok('vira o dia sem estourar 24h', saida('20:00', 210) === '04:00', `20:00 → ${saida('20:00', 210)}`);
+  ok('sem CH conhecida não inventa saída', saida('08:00', 999) === null);
+
+  // ── Férias: todos os períodos, não só o último ───────
+  sandbox.window.eoFeriasAll = [
+    { matricula: '30100', data_inicio: '2026-09-05', data_fim: '2026-09-20' },
+    { matricula: '30100', data_inicio: '2026-12-01', data_fim: '2026-12-20' },
+  ];
+  sandbox.window.eoFerias = new Map([['30100', { matricula: '30100', data_inicio: '2026-12-01', data_fim: '2026-12-20' }]]);
+  ok('férias de setembro aparecem mesmo havendo período posterior',
+    sandbox.escalaEstaDeFerias('30100', 2026, 9, 10) === true);
+  ok('dia fora de qualquer período não vira férias',
+    sandbox.escalaEstaDeFerias('30100', 2026, 9, 25) === false);
+
+  // Exceção lançada na escala anula o L daquele dia, sem tocar no RH.
+  sandbox.window._escalaDias.set('30100|10', { status: 'T' });
+  ok('exceção "T" anula as férias só naquele dia',
+    sandbox.escalaEstaDeFerias('30100', 2026, 9, 10) === false);
+  sandbox.window._escalaDias.delete('30100|10');
+  sandbox.window.eoFeriasAll = [];
+
+  // ── Colunas: Setor e Bloco saíram da grade ──────────
+  Object.assign(sandbox.window, { _escalaColunasSecundarias: true, _escalaAgruparPorTurno: false });
+  const html = sandbox.escalaGradeTabelaHTML(ANO, MES, DIAS);
+  ok('coluna Setor removida do cabeçalho', !/>Setor</.test(html));
+  ok('coluna Bloco removida do cabeçalho', !/>Bloco</.test(html));
+  ok('Turno auto continua na grade', html.includes('Turno auto'));
+  ok('Saída não é mais campo editável',
+    !/escalaEditarHorario\('[^']+','saida'/.test(html));
+  ok('Saída aparece como valor calculado', html.includes('escala-calculado'));
+
+  // ── Bloco fixo do topo ──────────────────────────────
+  ok('linha de contagem marcada pra medição', html.includes('escala-linha-trabalhando'));
+  ok('linha de cadastro presa no topo', html.includes('escala-linha-add'));
+  ok('cadastro manual disponível na linha de adicionar', html.includes('escala-form-manual'));
+  ok('CH é campo obrigatório do cadastro manual', html.includes('escala-man-ch'));
+
+  // ── Critérios de sub-bloco somem quando não há dado ──
+  // O fixture traz Setor/Bloco preenchidos de propósito (pra exercitar esses
+  // critérios acima). Aqui simula uma base como BEL, onde os dois estão
+  // vazios — é nela que as opções devem sumir do seletor.
+  const guardado = sandbox.window._escalaColabs.map(c => [c.turno, c.bloco_horario]);
+  sandbox.window._escalaColabs.forEach(c => { c.turno = null; c.bloco_horario = null; });
+  const disp = sandbox.escalaCriteriosSubBlocoDisponiveis().map(c => c.valor);
+  ok('sem Setor/Bloco preenchido, os critérios somem do seletor',
+    !disp.includes('setor') && !disp.includes('bloco'), `disponíveis: ${disp.join(', ')}`);
+  ok('critério salvo inválido cai pro padrão Turno', (() => {
+    sandbox.window._escalaCriterioSubBloco = 'setor';
+    const efetivo = sandbox.escalaCriterioSubBloco();
+    sandbox.window._escalaCriterioSubBloco = 'turno';
+    return efetivo === 'turno';
+  })());
+  sandbox.window._escalaColabs.forEach((c, i) => { [c.turno, c.bloco_horario] = guardado[i]; });
+  sandbox.window._escalaColabs[0].turno = 'Setor Manhã';
+  ok('com Setor preenchido, o critério volta',
+    sandbox.escalaCriteriosSubBlocoDisponiveis().map(c => c.valor).includes('setor'));
+  sandbox.window._escalaColabs[0].turno = guardado[0][0];
+})();
+
 process.exit(tudoOk ? 0 : 1);
+

@@ -729,6 +729,7 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
         <h1 class="page-title">Escala Online</h1>
         <p class="page-sub">Montar escala · ${base} · ${typeof adhMonthLabel==='function'?adhMonthLabel(mes):mes} · <span id="escala-contador-colabs" style="color:var(--text-primary);font-weight:600">${(window._escalaColabs||[]).length} colaborador${(window._escalaColabs||[]).length===1?'':'es'}</span></p>
         <p id="escala-save-indicator" style="font-size:11px;margin:4px 0 0;color:var(--text-muted)">Nenhuma alteração ainda</p>
+        <p id="escala-fora-cadastro" style="font-size:11px;margin:4px 0 0;display:none"></p>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
         ${bases.length>1
@@ -780,6 +781,10 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
             ${escalaMenuItem('sheet', 'Baixar Excel da escala', 'escalaExportarExcel()')}
             ${escalaMenuItem('printer', 'Imprimir / PDF', 'escalaImprimir()')}
             ${escalaMenuDivisor()}
+            ${escalaMenuSecao('Horários e férias')}
+            ${escalaMenuItem('clock', 'Recalcular saídas pela CH', 'escalaRecalcularSaidas()', travada)}
+            ${escalaMenuItem('history', 'Recarregar férias do sistema', 'escalaRecarregarFerias()')}
+            ${escalaMenuDivisor()}
             ${escalaMenuSecao('Cursos e feriados')}
             ${escalaMenuItem('download', 'Baixar modelo de cursos', 'escalaBaixarModeloCursos()')}
             ${escalaMenuItem('upload', 'Importar cursos (.xlsx)', `document.getElementById('escala-cursos-input').click()`, travada)}
@@ -808,7 +813,7 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
         <div>
           <label style="font-size:10.5px;color:var(--text-muted);display:block;margin-bottom:3px">Dividir grupo por</label>
           <select class="adh-month-select" onchange="escalaSetCriterioSubBloco(this.value)" title="Como quebrar cada grupo de função em sub-blocos — cada sub-bloco ganha a própria contagem de gente por dia">
-            ${ESCALA_CRITERIOS_SUBBLOCO.map(c => `<option value="${c.valor}" ${escalaCriterioSubBloco()===c.valor?'selected':''} title="${c.dica}">${c.label}</option>`).join('')}
+            ${escalaCriteriosSubBlocoDisponiveis().map(c => `<option value="${c.valor}" ${escalaCriterioSubBloco()===c.valor?'selected':''} title="${c.dica}">${c.label}</option>`).join('')}
           </select>
         </div>
         <div>
@@ -863,6 +868,18 @@ function escalaGradeAtualiza() {
   }
   escalaAjustarStickyOffset();
   escalaRestaurarSelecaoVisual();
+
+  const fora = escalaContarForaCadastro();
+  const aviso = document.getElementById('escala-fora-cadastro');
+  if (aviso) {
+    aviso.style.display = fora ? 'flex' : 'none';
+    aviso.style.alignItems = 'center';
+    aviso.style.gap = '5px';
+    aviso.style.color = 'var(--amber)';
+    aviso.innerHTML = fora
+      ? `${escalaIconeSolto('alert', 12)}${fora} colaborador${fora===1?'':'es'} fora do cadastro do RH nesta escala — precisa${fora===1?'':'m'} de regularização.`
+      : '';
+  }
 }
 
 // Mede a altura de verdade do cabeçalho (varia um pouco conforme zoom/fonte
@@ -875,6 +892,19 @@ function escalaAjustarStickyOffset() {
   if (!wrap || !thead) return;
   const altura = thead.getBoundingClientRect().height;
   if (altura > 0) wrap.style.setProperty('--escala-thead-h', `${Math.round(altura)}px`);
+
+  // O bloco fixo é uma pilha: cabeçalho → "Trabalhando no dia" → "Pico da
+  // malha" → linha de cadastro. Cada uma precisa saber a altura acumulada
+  // de todas as anteriores, senão elas se sobrepõem — que era exatamente o
+  // efeito de "barrinha passando por baixo" ao rolar a grade.
+  let topo = Math.round(altura);
+  const linhaTrab = wrap.querySelector('tr.escala-linha-trabalhando');
+  if (linhaTrab) topo += Math.round(linhaTrab.getBoundingClientRect().height);
+  wrap.style.setProperty('--escala-topo-pico', `${topo}px`);
+
+  const linhaPico = wrap.querySelector('tr.escala-linha-pico');
+  if (linhaPico) topo += Math.round(linhaPico.getBoundingClientRect().height);
+  wrap.style.setProperty('--escala-topo-add', `${topo}px`);
 }
 
 // A altura do cabeçalho muda com o zoom do navegador e com a troca de
@@ -892,13 +922,28 @@ if (!window._escalaResizeRegistrado) {
 
 const ESCALA_DIAS_SEMANA = ['dom','seg','ter','qua','qui','sex','sáb'];
 
-// Descobre se um dia (dd/mm/yyyy) cai dentro de um período de férias do
-// colaborador — não duplica dado, só olha o que já existe.
+// Descobre se um dia cai dentro de QUALQUER período de férias do
+// colaborador. Antes olhava window.eoFerias, que o hcEnsureData monta
+// guardando só UM período por matrícula (o de data_fim mais recente) — quem
+// tinha férias em outubro e outro período em dezembro simplesmente não
+// aparecia de férias em outubro. A lista completa já vinha carregada em
+// window.eoFeriasAll e não era usada aqui.
+function escalaPeriodosDeFerias(matricula) {
+  const todos = window.eoFeriasAll;
+  if (Array.isArray(todos) && todos.length) {
+    return todos.filter(r => String(r.matricula) === String(matricula) && r.data_inicio && r.data_fim);
+  }
+  const unico = window.eoFerias?.get(matricula);
+  return unico?.data_inicio && unico?.data_fim ? [unico] : [];
+}
+
 function escalaEstaDeFerias(matricula, ano, mesNum, dia) {
-  const fer = window.eoFerias?.get(matricula);
-  if (!fer?.data_inicio || !fer?.data_fim) return false;
+  // Exceção lançada nesta escala ("trabalha mesmo constando férias") tem
+  // prioridade — o cadastro do RH continua intacto, só esta base+mês
+  // ignora o período naquele dia.
+  if (window._escalaDias?.get(`${matricula}|${dia}`)?.status === 'T') return false;
   const alvo = `${ano}-${String(mesNum).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
-  return alvo >= fer.data_inicio && alvo <= fer.data_fim;
+  return escalaPeriodosDeFerias(matricula).some(f => alvo >= f.data_inicio && alvo <= f.data_fim);
 }
 
 function escalaHorarioPlanejado(base, matricula, ano, mesNum, dia) {
@@ -985,6 +1030,9 @@ function escalaConteudoDoMes(c, ano, mesNum, diasNoMes) {
   for (let d = 1; d <= diasNoMes; d++) {
     const key = `${c.matricula}|${d}`;
     const manual = window._escalaDias.get(key);
+    // 'T' é a exceção de férias: existe só pra anular o L daquele dia nesta
+    // escala. Não é status visível — o dia volta a ser dia de trabalho.
+    if (manual && manual.status === 'T') { brutos.push(null); detalhes.push(null); continue; }
     if (manual) { brutos.push(manual.status); detalhes.push(manual.detalhe || null); continue; } // 'F' | 'K' | 'CH' | 'J'
     if (escalaEstaDeFerias(c.matricula, ano, mesNum, d)) { brutos.push('L'); detalhes.push(null); continue; }
     brutos.push(null); detalhes.push(null); // dia de trabalho normal
@@ -1094,7 +1142,7 @@ function escalaGrupoDaFuncao(funcaoRaw) {
   return 'Administração';
 }
 function escalaFuncaoGrupoDoColab(c) {
-  const funcao = window.eoColabs?.get(c.matricula)?.funcao || '';
+  const funcao = window.eoColabs?.get(c.matricula)?.funcao || c.funcao_manual || '';
   const label = escalaGrupoDaFuncao(funcao);
   return { codigo: label, label };
 }
@@ -1241,8 +1289,10 @@ function escalaLinhaColabHTML(c, ci, ctx) {
   const travada = !!window._escalaTravada;
   const dis = travada ? 'disabled' : '';
   const info = window.eoColabs?.get(c.matricula);
-  const funcao = info?.funcao || '—';
-  const ch = info?.ch || '—';
+  // Quem foi cadastrado manualmente não vem do RH: função e CH ficam nos
+  // campos próprios da linha (funcao_manual / ch_manual).
+  const funcao = info?.funcao || c.funcao_manual || '—';
+  const ch = info?.ch || c.ch_manual || '—';
   const horarioFixo = escalaHorarioFixoDoColab(c.matricula, ano, mesNum, diasNoMes);
   const [entradaCalc, saidaCalc] = horarioFixo ? horarioFixo.split('-') : [null, null];
   const entrada = c.entrada_manual || entradaCalc || '';
@@ -1279,23 +1329,19 @@ function escalaLinhaColabHTML(c, ci, ctx) {
     </div>
   </td>`;
   html += `<td class="escala-fixa" style="padding:2px 8px;position:sticky;left:${leftMat}px;border:${BORDA}"><input type="text" ${dis} value="${c.matricula}" onchange="escalaEditarMatricula('${c.matricula}',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-primary);font-weight:500;text-overflow:ellipsis;padding:6px 0" title="Editar matrícula"></td>`;
-  html += `<td class="escala-fixa escala-fixa-borda" style="padding:8px;color:var(--text-primary);font-weight:500;position:sticky;left:${leftNome}px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:${BORDA}" title="${c.nome||''}">${c.nome||''}</td>`;
+  // Selo pra quem foi cadastrado na mão: a pessoa existe só nesta escala,
+  // então Aderência e Headcount não sabem dela.
+  const selo = c.fora_cadastro
+    ? `<span class="escala-selo-fora" title="Fora do cadastro do RH — não aparece em Aderência nem no Headcount. Peça a regularização.">fora do RH</span>`
+    : '';
+  html += `<td class="escala-fixa escala-fixa-borda" style="padding:8px;color:var(--text-primary);font-weight:500;position:sticky;left:${leftNome}px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:${BORDA}" title="${escalaEscapeAttr(c.nome||'')}">${c.nome||''}${selo}</td>`;
+  // Setor e Bloco saíram da grade: com o sub-bloco por Turno fazendo a
+  // separação sozinho, eram duas colunas de 82px sempre em "—" nesta base.
+  // O espaço foi pro Nome e pra Função, que viviam cortados. Os campos
+  // continuam no banco e voltam a aparecer sozinhos em qualquer base que
+  // já os use (ver escalaCriteriosSubBlocoDisponiveis).
   if (secOn) {
     html += `<td style="padding:8px 10px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;border:${BORDA}">${setor}</td>`;
-    html += `<td style="padding:2px 6px;border:${BORDA}">
-      <select ${dis} onchange="escalaEditarTurno('${c.matricula}', this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-secondary);font-size:11px;padding:4px 0;cursor:pointer">
-        <option value="">—</option>
-        ${turnosExistentes.map(t => `<option value="${escalaEscapeAttr(t)}" ${c.turno===t?'selected':''}>${escalaEscapeAttr(t)}</option>`).join('')}
-        <option value="__novo__">+ novo turno...</option>
-      </select>
-    </td>`;
-    html += `<td style="padding:2px 6px;border:${BORDA}">
-      <select ${dis} onchange="escalaEditarBloco('${c.matricula}', this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-secondary);font-size:11px;padding:4px 0;cursor:pointer">
-        <option value="">—</option>
-        ${blocosExistentes.map(b => `<option value="${escalaEscapeAttr(b)}" ${c.bloco_horario===b?'selected':''}>${escalaEscapeAttr(b)}</option>`).join('')}
-        <option value="__novo__">+ novo bloco...</option>
-      </select>
-    </td>`;
   }
   html += `<td style="padding:8px 10px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:${BORDA}" title="${funcao}">${funcao}</td>`;
   html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" ${dis} value="${entrada}" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" onchange="escalaEditarHorario('${c.matricula}','entrada',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-secondary);text-align:center;font-size:12px;padding:4px"></td>`;
@@ -1303,7 +1349,15 @@ function escalaLinhaColabHTML(c, ci, ctx) {
     html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" ${dis} value="${intInicio}" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" onchange="escalaEditarHorario('${c.matricula}','intervalo_inicio',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-muted);text-align:center;font-size:12px;padding:4px" title="Início do intervalo"></td>`;
     html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" ${dis} value="${intFim}" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" onchange="escalaEditarHorario('${c.matricula}','intervalo_fim',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-muted);text-align:center;font-size:12px;padding:4px" title="Fim do intervalo"></td>`;
   }
-  html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" ${dis} value="${saida}" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" onchange="escalaEditarHorario('${c.matricula}','saida',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-secondary);text-align:center;font-size:12px;padding:4px"></td>`;
+  // Saída não é mais editável: é sempre entrada + jornada + intervalo, pela
+  // CH da pessoa. Deixar aberto convidava a digitar 07:00 num colaborador de
+  // 180h que entra 00:00 e deveria sair 06:15, sem nada barrar.
+  const saidaEsperada = escalaSaidaCalculada(entrada, ch);
+  const divergente = saidaEsperada && saida && saida !== saidaEsperada;
+  html += `<td class="escala-calculado" style="text-align:center;border:${BORDA};padding:4px;color:${divergente?'#f6ad55':'var(--text-muted)'};font-size:12px;font-variant-numeric:tabular-nums"
+    title="${divergente
+      ? `Valor salvo (${saida}) não bate com o calculado pela CH ${ch} (${saidaEsperada}). Use \"Recalcular saídas\" no menu Mais ações.`
+      : `Calculado: entrada + jornada da CH ${ch||'?'} + intervalo. Pra mudar, altere a Entrada.`}">${saida || '--:--'}</td>`;
   html += `<td style="text-align:center;color:var(--text-secondary);border:${BORDA}">${ch}</td>`;
   html += `<td style="text-align:center;border:${BORDA};color:${corFolgas};font-weight:700;font-size:11px;font-variant-numeric:tabular-nums" title="${dicaFolgas}">${folgasFeitas}/${folgasMeta}</td>`;
   conteudo.forEach((item, i) => {
@@ -1339,8 +1393,23 @@ const ESCALA_CRITERIOS_SUBBLOCO = [
   { valor: 'nenhum',  label: 'Sem sub-bloco',        dica: 'Só o grupo de função, sem dividir por horário' },
 ];
 
+// Setor e Bloco saíram da grade, então só fazem sentido como critério de
+// sub-bloco numa base que JÁ tenha esses campos preenchidos (de importação
+// ou de uso anterior). Numa base onde estão todos vazios — o caso de BEL —
+// a opção some do seletor em vez de virar um "(sem setor)" único e inútil.
+function escalaCriteriosSubBlocoDisponiveis() {
+  const colabs = window._escalaColabs || [];
+  const temSetor = colabs.some(c => c.turno);
+  const temBloco = colabs.some(c => c.bloco_horario);
+  return ESCALA_CRITERIOS_SUBBLOCO.filter(c =>
+    (c.valor !== 'setor' || temSetor) && (c.valor !== 'bloco' || temBloco));
+}
+
 function escalaCriterioSubBloco() {
-  return window._escalaCriterioSubBloco || 'turno';
+  const escolhido = window._escalaCriterioSubBloco || 'turno';
+  // Se a base deixou de ter Setor/Bloco preenchido e o critério salvo era
+  // um desses, cai pro padrão em vez de agrupar tudo num balde só.
+  return escalaCriteriosSubBlocoDisponiveis().some(c => c.valor === escolhido) ? escolhido : 'turno';
 }
 
 // Rótulo do sub-bloco de um colaborador, no critério ativo. É a chave do
@@ -1496,11 +1565,11 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   // célula: a contagem do dia 1 caía embaixo da coluna CH, todos os
   // números apareciam deslocados uma coluna pra esquerda e o último dia do
   // mês ficava sem célula nenhuma.
-  //   com extras: Seleção, Matrícula, Nome, Turno, Setor, Bloco, Função,
-  //               Entrada, Interv.↓, Interv.↑, Saída, CH, Folgas = 13
+  //   com extras: Seleção, Matrícula, Nome, Turno, Função, Entrada,
+  //               Interv.↓, Interv.↑, Saída, CH, Folgas = 11
   //   essenciais: Seleção, Matrícula, Nome, Função, Entrada, Saída, CH,
   //               Folgas = 8
-  const NCOLS_FIXAS = secOn ? 13 : 8;
+  const NCOLS_FIXAS = secOn ? 11 : 8;
   const NCOLS = NCOLS_FIXAS + diasNoMes;
   const BORDA = '1px solid var(--border-strong)';
   const turnosExistentes = [...new Set(colabs.map(c => c.turno).filter(Boolean))].sort((a,b) => a.localeCompare(b));
@@ -1515,7 +1584,10 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   // Vale lembrar: com TODAS as extras ligadas num mês de 31 dias o dia
   // fica com ~24px, que é o piso do legível. O modo confortável de
   // verdade é o de colunas essenciais, onde sobra ~34px por dia.
-  const LARG = { remover:30, mat:66, nome:160, setor:82, turno:82, bloco:82, funcao:120,
+  // Setor (82) e Bloco (82) saíram: os 164px foram pro Nome (160→235) e pra
+  // Função (120→175), que apareciam cortados com reticências em quase toda
+  // linha. Sobram ainda 34px de folga pras colunas de dia.
+  const LARG = { remover:30, mat:66, nome:235, turno:82, funcao:175,
                  entrada:50, intInicio:48, intFim:48, saida:50, ch:34, folgas:44, diaMin:24 };
   const leftMat  = LARG.remover;
   const leftNome = LARG.remover + LARG.mat;
@@ -1537,7 +1609,7 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   // os 60px da Entrada (cortando o nome do cargo) e o CH caía na largura
   // automática dos dias. Agora sai uma <col> por coluna, na mesma ordem.
   const larguraFixas = LARG.remover + LARG.mat + LARG.nome
-    + (secOn ? LARG.setor + LARG.turno + LARG.bloco : 0)
+    + (secOn ? LARG.turno : 0)
     + LARG.funcao + LARG.entrada
     + (secOn ? LARG.intInicio + LARG.intFim : 0)
     + LARG.saida + LARG.ch + LARG.folgas;
@@ -1545,7 +1617,7 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
 
   let html = `<table style="border-collapse:collapse;font-size:13px;width:100%;min-width:${larguraMinima}px;table-layout:fixed"><colgroup>
     <col style="width:${LARG.remover}px"><col style="width:${LARG.mat}px"><col style="width:${LARG.nome}px">
-    ${secOn?`<col style="width:${LARG.turno}px"><col style="width:${LARG.setor}px"><col style="width:${LARG.bloco}px">`:''}
+    ${secOn?`<col style="width:${LARG.turno}px">`:''}
     <col style="width:${LARG.funcao}px"><col style="width:${LARG.entrada}px">
     ${secOn?`<col style="width:${LARG.intInicio}px"><col style="width:${LARG.intFim}px">`:''}
     <col style="width:${LARG.saida}px"><col style="width:${LARG.ch}px"><col style="width:${LARG.folgas}px">
@@ -1574,8 +1646,6 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   html += th({ label:'Nome', col:'nome', fixaLeft:leftNome, titulo:'Clique pra ordenar por nome', classe:'escala-fixa escala-fixa-borda' });
   if (secOn) {
     html += th({ label:'Turno auto', col:'turno', titulo:'Alpha/Bravo/Charlie/Delta, calculado sozinho pelo horário de entrada — clique pra ordenar' });
-    html += th({ label:'Setor', col:'setor', titulo:'Campo MANUAL, preenchido na linha de cada pessoa, particular de cada base — clique pra ordenar' });
-    html += th({ label:'Bloco', col:'bloco', titulo:'Campo manual — junta quem entra em horários diferentes mas é o mesmo bloco (ex.: 23:00 com 00:00) — clique pra ordenar' });
   }
   html += th({ label:'Função' });
   html += th({ label:'Entrada', col:'entrada', align:'center', titulo:'Clique pra ordenar por horário de entrada' });
@@ -1583,7 +1653,7 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     html += th({ label:'Entra int.', align:'center', titulo:'Início do intervalo' });
     html += th({ label:'Volta int.', align:'center', titulo:'Fim do intervalo' });
   }
-  html += th({ label:'Saída', align:'center' });
+  html += th({ label:'Saída', align:'center', titulo:'Calculada: entrada + jornada da CH + intervalo. Não é editável — mude a Entrada.' });
   html += th({ label:'CH', align:'center' });
   html += th({ label:'Folgas', align:'center', titulo:'Folgas marcadas no mês (F e FA) contra a meta calculada pela carga horária' });
   for (let d = 1; d <= diasNoMes; d++) {
@@ -1618,11 +1688,11 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     if (razao < 0.9) return { bg: 'rgba(246,173,85,.14)', cor: '#f6ad55', aviso: ` — ${Math.round((1-razao)*100)}% abaixo da média do mês (${Math.round(mediaContagem)})` };
     return { bg: 'var(--bg-surface)', cor: 'var(--text-primary)', aviso: '' };
   };
-  html += `<tr style="background:rgba(0,160,210,.06)">
-    <td colspan="${NCOLS_FIXAS}" style="border:${BORDA};padding:6px 10px;color:var(--text-secondary);font-size:11px;text-align:right;font-weight:600;position:sticky;top:var(--escala-thead-h, 36px);left:0;z-index:1;background:var(--bg-surface);white-space:nowrap">Trabalhando no dia ${escalaIconeSolto('arrowRight', 11)}</td>
+  html += `<tr class="escala-linha-trabalhando" style="background:rgba(0,160,210,.06)">
+    <td colspan="${NCOLS_FIXAS}" class="escala-fixa" style="border:${BORDA};padding:6px 10px;color:var(--text-secondary);font-size:11px;text-align:right;font-weight:600;position:sticky;top:var(--escala-thead-h, 36px);left:0;z-index:16;white-space:nowrap">Trabalhando no dia ${escalaIconeSolto('arrowRight', 11)}</td>
     ${contagemPorDia.map(n => {
       const { bg, cor, aviso } = corDoDia(n);
-      return `<td style="text-align:center;border:${BORDA};color:${cor};font-weight:700;font-size:12px;position:sticky;top:var(--escala-thead-h, 36px);z-index:1;background:${bg}" title="${n} trabalhando${aviso}">${n}</td>`;
+      return `<td style="text-align:center;border:${BORDA};color:${cor};font-weight:700;font-size:12px;position:sticky;top:var(--escala-thead-h, 36px);z-index:15;background:${bg}" title="${n} trabalhando${aviso}">${n}</td>`;
     }).join('')}
   </tr>`;
 
@@ -1640,23 +1710,66 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     const picos = [];
     for (let d = 1; d <= diasNoMes; d++) picos.push(escalaPicoDoDia(d));
     const picoMax = Math.max(1, ...picos);
-    html += `<tr>
-      <td colspan="${NCOLS_FIXAS}" style="border:${BORDA};padding:4px 10px;color:var(--text-muted);font-size:10.5px;text-align:right;position:sticky;left:0;z-index:1;background:var(--bg-surface);white-space:nowrap">Pico da malha no dia ${escalaIconeSolto('arrowRight', 10)}</td>
+    html += `<tr class="escala-linha-pico">
+      <td colspan="${NCOLS_FIXAS}" class="escala-fixa" style="border:${BORDA};padding:4px 10px;color:var(--text-muted);font-size:10.5px;text-align:right;position:sticky;left:0;top:var(--escala-topo-pico,72px);z-index:14;white-space:nowrap">Pico da malha no dia ${escalaIconeSolto('arrowRight', 10)}</td>
       ${picos.map(p => {
         const forca = p / picoMax;
         const cor = forca > .9 ? 'var(--blue)' : 'var(--text-muted)';
-        return `<td style="text-align:center;border:${BORDA};color:${cor};font-size:10px;font-weight:${forca>.9?'700':'500'}" title="Pico de ${p} pessoas simultâneas pela malha de voos">${p}</td>`;
+        return `<td style="text-align:center;border:${BORDA};color:${cor};font-size:10px;font-weight:${forca>.9?'700':'500'};position:sticky;top:var(--escala-topo-pico,72px);z-index:13" title="Pico de ${p} pessoas simultâneas pela malha de voos">${p}</td>`;
       }).join('')}
     </tr>`;
   }
 
-  html += `<tr>
-    <td style="border:${BORDA};padding:2px;position:sticky;left:0;background:var(--adh-surface)"></td>
-    <td style="border:${BORDA};padding:2px;position:sticky;left:${leftMat}px;background:var(--adh-surface)">
-      <input type="text" id="escala-add-inline" ${window._escalaTravada ? 'disabled' : ''} placeholder="+ matrícula" onkeydown="if(event.key==='Enter') escalaAdicionarPorMatriculaInline(this.value)"
-        style="width:100%;box-sizing:border-box;background:transparent;border:1px dashed var(--border-strong);border-radius:4px;color:var(--text-secondary);font-family:monospace;font-size:11px;padding:6px 8px">
+  // Linha de cadastro. Fica GRUDADA logo abaixo das duas linhas de
+  // contagem: antes ela rolava junto com o corpo e passava por baixo do
+  // cabeçalho fixo, dando a impressão de sobreposição.
+  //
+  // Dois caminhos no mesmo lugar: matrícula que já existe no cadastro do
+  // RH (o normal), ou cadastro manual completo pra quem ainda não subiu no
+  // sistema. O manual exige CH porque é ela que governa a meta de folgas e
+  // o cálculo da saída — sem ela a pessoa cairia no fallback de 6 folgas,
+  // que pode não ser a dela.
+  const chsConhecidas = Object.keys(ESCALA_CH_REGRAS).sort((a,b) => a-b);
+  const inputEstilo = 'box-sizing:border-box;background:transparent;border:1px dashed var(--border-strong);border-radius:4px;color:var(--text-secondary);font-size:11px;padding:5px 7px';
+  html += `<tr class="escala-linha-add">
+    <td class="escala-fixa" style="border:${BORDA};padding:2px;position:sticky;left:0"></td>
+    <td class="escala-fixa" style="border:${BORDA};padding:2px;position:sticky;left:${leftMat}px">
+      <input type="text" id="escala-add-inline" ${window._escalaTravada ? 'disabled' : ''} placeholder="+ matrícula"
+        onkeydown="if(event.key==='Enter') escalaAdicionarPorMatriculaInline(this.value)"
+        style="width:100%;${inputEstilo};font-family:monospace">
     </td>
-    <td colspan="${NCOLS-2}" style="border:${BORDA};padding:8px 10px;color:var(--text-muted);font-size:11px">digite a matrícula e aperte Enter — o nome aparece sozinho</td>
+    <td colspan="${NCOLS - 2}" style="border:${BORDA};padding:5px 10px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="color:var(--text-muted);font-size:11px">digite a matrícula e aperte Enter — o nome aparece sozinho</span>
+        <span style="color:var(--text-muted);opacity:.5">|</span>
+        <button class="adh-refresh-btn" style="padding:3px 10px;font-size:10px" ${window._escalaTravada ? 'disabled' : ''}
+          onclick="escalaToggleFormManual()" title="Pra colaborador novo que ainda não subiu no cadastro do RH">
+          ${escalaIcone('userPlus')}Cadastrar manualmente
+        </button>
+      </div>
+      <div id="escala-form-manual" style="display:none;margin-top:8px;padding:10px;background:var(--bg-hover);border-radius:7px">
+        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+          ${[['mat','Matrícula','110px','text'],['nome','Nome completo','240px','text'],['funcao','Função','200px','text']]
+            .map(([id,rot,w]) => `<div><label style="font-size:9.5px;color:var(--text-muted);display:block;margin-bottom:3px">${rot}</label>
+              <input type="text" id="escala-man-${id}" style="width:${w};${inputEstilo}"></div>`).join('')}
+          <div><label style="font-size:9.5px;color:var(--text-muted);display:block;margin-bottom:3px">CH (obrigatória)</label>
+            <select id="escala-man-ch" style="width:90px;${inputEstilo};cursor:pointer">
+              <option value="">—</option>
+              ${chsConhecidas.map(ch => `<option value="${ch}">${ch}h</option>`).join('')}
+            </select></div>
+          <div><label style="font-size:9.5px;color:var(--text-muted);display:block;margin-bottom:3px">Entrada</label>
+            <input type="text" id="escala-man-entrada" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" style="width:70px;${inputEstilo};text-align:center"></div>
+          <div><label style="font-size:9.5px;color:var(--text-muted);display:block;margin-bottom:3px">Saída</label>
+            <span id="escala-man-saida" style="display:inline-block;width:70px;text-align:center;font-size:11px;color:var(--text-muted);padding:5px 0">--:--</span></div>
+          <button class="adh-refresh-btn" style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600;padding:5px 12px;font-size:11px"
+            onclick="escalaSalvarColabManual()">Adicionar</button>
+          <button class="adh-refresh-btn" style="padding:5px 12px;font-size:11px" onclick="escalaToggleFormManual()">Cancelar</button>
+        </div>
+        <div style="margin-top:7px;color:var(--amber);font-size:10.5px;display:flex;align-items:center;gap:5px">
+          ${escalaIconeSolto('alert', 12)}Colaborador fora do cadastro do RH: não aparece em Aderência nem no Headcount. Peça a regularização.
+        </div>
+      </div>
+    </td>
   </tr>`;
 
   if (!colabs.length) {
@@ -1884,7 +1997,7 @@ async function escalaEditarHorario(matricula, campo, valor) {
   let saidaAutoCalculada = null;
   if (campo === 'entrada' && valor && !c?.saida_manual) {
     const horaMatch = valor.match(/^(\d{1,2}):(\d{2})$/);
-    const ch = window.eoColabs?.get(matricula)?.ch;
+    const ch = window.eoColabs?.get(matricula)?.ch || (window._escalaColabs||[]).find(x=>x.matricula===matricula)?.ch_manual;
     const chNum = parseInt(String(ch||'').replace(/\D/g,''), 10);
     const regra = ESCALA_CH_REGRAS[chNum];
     if (horaMatch && regra) {
@@ -2504,10 +2617,39 @@ const ESCALA_CH_REGRAS = {
   60:  { jornadaDiaria: 2, teto30: 48,  teto31: 48  },
   90:  { jornadaDiaria: 3, teto30: 72,  teto31: 72  },
   100: { jornadaDiaria: 4, teto30: 100, teto31: 100 },
-  120: { jornadaDiaria: 4, teto30: 120, teto31: 120 },
+  // CH 120 segue a MESMA regra da 100 (confirmado com o cliente). Antes
+  // tinha teto 120 com jornada de 4h, o que dava 30 dias de trabalho e
+  // deixava 1 folga no mês inteiro — era o "0/5"/"0/1" que aparecia na
+  // grade. Repare que nas faixas maiores o teto também é menor que a CH
+  // (180 → 150, 210 → 177), justamente pra descontar o descanso; só a
+  // linha do 120 tinha ficado sem esse desconto.
+  120: { jornadaDiaria: 4, teto30: 100, teto31: 100 },
   180: { jornadaDiaria: 6, teto30: 150, teto31: 150 },
   210: { jornadaDiaria: 7, teto30: 171, teto31: 177 },
 };
+
+// Minutos de intervalo por carga horária — confirmado com o cliente:
+// CH 210h = 1h; CH 180h = 15min. Jornadas mais curtas não têm intervalo
+// obrigatório definido, então ficam em zero.
+function escalaIntervaloMinutosPorCH(ch) {
+  const chNum = parseInt(String(ch||'').replace(/\D/g,''), 10);
+  return chNum >= 210 ? 60 : chNum === 180 ? 15 : 0;
+}
+
+// Saída = entrada + jornada diária + intervalo. O intervalo entra na conta
+// porque é a saída REAL (a que bate no crachá): quem cumpre 7h de jornada
+// com 1h de almoço fica 8h no local. Antes só somava a jornada, e mesmo
+// assim só quando o campo estava vazio — por isso a base tinha saídas
+// importadas sem relação nenhuma com a entrada (10:00→12:00, 22:00→02:00
+// em gente de CH 210, que deveria ser +8h).
+function escalaSaidaCalculada(entrada, ch) {
+  const m = String(entrada||'').match(/^(\d{1,2}):(\d{2})$/);
+  const regra = ESCALA_CH_REGRAS[parseInt(String(ch||'').replace(/\D/g,''), 10)];
+  if (!m || !regra) return null;
+  const minEntrada = parseInt(m[1],10)*60 + parseInt(m[2],10);
+  const total = (minEntrada + regra.jornadaDiaria*60 + escalaIntervaloMinutosPorCH(ch)) % (24*60);
+  return `${String(Math.floor(total/60)).padStart(2,'0')}:${String(total%60).padStart(2,'0')}`;
+}
 
 // Meta de folgas no mês = dias do mês menos os dias de trabalho necessários
 // pra bater (sem ultrapassar) o teto mensal de horas daquela carga horária.
@@ -2516,12 +2658,17 @@ const ESCALA_CH_REGRAS = {
 // trabalhando antes de uma folga (podendo ser menos: 3x1, 4x1, 5x1 também
 // valem), isso fica a cargo de quem monta a sequência (escalaGerarFolgasAuto).
 function escalaMetaFolgasDoColab(ch, diasNoMes) {
+  // Piso de descanso semanal: ninguém pode ficar com menos de uma folga por
+  // semana, seja qual for a CH. É rede de segurança — se amanhã entrar uma
+  // carga horária nova na tabela com o teto errado, o pior que acontece é a
+  // meta ficar conservadora, não alguém aparecer com 1 folga no mês.
+  const piso = Math.ceil(diasNoMes / 7);
   const chNum = parseInt(String(ch||'').replace(/\D/g,''), 10);
   const regra = ESCALA_CH_REGRAS[chNum];
-  if (!regra) return 6; // CH fora da tabela conhecida — fallback conservador
+  if (!regra) return Math.max(6, piso); // CH fora da tabela — fallback conservador
   const teto = diasNoMes >= 31 ? regra.teto31 : regra.teto30;
   const diasTrabalho = Math.ceil(teto / regra.jornadaDiaria);
-  return Math.max(0, diasNoMes - diasTrabalho);
+  return Math.max(piso, diasNoMes - diasTrabalho);
 }
 
 function escalaMesAnterior(mes) {
@@ -2568,7 +2715,7 @@ async function escalaPreencherHorarioMesAnterior() {
     // Intervalo: prioriza o que já estava manual no mês anterior; senão,
     // descobre pelo ponto batido de verdade (sai1/ent2) daquele mês; senão,
     // cai pro padrão por carga horária (210h=1h, 180h=15min).
-    const ch = window.eoColabs?.get(c.matricula)?.ch;
+    const ch = window.eoColabs?.get(c.matricula)?.ch || c.ch_manual;
     const intervaloPontoAnt = escalaIntervaloFixoDoColab(c.matricula, anoAnt, mesNumAnt, diasNoMesAnt);
     const [intInicioCalcAnt, intFimCalcAnt] = intervaloPontoAnt ? intervaloPontoAnt.split('-') : [null, null];
     let intInicioAnt = anterior?.intervalo_inicio_manual || intInicioCalcAnt;
@@ -3227,6 +3374,206 @@ function escalaImprimir() {
 // em SVG. Antes cada chamada trazia um emoji colado no proprio texto
 // ("✓ Horario salvo"), o que espalhava simbolo por dezenas de strings e
 // obrigava a limpar com regex antes de reaproveitar o texto no indicador.
+// ══════════════════════════════════════════════════════
+// RECALCULAR SAÍDAS · FÉRIAS
+// ══════════════════════════════════════════════════════
+
+// Reescreve a Saída de todo mundo pela regra (entrada + jornada da CH +
+// intervalo). Necessário porque o campo era editável e a base veio de
+// importação com valores sem relação nenhuma com a entrada — e o
+// auto-cálculo antigo só disparava quando a saída estava vazia, então
+// nada disso se corrigia sozinho. Mostra o que vai mudar ANTES de gravar.
+async function escalaRecalcularSaidas() {
+  if (escalaVerificarTravada()) return;
+  const colabs = window._escalaColabs || [];
+  if (!colabs.length) { escalaMsg('Nenhum colaborador nessa escala.', true); return; }
+
+  const [ano, mesNum] = window._escalaMes.split('-').map(Number);
+  const diasNoMes = new Date(ano, mesNum, 0).getDate();
+
+  const mudancas = [];
+  const semCH = [];
+  for (const c of colabs) {
+    const ch = window.eoColabs?.get(c.matricula)?.ch || c.ch_manual;
+    const entrada = escalaEntradaEfetivaDoColab(c, ano, mesNum, diasNoMes);
+    if (!entrada) continue;
+    const nova = escalaSaidaCalculada(entrada, ch);
+    if (!nova) { semCH.push(c); continue; }
+    const horarioFixo = escalaHorarioFixoDoColab(c.matricula, ano, mesNum, diasNoMes);
+    const atual = c.saida_manual || (horarioFixo ? horarioFixo.split('-')[1] : null);
+    if (atual !== nova) mudancas.push({ c, de: atual || '--:--', para: nova });
+  }
+
+  if (!mudancas.length) {
+    escalaMsg(`Todas as saídas já batem com a regra${semCH.length?` (${semCH.length} sem CH conhecida foram ignorados)`:''}.`);
+    return;
+  }
+
+  // Amostra no confirm: ver 3 exemplos concretos evita aplicar às cegas.
+  const amostra = mudancas.slice(0, 3)
+    .map(m => `  ${m.c.nome || m.c.matricula}: ${m.de} → ${m.para}`).join('\n');
+  const resto = mudancas.length > 3 ? `\n  ...e mais ${mudancas.length - 3}` : '';
+  const aviso = semCH.length ? `\n\n${semCH.length} colaborador(es) sem CH conhecida ficam de fora.` : '';
+  if (!confirm(`Recalcular a saída de ${mudancas.length} colaborador(es)?\n\nRegra: entrada + jornada da CH + intervalo.\n\n${amostra}${resto}${aviso}`)) return;
+
+  const LOTE = 200;
+  for (let i = 0; i < mudancas.length; i += LOTE) {
+    const linhas = mudancas.slice(i, i + LOTE).map(m => ({
+      base: window._escalaBase, mes: window._escalaMes,
+      matricula: m.c.matricula, nome: m.c.nome, saida_manual: m.para,
+    }));
+    const { error } = await db.from('escala_colaborador').upsert(linhas, { onConflict: 'base,mes,matricula' });
+    if (error) { escalaMsg('Erro ao recalcular saídas: ' + error.message, true); return; }
+  }
+  mudancas.forEach(m => { m.c.saida_manual = m.para; });
+  escalaGradeAtualiza();
+  escalaMsg(`${mudancas.length} saída(s) recalculada(s).`);
+}
+
+// Relê colaboradores_ferias do banco. O painel guarda esse dado em cache
+// (window.eoFeriasAll) desde a primeira tela que o carregou, então férias
+// lançadas pelo RH com o painel aberto só apareciam depois de um F5.
+async function escalaRecarregarFerias() {
+  escalaMostrarLoading('Recarregando férias do cadastro...');
+  window.eoFerias = null;
+  window.eoFeriasAll = null;
+  try {
+    if (typeof hcEnsureData === 'function') await hcEnsureData();
+    const total = (window.eoFeriasAll || []).length;
+    const [ano, mesNum] = window._escalaMes.split('-').map(Number);
+    const diasNoMes = new Date(ano, mesNum, 0).getDate();
+    const noMes = (window._escalaColabs || []).filter(c => {
+      for (let d = 1; d <= diasNoMes; d++) if (escalaEstaDeFerias(c.matricula, ano, mesNum, d)) return true;
+      return false;
+    }).length;
+    escalaGradeAtualiza();
+    escalaMsg(`Férias recarregadas: ${total} período(s) no cadastro, ${noMes} pessoa(s) com férias nesse mês.`);
+  } catch (e) {
+    // escalaMostrarLoading trocou o conteúdo da grade — precisa redesenhar
+    // mesmo em caso de erro, senão a tela fica presa no "Recarregando...".
+    escalaGradeAtualiza();
+    escalaMsg('Erro ao recarregar férias: ' + e.message, true);
+  }
+}
+
+// Exceção de férias: marca "trabalha mesmo constando férias" nos dias do
+// mês em que o cadastro do RH diz férias. Não mexe em colaboradores_ferias
+// — se o lançamento foi errado, quem corrige na origem é o RH; a escala só
+// não pode ficar parada esperando isso.
+async function escalaRemoverFeriasDoMes(matricula) {
+  if (escalaVerificarTravada()) return;
+  const [ano, mesNum] = window._escalaMes.split('-').map(Number);
+  const diasNoMes = new Date(ano, mesNum, 0).getDate();
+  const c = (window._escalaColabs || []).find(x => x.matricula === matricula);
+
+  const dias = [];
+  for (let d = 1; d <= diasNoMes; d++) if (escalaEstaDeFerias(matricula, ano, mesNum, d)) dias.push(d);
+  if (!dias.length) { escalaMsg(`${c?.nome || matricula} não está de férias nesse mês.`, true); return; }
+
+  if (!confirm(`Marcar ${c?.nome || matricula} como TRABALHANDO nos ${dias.length} dia(s) que constam como férias nesse mês?\n\nO cadastro de férias do RH NÃO é alterado — a exceção vale só para esta escala. Se as férias foram lançadas por engano, peça a correção ao RH também.`)) return;
+
+  const agora = new Date();
+  const autor = currentUserProfile?.id || currentUser?.id || null;
+  const payloads = dias.map(dia => ({
+    base: window._escalaBase, mes: window._escalaMes, matricula, dia,
+    status: 'T', origem: 'excecao_ferias', updated_at: agora, updated_by: autor,
+  }));
+  const { error } = await db.from('escala_dia').upsert(payloads, { onConflict: 'base,mes,matricula,dia' });
+  if (error) { escalaMsg('Erro ao salvar exceção: ' + error.message, true); return; }
+  payloads.forEach(p => window._escalaDias.set(`${p.matricula}|${p.dia}`, p));
+  escalaGradeAtualiza();
+  escalaMsg(`${dias.length} dia(s) de férias ignorados nesta escala para ${c?.nome || matricula}. O RH segue com o período cadastrado.`);
+}
+
+// Desfaz a exceção acima — as férias do cadastro voltam a valer.
+async function escalaRestaurarFeriasDoMes(matricula) {
+  if (escalaVerificarTravada()) return;
+  const chaves = [...window._escalaDias.entries()]
+    .filter(([k, v]) => k.startsWith(matricula + '|') && v.status === 'T')
+    .map(([k]) => k);
+  if (!chaves.length) { escalaMsg('Não há exceção de férias pra esse colaborador nesse mês.', true); return; }
+
+  const { error } = await db.from('escala_dia').delete()
+    .eq('base', window._escalaBase).eq('mes', window._escalaMes)
+    .eq('matricula', matricula).eq('status', 'T');
+  if (error) { escalaMsg('Erro ao desfazer: ' + error.message, true); return; }
+  chaves.forEach(k => window._escalaDias.delete(k));
+  escalaGradeAtualiza();
+  escalaMsg('Férias do cadastro voltaram a valer para esse colaborador.');
+}
+
+// ══════════════════════════════════════════════════════
+// CADASTRO MANUAL DE COLABORADOR
+// ══════════════════════════════════════════════════════
+
+function escalaToggleFormManual() {
+  const form = document.getElementById('escala-form-manual');
+  if (!form) return;
+  const abrindo = form.style.display === 'none';
+  form.style.display = abrindo ? 'block' : 'none';
+  if (abrindo) {
+    document.getElementById('escala-man-mat')?.focus();
+    // A saída acompanha a entrada em tempo real, com a mesma regra da
+    // grade — quem cadastra já vê o horário que vai valer.
+    const recalc = () => {
+      const el = document.getElementById('escala-man-saida');
+      if (!el) return;
+      const saida = escalaSaidaCalculada(
+        document.getElementById('escala-man-entrada')?.value,
+        document.getElementById('escala-man-ch')?.value);
+      el.textContent = saida || '--:--';
+      el.style.color = saida ? 'var(--text-secondary)' : 'var(--text-muted)';
+    };
+    document.getElementById('escala-man-entrada')?.addEventListener('input', recalc);
+    document.getElementById('escala-man-ch')?.addEventListener('change', recalc);
+  }
+}
+
+async function escalaSalvarColabManual() {
+  if (escalaVerificarTravada()) return;
+  const val = (id) => String(document.getElementById(`escala-man-${id}`)?.value || '').trim();
+  const matricula = val('mat'), nome = val('nome'), funcao = val('funcao');
+  const ch = val('ch'), entrada = val('entrada');
+
+  if (!matricula) { escalaMsg('Informe a matrícula.', true); return; }
+  if (!nome)      { escalaMsg('Informe o nome completo.', true); return; }
+  if (!funcao)    { escalaMsg('Informe a função — é ela que define o grupo na grade.', true); return; }
+  if (!ch)        { escalaMsg('A CH é obrigatória: é ela que calcula a meta de folgas e a saída.', true); return; }
+  if ((window._escalaColabs||[]).some(c => c.matricula === matricula)) {
+    escalaMsg('Essa matrícula já está nessa escala.', true); return;
+  }
+  if (window.eoColabs?.has(matricula)) {
+    escalaMsg(`Matrícula ${matricula} já existe no cadastro do RH — digite ela no campo "+ matrícula" em vez de cadastrar manualmente.`, true);
+    return;
+  }
+  if (entrada && !/^\d{2}:\d{2}$/.test(entrada)) { escalaMsg('Entrada precisa estar no formato HH:MM.', true); return; }
+
+  const linha = {
+    base: window._escalaBase, mes: window._escalaMes, matricula, nome,
+    funcao_manual: funcao, ch_manual: ch, fora_cadastro: true,
+    entrada_manual: entrada || null,
+    saida_manual: entrada ? escalaSaidaCalculada(entrada, ch) : null,
+  };
+  const { error } = await db.from('escala_colaborador').upsert(linha, { onConflict: 'base,mes,matricula' });
+  if (error) { escalaMsg('Erro ao cadastrar: ' + error.message, true); return; }
+
+  // Espelha no cache de cadastro pra Função e CH aparecerem na grade sem
+  // recarregar — a fonte da verdade continua sendo o RH pra quem existe lá.
+  if (window.eoColabs) window.eoColabs.set(matricula, { nome, funcao, ch, station: window._escalaBase, fora_cadastro: true });
+  (window._escalaColabs = window._escalaColabs || []).push(linha);
+
+  ['mat','nome','funcao','entrada'].forEach(id => { const el = document.getElementById(`escala-man-${id}`); if (el) el.value = ''; });
+  const selCh = document.getElementById('escala-man-ch'); if (selCh) selCh.value = '';
+  escalaGradeAtualiza();
+  escalaMsg(`${nome} adicionado fora do cadastro do RH — precisa ser regularizado no sistema.`);
+}
+
+// Quantos estão na escala sem existir no cadastro do RH. Vai no rodapé pra
+// que ninguém esqueça que existe gente pendente de regularização.
+function escalaContarForaCadastro() {
+  return (window._escalaColabs || []).filter(c => c.fora_cadastro).length;
+}
+
 function escalaMsg(texto, erro) {
   const limpo = String(texto || '').replace(/^[\u2713\u26a0\u2714\u2717]\s*/, '');
   const icone = limpo ? escalaIconeSolto(erro ? 'alert' : 'check', 12) : '';
