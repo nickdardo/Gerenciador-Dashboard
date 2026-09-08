@@ -465,4 +465,49 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaColunasSecundarias: fal
   sandbox.window._escalaDias = guardadoDias;
 })();
 
+// ── Staff: cruzamento de férias por matrícula ──────────────────────
+// Carrega só as funções de férias do headcount.js no mesmo sandbox (ele
+// depende dos normalizadores definidos em escala.js).
+(function () {
+  const ok = (nome, cond, detalhe) => {
+    console.log(`${cond ? 'PASSOU' : 'FALHOU'}  ${nome}${detalhe ? ` · ${detalhe}` : ''}`);
+    tudoOk &= cond;
+  };
+  const fonte = fs.readFileSync(__dirname + '/../js/headcount.js', 'utf8');
+  const trecho = fonte.slice(fonte.indexOf('let _hcFeriasIndice'), fonte.indexOf('function hcIsAtestado'));
+  vm.runInContext(trecho, sandbox);
+
+  const guardado = sandbox.window.eoFeriasAll;
+
+  // O caso do painel: matrícula numérica no cadastro de férias, texto no
+  // cadastro de colaboradores. O lookup cru falhava e tudo dava zero.
+  sandbox.window.eoFeriasAll = [
+    { matricula: 160590, data_inicio: '2026-09-01', data_fim: '2026-09-30', filial: 'BEL' },
+    { matricula: '0160580', data_inicio: '2026-09-10', data_fim: '2026-09-20', filial: 'BEL' },
+    { matricula: '160980', data_inicio: '2026-12-01', data_fim: '2026-12-15', filial: 'BEL' },
+  ];
+
+  ok('matrícula numérica cruza com a de texto',
+    sandbox.hcTemFeriasNoMes('160590', '2026-09') === true);
+  ok('zero à esquerda cruza',
+    sandbox.hcTemFeriasNoMes('160580', '2026-09') === true);
+  ok('quem só tem férias em dezembro não entra em setembro',
+    sandbox.hcTemFeriasNoMes('160980', '2026-09') === false);
+  ok('e aparece em dezembro',
+    sandbox.hcTemFeriasNoMes('160980', '2026-12') === true);
+
+  // "De férias hoje" x "tem férias no mês" são perguntas diferentes: era
+  // por isso que o filtro vinha vazio com 52 períodos programados.
+  ok('férias no mês não exige estar de férias na data de hoje',
+    sandbox.hcTemFeriasNoMes('160580', '2026-09') === true &&
+    sandbox.hcIsFeriasAtiva('160580', '2026-09-05') === false);
+  ok('e a checagem por data continua exata',
+    sandbox.hcIsFeriasAtiva('160580', '2026-09-15') === true);
+
+  ok('período sem data_fim não vira férias eterna sem início',
+    sandbox.hcPeriodosFerias('999999').length === 0);
+
+  sandbox.window.eoFeriasAll = guardado;
+})();
+
 process.exit(tudoOk ? 0 : 1);

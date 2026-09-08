@@ -30,12 +30,55 @@ function hcIsDesligado(mat) {
   return !!window.eoDesligados?.get(mat);
 }
 
-function hcIsFeriasAtiva(mat) {
-  const f = window.eoFerias?.get(mat);
-  if (!f || !f.data_inicio) return false;
-  const hoje = new Date().toISOString().slice(0,10);
-  const fim = f.data_fim || '9999-12-31';
-  return f.data_inicio <= hoje && hoje <= fim;
+// Índice matrícula normalizada → períodos de férias. Reconstruído sempre
+// que a lista muda. Existe porque o lookup era feito direto em
+// window.eoFerias.get(mat), e esse mapa é chaveado pela matrícula CRUA do
+// banco: se a coluna vier numérica (ou com zero à esquerda) e o cadastro
+// de colaboradores trouxer texto, o get() nunca acha ninguém. O sintoma
+// era o painel mostrar "52 programadas" (contagem direta, sem cruzar) e
+// ao mesmo tempo 0 no filtro Férias e 0 na coluna FÉRIAS por grupo —
+// tudo que depende do cruzamento por matrícula.
+let _hcFeriasIndice = null;
+let _hcFeriasIndiceFonte = null;
+
+function hcFeriasIndice() {
+  const lista = window.eoFeriasAll || [];
+  if (_hcFeriasIndice && _hcFeriasIndiceFonte === lista) return _hcFeriasIndice;
+  const idx = new Map();
+  for (const r of lista) {
+    const mat = escalaNormMatricula(r.matricula);
+    const ini = escalaNormData(r.data_inicio);
+    const fim = escalaNormData(r.data_fim);
+    if (!mat || !ini) continue;
+    if (!idx.has(mat)) idx.set(mat, []);
+    idx.get(mat).push({ ini, fim: fim || '9999-12-31', filial: r.filial, bruto: r });
+  }
+  _hcFeriasIndice = idx;
+  _hcFeriasIndiceFonte = lista;
+  return idx;
+}
+
+function hcPeriodosFerias(mat) {
+  return hcFeriasIndice().get(escalaNormMatricula(mat)) || [];
+}
+
+// Está de férias numa data específica (padrão: hoje). Considera TODOS os
+// períodos, não só o de data_fim mais tarde — quem tem férias em setembro e
+// outro período em dezembro precisa aparecer nos dois.
+function hcIsFeriasAtiva(mat, dataRef) {
+  const alvo = dataRef || new Date().toISOString().slice(0,10);
+  return hcPeriodosFerias(mat).some(p => p.ini <= alvo && alvo <= p.fim);
+}
+
+// Tem férias em algum dia do mês (formato 'YYYY-MM'). É o que o filtro
+// "Férias" da lista precisa: perguntar "está de férias HOJE" devolve zero
+// sempre que o mês tem férias mas nenhuma cobre exatamente a data de hoje.
+function hcTemFeriasNoMes(mat, mesISO) {
+  const mes = mesISO || new Date().toISOString().slice(0,7);
+  const primeiro = `${mes}-01`;
+  const [a, m] = mes.split('-').map(Number);
+  const ultimo = `${mes}-${String(new Date(a, m, 0).getDate()).padStart(2,'0')}`;
+  return hcPeriodosFerias(mat).some(p => p.ini <= ultimo && p.fim >= primeiro);
 }
 
 function hcIsAtestado(situacao) {
@@ -175,7 +218,10 @@ function hcComputeStats() {
     if (!grupos.has(grupo)) grupos.set(grupo, { staff: 0, ferias: 0 });
     const g = grupos.get(grupo);
     g.staff++;
-    if (emFerias) g.ferias++;
+    // Conta férias do MÊS: a meta ao lado é "10% do staff por mês", então
+    // comparar com "de férias hoje" misturava duas unidades diferentes e
+    // deixava a coluna zerada quase sempre.
+    if (hcTemFeriasNoMes(r.mat)) g.ferias++;
 
     const funcao = String(r.funcao || 'SEM FUNÇÃO').trim();
     const chd = hcChDiario(ch);
@@ -670,13 +716,20 @@ function hcBuildColabList() {
     const desligInfo = window.eoDesligados?.get(mat);
     const feriasInfo = window.eoFerias?.get(mat);
     const emFerias = hcIsFeriasAtiva(mat);
+    const feriasNoMes = hcTemFeriasNoMes(mat);
+    const periodos = hcPeriodosFerias(mat);
     const afastado = !desligado && hcIsAfastado(r.situacao);
     out.push({
       mat, nome: r.nome, filial: st, funcao: r.funcao, ch: r.ch,
       situacao: r.situacao, admissao: r.admissao || null,
       desligado, demissao: desligInfo?.data_demissao || null,
       afastado,
-      emFerias, feriasFim: feriasInfo?.data_fim || null,
+      emFerias, feriasNoMes,
+      // A data de fim sai do período que realmente cobre o mês, não do
+      // "último período cadastrado" — eram coisas diferentes pra quem tem
+      // mais de um período no ano.
+      feriasFim: (periodos.find(p => p.fim >= new Date().toISOString().slice(0,10)) || periodos[periodos.length-1])?.fim
+                 || feriasInfo?.data_fim || null,
       pcd: !!window.eoPcd?.get(mat),
     });
   }
@@ -833,7 +886,10 @@ function hcColabListFiltered() {
   let list = (window._hcColabListFull || []).slice();
   if (window._hcSituFilter === 'ativo')   list = list.filter(c => !c.desligado && !c.afastado);
   if (window._hcSituFilter === 'inativo') list = list.filter(c => c.desligado || c.afastado);
-  if (window._hcSituFilter === 'ferias')  list = list.filter(c => c.emFerias);
+  // Férias do MÊS, não "de férias exatamente hoje". Com a pergunta antiga a
+  // lista vinha vazia sempre que ninguém estivesse no meio das férias na
+  // data de hoje, mesmo com dezenas de períodos programados no mês.
+  if (window._hcSituFilter === 'ferias')  list = list.filter(c => c.feriasNoMes || c.emFerias);
   if (window._hcGrupoFilter) list = list.filter(c => hcCargoGrupo(c.funcao) === window._hcGrupoFilter);
   const q = (window._hcSearch||'').trim().toLowerCase();
   if (q) list = list.filter(c => String(c.mat).includes(q) || String(c.nome||'').toLowerCase().includes(q));
