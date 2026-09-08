@@ -792,6 +792,7 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
             ${escalaMenuSecao('Horários e férias')}
             ${escalaMenuItem('clock', 'Recalcular saídas pela CH', 'escalaRecalcularSaidas()', travada)}
             ${escalaMenuItem('history', 'Recarregar férias do sistema', 'escalaRecarregarFerias()')}
+            ${escalaMenuItem('alert', 'Diagnosticar férias do mês', 'escalaDiagnosticoFerias()')}
             ${escalaMenuDivisor()}
             ${escalaMenuSecao('Cursos e feriados')}
             ${escalaMenuItem('download', 'Baixar modelo de cursos', 'escalaBaixarModeloCursos()')}
@@ -953,13 +954,39 @@ const ESCALA_DIAS_SEMANA = ['dom','seg','ter','qua','qui','sex','sáb'];
 // tinha férias em outubro e outro período em dezembro simplesmente não
 // aparecia de férias em outubro. A lista completa já vinha carregada em
 // window.eoFeriasAll e não era usada aqui.
+// Normaliza matrícula pra comparar: o cadastro de férias pode vir com a
+// matrícula como número (perde o zero à esquerda) enquanto a escala guarda
+// texto — "0160590" e "160590" são a mesma pessoa e precisam bater.
+function escalaNormMatricula(v) {
+  return String(v ?? '').trim().replace(/^0+/, '');
+}
+
+// Normaliza data pra 'YYYY-MM-DD'. A coluna pode vir como date puro
+// ('2026-09-01'), como timestamp ('2026-09-01T00:00:00+00:00') ou já como
+// objeto Date, dependendo de como o arquivo foi importado. Comparar string
+// crua nesses três formatos dá resultado diferente, e o sintoma é
+// exatamente "só algumas férias aparecem".
+function escalaNormData(v) {
+  if (!v) return null;
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  const t = String(v).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(t)) return t.slice(0, 10);
+  // dd/mm/aaaa — formato que sai do Excel quando a coluna é texto
+  const br = t.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (br) return `${br[3]}-${br[2]}-${br[1]}`;
+  return null;
+}
+
 function escalaPeriodosDeFerias(matricula) {
-  const todos = window.eoFeriasAll;
-  if (Array.isArray(todos) && todos.length) {
-    return todos.filter(r => String(r.matricula) === String(matricula) && r.data_inicio && r.data_fim);
-  }
-  const unico = window.eoFerias?.get(matricula);
-  return unico?.data_inicio && unico?.data_fim ? [unico] : [];
+  const alvo = escalaNormMatricula(matricula);
+  const bruto = (Array.isArray(window.eoFeriasAll) && window.eoFeriasAll.length)
+    ? window.eoFeriasAll
+    : (() => { const u = window.eoFerias?.get(matricula); return u ? [u] : []; })();
+
+  return bruto
+    .filter(r => escalaNormMatricula(r.matricula) === alvo)
+    .map(r => ({ inicio: escalaNormData(r.data_inicio), fim: escalaNormData(r.data_fim), bruto: r }))
+    .filter(r => r.inicio && r.fim);
 }
 
 function escalaEstaDeFerias(matricula, ano, mesNum, dia) {
@@ -968,7 +995,7 @@ function escalaEstaDeFerias(matricula, ano, mesNum, dia) {
   // ignora o período naquele dia.
   if (window._escalaDias?.get(`${matricula}|${dia}`)?.status === 'T') return false;
   const alvo = `${ano}-${String(mesNum).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
-  return escalaPeriodosDeFerias(matricula).some(f => alvo >= f.data_inicio && alvo <= f.data_fim);
+  return escalaPeriodosDeFerias(matricula).some(f => alvo >= f.inicio && alvo <= f.fim);
 }
 
 function escalaHorarioPlanejado(base, matricula, ano, mesNum, dia) {
@@ -3715,6 +3742,62 @@ function escalaSetFiltroSituacao(valor) {
     return;
   }
   escalaMsg(`${rotulo}: ninguém nessa situação.`);
+}
+
+// Diagnóstico de férias. Existe porque "não aparece férias" tem umas seis
+// causas possíveis (arquivo não subiu, data em formato diferente, matrícula
+// com zero à esquerda, período de outra base, paginação perdendo linha) e
+// sem enxergar o dado bruto vira adivinhação.
+function escalaDiagnosticoFerias() {
+  const [ano, mesNum] = window._escalaMes.split('-').map(Number);
+  const diasNoMes = new Date(ano, mesNum, 0).getDate();
+  const primeiro = `${ano}-${String(mesNum).padStart(2,'0')}-01`;
+  const ultimo   = `${ano}-${String(mesNum).padStart(2,'0')}-${String(diasNoMes).padStart(2,'0')}`;
+
+  const todos = window.eoFeriasAll || [];
+  const naEscala = new Set((window._escalaColabs || []).map(c => escalaNormMatricula(c.matricula)));
+
+  const linhas = todos.map(r => ({
+    mat: escalaNormMatricula(r.matricula), nome: r.nome, filial: r.filial,
+    ini: escalaNormData(r.data_inicio), fim: escalaNormData(r.data_fim),
+    iniBruto: r.data_inicio, fimBruto: r.data_fim,
+  }));
+
+  const dataInvalida = linhas.filter(r => !r.ini || !r.fim);
+  const cruzamMes    = linhas.filter(r => r.ini && r.fim && r.ini <= ultimo && r.fim >= primeiro);
+  const noMesEnaEscala = cruzamMes.filter(r => naEscala.has(r.mat));
+  const noMesForaEscala = cruzamMes.filter(r => !naEscala.has(r.mat));
+  const filiais = [...new Set(cruzamMes.map(r => r.filial).filter(Boolean))];
+
+  const amostra = (lista, n) => lista.slice(0, n)
+    .map(r => `   ${r.mat} ${String(r.nome||'').slice(0,26).padEnd(26)} ${r.ini||'?'} → ${r.fim||'?'}${r.filial?`  [${r.filial}]`:''}`).join('\n');
+
+  const partes = [
+    `DIAGNÓSTICO DE FÉRIAS — ${window._escalaBase} · ${window._escalaMes}`,
+    ``,
+    `Períodos carregados do cadastro: ${todos.length}`,
+    `Períodos que cruzam ${primeiro} a ${ultimo}: ${cruzamMes.length}`,
+    `  · de gente que está nesta escala: ${noMesEnaEscala.length}`,
+    `  · de gente que NÃO está nesta escala: ${noMesForaEscala.length}`,
+    `Datas em formato não reconhecido: ${dataInvalida.length}`,
+    filiais.length ? `Filiais nos períodos do mês: ${filiais.join(', ')}` : '',
+  ].filter(Boolean);
+
+  if (noMesEnaEscala.length) partes.push(``, `Aparecem na grade (${Math.min(8, noMesEnaEscala.length)} de ${noMesEnaEscala.length}):`, amostra(noMesEnaEscala, 8));
+  if (noMesForaEscala.length) partes.push(``, `NÃO aparecem: a matrícula não está nesta escala (${Math.min(5, noMesForaEscala.length)} de ${noMesForaEscala.length}):`, amostra(noMesForaEscala, 5));
+  if (dataInvalida.length) partes.push(``, `Datas ilegíveis — o import precisa ser refeito (${Math.min(5, dataInvalida.length)} de ${dataInvalida.length}):`,
+    dataInvalida.slice(0,5).map(r => `   ${r.mat}: início="${r.iniBruto}" fim="${r.fimBruto}"`).join('\n'));
+
+  if (!cruzamMes.length) {
+    partes.push(``, todos.length
+      ? `NENHUM período cruza esse mês. O cadastro tem ${todos.length} período(s), mas todos ficam fora de ${primeiro}–${ultimo}. O arquivo de férias desse mês provavelmente ainda não foi importado no Staff.`
+      : `Nenhum período carregado. Importe o arquivo de férias no Staff e volte aqui.`);
+    const proximos = linhas.filter(r => r.fim).sort((a,b) => b.fim.localeCompare(a.fim)).slice(0, 5);
+    if (proximos.length) partes.push(``, `Períodos mais recentes que existem no cadastro:`, amostra(proximos, 5));
+  }
+
+  console.log(partes.join('\n'));
+  alert(partes.join('\n') + `\n\n(o mesmo texto foi impresso no console do navegador, F12)`);
 }
 
 function escalaMsg(texto, erro) {

@@ -88,7 +88,7 @@ async function hcEnsureData() {
   if (typeof adhEnsureRoster === 'function') await adhEnsureRoster();
   if (!window.eoFerias) {
     try {
-      const data = await dbFetchAll('colaboradores_ferias', 'matricula,nome,cargo,filial,data_inicio,data_fim,dias');
+      const data = await dbFetchAll('colaboradores_ferias', 'matricula,nome,cargo,filial,data_inicio,data_fim,dias', 'matricula');
       const byMat = new Map();
       for (const r of (data||[])) {
         const prev = byMat.get(r.matricula);

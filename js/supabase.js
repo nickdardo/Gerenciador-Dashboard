@@ -11,14 +11,32 @@ const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 // além disso (histórico acumulado de férias/desligamentos/pcd, por ex.) —
 // um select() simples trunca silenciosamente, sem erro, então é fácil passar
 // despercebido até os dados crescerem o suficiente pra estourar o limite.
-async function dbFetchAll(table, columns) {
+// IMPORTANTE: o .order() não é enfeite. O PostgREST não garante ordem
+// estável entre chamadas sem ORDER BY explícito, então paginar com
+// .range() sem ordenar pode devolver a mesma linha em duas páginas e
+// PULAR outras — silenciosamente, sem erro. Em tabelas com mais de 1000
+// linhas (é o caso de colaboradores_ferias) isso aparece como "alguns
+// registros existem no banco mas nunca chegam na tela".
+async function dbFetchAll(table, columns, orderBy) {
   const { count } = await db.from(table).select('*', { count: 'exact', head: true });
   if (!count) return [];
   const PAGE = 1000;
   const all = [];
+  const chave = orderBy || 'id';
   for (let from = 0; from < count; from += PAGE) {
-    const { data, error } = await db.from(table).select(columns).range(from, from + PAGE - 1);
-    if (error) throw new Error(error.message);
+    let q = db.from(table).select(columns).range(from, from + PAGE - 1);
+    // Se a tabela não tiver a coluna de ordenação, cai pra busca sem ordem
+    // (comportamento antigo) em vez de quebrar a tela inteira.
+    const { data, error } = await q.order(chave, { ascending: true });
+    if (error) {
+      if (/column .* does not exist|failed to parse order/i.test(error.message)) {
+        const retry = await db.from(table).select(columns).range(from, from + PAGE - 1);
+        if (retry.error) throw new Error(retry.error.message);
+        if (retry.data) all.push(...retry.data);
+        continue;
+      }
+      throw new Error(error.message);
+    }
     if (data) all.push(...data);
   }
   return all;

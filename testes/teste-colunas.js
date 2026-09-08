@@ -298,4 +298,56 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaColunasSecundarias: fal
   sandbox.window.eoFeriasAll = [];
 })();
 
+// ── Robustez do casamento de férias (formatos de data e matrícula) ──
+(function () {
+  const ok = (nome, cond, detalhe) => {
+    console.log(`${cond ? 'PASSOU' : 'FALHOU'}  ${nome}${detalhe ? ` · ${detalhe}` : ''}`);
+    tudoOk &= cond;
+  };
+  const guardado = sandbox.window.eoFeriasAll;
+
+  // Mesmo período, escrito dos quatro jeitos que o import pode gerar.
+  const casos = [
+    ['date puro',            '2026-09-01', '2026-09-30'],
+    ['timestamp com fuso',   '2026-09-01T00:00:00+00:00', '2026-09-30T00:00:00+00:00'],
+    ['dd/mm/aaaa do Excel',  '01/09/2026', '30/09/2026'],
+    ['objeto Date',          new Date('2026-09-01T00:00:00Z'), new Date('2026-09-30T00:00:00Z')],
+  ];
+  casos.forEach(([nome, ini, fim]) => {
+    sandbox.window.eoFeriasAll = [{ matricula: '30100', data_inicio: ini, data_fim: fim }];
+    const meio = sandbox.escalaEstaDeFerias('30100', 2026, 9, 15);
+    const primeiro = sandbox.escalaEstaDeFerias('30100', 2026, 9, 1);
+    const ultimo = sandbox.escalaEstaDeFerias('30100', 2026, 9, 30);
+    ok(`férias reconhecidas com data em ${nome}`, meio && primeiro && ultimo);
+  });
+
+  // Zero à esquerda: o cadastro de férias costuma vir com a matrícula como
+  // número, e a escala guarda texto.
+  sandbox.window.eoFeriasAll = [{ matricula: 160590, data_inicio: '2026-09-01', data_fim: '2026-09-30' }];
+  ok('matrícula numérica casa com a de texto', sandbox.escalaEstaDeFerias('160590', 2026, 9, 10));
+  sandbox.window.eoFeriasAll = [{ matricula: '0160590', data_inicio: '2026-09-01', data_fim: '2026-09-30' }];
+  ok('zero à esquerda não impede o casamento', sandbox.escalaEstaDeFerias('160590', 2026, 9, 10));
+
+  // Período que atravessa a virada do mês conta nos dois meses.
+  sandbox.window.eoFeriasAll = [{ matricula: '30100', data_inicio: '2026-08-20', data_fim: '2026-09-03' }];
+  ok('período de agosto que vaza pra setembro aparece nos 2 meses',
+    sandbox.escalaEstaDeFerias('30100', 2026, 8, 25) && sandbox.escalaEstaDeFerias('30100', 2026, 9, 3));
+  ok('e não vaza pra depois do fim', !sandbox.escalaEstaDeFerias('30100', 2026, 9, 4));
+
+  // Vários períodos do mesmo colaborador: todos valem, não só o último.
+  sandbox.window.eoFeriasAll = [
+    { matricula: '30100', data_inicio: '2026-09-01', data_fim: '2026-09-30' },
+    { matricula: '30100', data_inicio: '2026-12-01', data_fim: '2026-12-20' },
+  ];
+  ok('dois períodos: setembro continua valendo', sandbox.escalaEstaDeFerias('30100', 2026, 9, 15));
+  ok('dois períodos: dezembro também', sandbox.escalaEstaDeFerias('30100', 2026, 12, 5));
+
+  // Data ilegível não pode virar "está de férias sempre".
+  sandbox.window.eoFeriasAll = [{ matricula: '30100', data_inicio: 'setembro', data_fim: '' }];
+  ok('data ilegível é descartada em vez de casar com tudo',
+    !sandbox.escalaEstaDeFerias('30100', 2026, 9, 15));
+
+  sandbox.window.eoFeriasAll = guardado;
+})();
+
 process.exit(tudoOk ? 0 : 1);
