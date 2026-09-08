@@ -540,6 +540,81 @@ function hcMesesFeriasDisponiveis() {
   return lista;
 }
 
+// Radiografia do que existe em colaboradores_ferias. Foi preciso porque a
+// pergunta "as férias de setembro não aparecem: é bug ou o arquivo não
+// subiu?" não se responde olhando a lista filtrada — ela só mostra o que
+// passou no filtro. Aqui aparece a distribuição inteira, inclusive o que
+// ficou de fora.
+function hcDiagnosticoFerias() {
+  const todos = window.eoFeriasAll || [];
+  const matsDaBase = new Set();
+  for (const [mat, r] of (window.eoColabs || new Map())) {
+    if (hcBaseSelected((r.station || '').toUpperCase())) matsDaBase.add(escalaNormMatricula(mat));
+  }
+
+  const linhas = todos.map(r => ({
+    mat: escalaNormMatricula(r.matricula),
+    ini: escalaNormData(r.data_inicio),
+    fim: escalaNormData(r.data_fim),
+    filial: r.filial,
+  }));
+  const daBase = linhas.filter(r => matsDaBase.has(r.mat));
+  const validos = daBase.filter(r => r.ini && r.fim);
+
+  // Histograma por mês de INÍCIO — é o que mostra até onde o cadastro foi
+  // alimentado. Se o último mês com períodos é agosto, o arquivo de
+  // setembro não subiu, e nenhuma correção de código traz esse dado.
+  const porMes = new Map();
+  validos.forEach(r => {
+    const m = r.ini.slice(0, 7);
+    porMes.set(m, (porMes.get(m) || 0) + 1);
+  });
+  const meses = [...porMes.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+
+  const maxFim = validos.reduce((mx, r) => (r.fim > mx ? r.fim : mx), '');
+  const maxIni = validos.reduce((mx, r) => (r.ini > mx ? r.ini : mx), '');
+  const filiais = [...new Set(daBase.map(r => r.filial).filter(Boolean))];
+  const semData = daBase.length - validos.length;
+
+  const mesAtual = hcMesFerias();
+  const [a, m] = mesAtual.split('-').map(Number);
+  const ultimoDia = `${mesAtual}-${String(new Date(a, m, 0).getDate()).padStart(2,'0')}`;
+  const noMes = validos.filter(r => r.ini <= ultimoDia && r.fim >= `${mesAtual}-01`);
+  const iniciamNoMes = noMes.filter(r => r.ini >= `${mesAtual}-01`).length;
+  const vindosDeAntes = noMes.length - iniciamNoMes;
+
+  const partes = [
+    `DIAGNÓSTICO DE FÉRIAS — base ${hcBaseLabel()}`,
+    ``,
+    `Períodos no cadastro (todas as bases): ${todos.length}`,
+    `Períodos de gente desta base: ${daBase.length}${semData ? ` (${semData} com data ilegível)` : ''}`,
+    filiais.length ? `Filiais encontradas: ${filiais.join(', ')}` : '',
+    ``,
+    `Início de férias mais recente no cadastro: ${maxIni || '—'}`,
+    `Fim de férias mais distante no cadastro:   ${maxFim || '—'}`,
+    ``,
+    `No mês selecionado (${mesAtual}): ${noMes.length} período(s)`,
+    `  · que COMEÇAM no mês: ${iniciamNoMes}`,
+    `  · que vêm de meses anteriores: ${vindosDeAntes}`,
+    ``,
+    `Períodos por mês de início:`,
+    ...meses.map(([mes, n]) => `   ${mes}  ${String(n).padStart(4)}  ${'#'.repeat(Math.min(40, n))}`),
+  ].filter(l => l !== null);
+
+  if (iniciamNoMes === 0 && noMes.length > 0) {
+    partes.push(``, `ATENÇÃO: nenhum período COMEÇA em ${mesAtual} — os ${noMes.length} que aparecem são`,
+      `sobras de meses anteriores que terminam dentro dele. Isso é o padrão de`,
+      `quando o arquivo de férias do mês ainda não foi importado.`);
+  }
+  if (maxIni && maxIni.slice(0, 7) < mesAtual) {
+    partes.push(``, `O cadastro não tem NENHUM início de férias depois de ${maxIni}.`,
+      `Importe o arquivo de ${mesAtual} em Admin → Arquivos e clique em Atualizar.`);
+  }
+
+  console.log(partes.join('\n'));
+  alert(partes.join('\n') + `\n\n(o mesmo texto está no console, F12)`);
+}
+
 function hcFilterSitu(mode, btn) {
   document.querySelectorAll('.hc-situ-filter-btn').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
@@ -717,6 +792,7 @@ function hcRenderMain(el) {
                 <button class="adh-sort-btn hc-situ-filter-btn" onclick="hcFilterSitu('ativo',this)">Ativos</button>
                 <button class="adh-sort-btn hc-situ-filter-btn" onclick="hcFilterSitu('inativo',this)">Inativos</button>
                 <button class="adh-sort-btn hc-situ-filter-btn" onclick="hcFilterSitu('ferias',this)">Férias</button>
+                <button class="adh-sort-btn" style="margin-left:6px" title="Mostra o que existe no cadastro de férias e até que mês ele foi alimentado" onclick="hcDiagnosticoFerias()">Diagnóstico</button>
                 <select class="adh-month-select" style="margin-left:6px;padding:4px 8px;font-size:11.5px"
                   title="Mês de referência do filtro Férias" onchange="hcSetMesFerias(this.value)">
                   ${hcMesesFeriasDisponiveis().map(m =>

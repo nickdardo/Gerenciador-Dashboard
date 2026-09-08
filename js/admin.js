@@ -290,21 +290,53 @@ const ADM_BATCH_PATTERNS = [
 
 // "HRCL107" já foi usado tanto pra Férias quanto pra Absenteísmo (mesmo
 // número de relatório, arquivos diferentes) — em vez de chutar pelo nome,
-// abre o arquivo e olha as colunas do cabeçalho pra decidir de verdade.
+// abre o arquivo e decide pelo CONTEÚDO.
+//
+// A versão anterior decidia pelo cabeçalho: se encontrasse "afastam", "cid"
+// ou "situa", classificava como Absenteísmo. Só que os dois relatórios saem
+// do mesmo layout e o de Férias tem exatamente essas três colunas
+// (Afastam. = início das férias, Situação, CID vazio). Resultado: TODO
+// HRCL107 de férias era mandado pro importador de absenteísmo e a tabela
+// colaboradores_ferias nunca era atualizada. O sintoma na ponta era a
+// escala e o Staff pararem no último mês importado por outro caminho.
+//
+// O que realmente separa os dois é a coluna de situação: no arquivo de
+// férias praticamente toda linha diz "Férias"; no de absenteísmo diz
+// Auxílio Doença, Acidente de Trabalho, Atestado etc.
 const ADM_HRCL107_SNIFF = {
   test: n => n.includes('hrcl107'),
+
+  // Exposto separado pra poder testar sem depender de File/ArrayBuffer.
+  decidirPorLinhas(rows) {
+    const dados = (rows || []).slice(1).filter(r => Array.isArray(r) && r.some(c => c !== null && c !== ''));
+    if (!dados.length) return null;
+    let comFerias = 0;
+    for (const linha of dados) {
+      const texto = linha.map(c => String(c ?? '')).join(' ').toLowerCase();
+      if (texto.includes('féria') || texto.includes('feria')) comFerias++;
+    }
+    const proporcao = comFerias / dados.length;
+    return {
+      proporcao, linhas: dados.length, comFerias,
+      ...(proporcao >= 0.6
+        ? { fn: 'adminLoadFerias', label: 'Férias' }
+        : { fn: 'adminLoadAbsenteismo', label: 'Absenteísmo' }),
+    };
+  },
+
   async resolve(file) {
     try {
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { type:'array' });
       const ws = wb.Sheets[wb.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:true });
-      const headerRow = rows.find(r => Array.isArray(r) && r.some(c => typeof c === 'string' && c.trim())) || [];
-      const headerText = headerRow.map(c => String(c||'').toLowerCase()).join(' | ');
-      if (headerText.includes('afastam') || headerText.includes('cid') || headerText.includes('situa')) {
+      const r = this.decidirPorLinhas(rows);
+      if (!r) {
+        console.warn('[batchUpload] HRCL107 sem linhas de dados — assumindo Absenteísmo.');
         return { fn: 'adminLoadAbsenteismo', label: 'Absenteísmo' };
       }
-      return { fn: 'adminLoadFerias', label: 'Férias' };
+      console.log(`[batchUpload] HRCL107 classificado como ${r.label} — ${r.comFerias} de ${r.linhas} linha(s) mencionam férias (${Math.round(r.proporcao*100)}%).`);
+      return { fn: r.fn, label: r.label };
     } catch(e) {
       console.warn('[batchUpload] não consegui abrir HRCL107 pra identificar pelo conteúdo, assumindo Absenteísmo:', e.message);
       return { fn: 'adminLoadAbsenteismo', label: 'Absenteísmo' };
@@ -668,20 +700,37 @@ async function adminLoadFerias(input) {
       const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:null, raw:true });
 
       const records = [];
+      const ignoradas = { semMatricula: 0, semDataInicio: 0, semDataFim: 0 };
       rows.forEach((row, i) => {
         if (i===0 || !row || !row[0]) return;
         const matRaw = String(row[0]).trim();
-        if (!matRaw || isNaN(parseInt(matRaw))) return;
+        if (!matRaw || isNaN(parseInt(matRaw))) { ignoradas.semMatricula++; return; }
         const mat = matRaw.padStart(6, '0');
         const nome        = String(row[1]||'').trim();
         const cargo       = String(row[2]||'').trim();
         const filial      = String(row[4]||'').trim().toUpperCase();
-        const data_inicio = adminXlsToISODate(row[6]);
-        const dias        = parseInt(row[10]) || 0;
-        const data_fim     = adminXlsToISODate(row[11]);
-        if (!data_inicio) return;
+        const data_inicio = adminXlsToISODate(row[6]);   // coluna G — Afastam. (início)
+        const dias        = parseInt(row[10]) || 0;      // coluna K — Dias
+        const data_fim    = adminXlsToISODate(row[11]);  // coluna L — Término (fim)
+        if (!data_inicio) { ignoradas.semDataInicio++; return; }
+        if (!data_fim) ignoradas.semDataFim++;
         records.push({ matricula: mat, nome, cargo, filial, data_inicio, data_fim, dias, updated_at: new Date() });
       });
+
+      // Resumo do que entrou. Sem isso, uma importação que descarta metade
+      // das linhas (data em formato inesperado, coluna deslocada) termina
+      // com "pronto" e ninguém percebe até faltar gente na escala.
+      const porMes = new Map();
+      records.forEach(r => porMes.set(r.data_inicio.slice(0,7), (porMes.get(r.data_inicio.slice(0,7))||0) + 1));
+      const mesesOrdenados = [...porMes.entries()].sort((a,b) => a[0].localeCompare(b[0]));
+      console.log([
+        `[import/férias] ${rows.length - 1} linha(s) no arquivo · ${records.length} válida(s)`,
+        `[import/férias] ignoradas: ${ignoradas.semMatricula} sem matrícula, ${ignoradas.semDataInicio} sem data de início (coluna G), ${ignoradas.semDataFim} sem data de fim (coluna L)`,
+        `[import/férias] períodos por mês de início: ${mesesOrdenados.map(([m,n]) => `${m}=${n}`).join(' · ') || 'nenhum'}`,
+      ].join('\n'));
+      if (!records.length) {
+        throw new Error('Nenhuma linha válida. Confira se a coluna G tem a data de início das férias e a L a data de término.');
+      }
 
       const total = records.length;
       adminSetFileStatus('ferias', `Gravando ${total.toLocaleString()} no banco...`, 'load');
@@ -701,8 +750,16 @@ async function adminLoadFerias(input) {
         count: total,
         date: new Date().toLocaleDateString('pt-BR'),
         data: new Map(records.map(r => [r.matricula, r])),
+        periodo: mesesOrdenados.length
+          ? `${mesesOrdenados[0][0]} a ${mesesOrdenados[mesesOrdenados.length-1][0]}`
+          : null,
       };
-      adminSetFileStatus('ferias', `✓ ${total.toLocaleString()} registros de férias`, 'ok');
+      // Invalida os caches em memória: sem isso a Escala e o Staff seguem
+      // usando a lista antiga até alguém dar F5.
+      window.eoFerias = null;
+      window.eoFeriasAll = null;
+      adminSetFileStatus('ferias',
+        `✓ ${total.toLocaleString()} registros de férias${adminFiles.ferias.periodo ? ` · ${adminFiles.ferias.periodo}` : ''}`, 'ok');
       adminAddHistory('ferias', file.name);
       input.value = '';
     } catch(err) {

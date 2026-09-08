@@ -547,4 +547,96 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaColunasSecundarias: fal
   sandbox.window.eoFeriasAll = guardado;
 })();
 
+// ── O filtro precisa achar quem COMEÇA férias no mês, não só quem
+//    termina dentro dele ────────────────────────────────────────────
+(function () {
+  const ok = (nome, cond, detalhe) => {
+    console.log(`${cond ? 'PASSOU' : 'FALHOU'}  ${nome}${detalhe ? ` · ${detalhe}` : ''}`);
+    tudoOk &= cond;
+  };
+  const guardado = sandbox.window.eoFeriasAll;
+
+  // Reproduz o que o painel mostrou: uma leva inteira de 05/08 a 03/09
+  // (sobra de agosto) e, junto, períodos que começam em setembro.
+  sandbox.window.eoFeriasAll = [
+    { matricula: '160819', data_inicio: '2026-08-05', data_fim: '2026-09-03' },
+    { matricula: '160590', data_inicio: '2026-08-05', data_fim: '2026-09-03' },
+    { matricula: '170001', data_inicio: '2026-09-01', data_fim: '2026-09-30' },
+    { matricula: '170002', data_inicio: '2026-09-15', data_fim: '2026-10-14' },
+    { matricula: '170003', data_inicio: '2026-09-28', data_fim: '2026-10-27' },
+  ];
+
+  const naLista = (mes) => ['160819','160590','170001','170002','170003']
+    .filter(m => sandbox.hcTemFeriasNoMes(m, mes));
+
+  ok('setembro traz tanto a sobra de agosto quanto quem começa no mês',
+    naLista('2026-09').length === 5, naLista('2026-09').join(', '));
+  ok('quem começa 01/09 entra', sandbox.hcTemFeriasNoMes('170001', '2026-09'));
+  ok('quem começa 28/09 e termina em outubro entra nos dois meses',
+    sandbox.hcTemFeriasNoMes('170003', '2026-09') && sandbox.hcTemFeriasNoMes('170003', '2026-10'));
+  ok('a sobra de agosto NÃO entra em outubro',
+    !sandbox.hcTemFeriasNoMes('160819', '2026-10'));
+
+  // Cada pessoa tem que exibir o SEU período, não o de outra — o painel
+  // mostrou 21 linhas com o mesmo intervalo, e isso só é aceitável se o
+  // dado for realmente igual.
+  const p1 = sandbox.hcPeriodoNoMes('170001', '2026-09');
+  const p2 = sandbox.hcPeriodoNoMes('170002', '2026-09');
+  ok('cada matrícula devolve o próprio período',
+    p1.ini === '2026-09-01' && p2.ini === '2026-09-15',
+    `${p1.ini} / ${p2.ini}`);
+
+  sandbox.window.eoFeriasAll = guardado;
+})();
+
+// ── HRCL107: separar o arquivo de Férias do de Absenteísmo ─────────
+// Os dois saem do mesmo layout de relatório. A regra antiga olhava o
+// cabeçalho e, como o de Férias TAMBÉM tem "Afastam.", "Situação" e "CID",
+// mandava todo arquivo de férias pro importador errado.
+(function () {
+  const ok = (nome, cond, detalhe) => {
+    console.log(`${cond ? 'PASSOU' : 'FALHOU'}  ${nome}${detalhe ? ` · ${detalhe}` : ''}`);
+    tudoOk &= cond;
+  };
+  const fonte = fs.readFileSync(__dirname + '/../js/admin.js', 'utf8');
+  const trecho = fonte.slice(fonte.indexOf('const ADM_HRCL107_SNIFF'), fonte.indexOf('function adminLoadEach'));
+  // `const` no topo de um script do vm cria binding léxico, não vira
+  // propriedade do global — por isso a exportação explícita.
+  vm.runInContext(trecho + '\n;globalThis.ADM_HRCL107_SNIFF = ADM_HRCL107_SNIFF;', sandbox);
+  const sniff = sandbox.ADM_HRCL107_SNIFF;
+
+  // Cabeçalho REAL do arquivo do cliente — tem afastam, situa e cid.
+  const cabecalho = ['Cadastro','Nome','Cargo','C.Horária','Filial','Admissão',
+                     'Afastam.','Situação Afastamento','Dias','Término','CID','Observação'];
+  const linhaFerias = (mat, ini, fim) =>
+    [mat,'FULANO','AUX RAMPA','180:00','BEL','01/02/2013', ini, 2, '-', 'Férias', 30, fim];
+  const linhaAusencia = (mat, motivo) =>
+    [mat,'FULANO','AUX RAMPA','180:00','BEL','01/02/2013','01/09/2026', 5, '-', motivo, 3, '05/09/2026'];
+
+  const arquivoFerias = [cabecalho,
+    linhaFerias('160183','01/09/2026','30/09/2026'),
+    linhaFerias('160815','01/09/2026','30/09/2026'),
+    linhaFerias('160282','01/09/2026','30/09/2026')];
+  const arquivoAusencia = [cabecalho,
+    linhaAusencia('160183','Auxílio Doença'),
+    linhaAusencia('160815','Acidente de Trabalho'),
+    linhaAusencia('160282','Atestado Médico')];
+
+  const rf = sniff.decidirPorLinhas(arquivoFerias);
+  const ra = sniff.decidirPorLinhas(arquivoAusencia);
+  ok('arquivo de férias vai pro importador de Férias', rf.fn === 'adminLoadFerias', rf.label);
+  ok('arquivo de absenteísmo vai pro de Absenteísmo', ra.fn === 'adminLoadAbsenteismo', ra.label);
+  ok('o cabeçalho sozinho não decide mais nada (os dois são idênticos)',
+    rf.fn !== ra.fn);
+
+  // Mistura com poucas linhas de férias não pode virar arquivo de férias.
+  const misto = [cabecalho, linhaAusencia('1','Auxílio Doença'), linhaAusencia('2','Atestado'),
+                 linhaAusencia('3','Acidente'), linhaFerias('4','01/09/2026','30/09/2026')];
+  ok('minoria de linhas de férias continua sendo absenteísmo',
+    sniff.decidirPorLinhas(misto).fn === 'adminLoadAbsenteismo');
+
+  ok('arquivo sem linhas de dados devolve nulo', sniff.decidirPorLinhas([cabecalho]) === null);
+  ok('nome do arquivo continua sendo reconhecido', sniff.test('hrcl107_setembro.xlsx'));
+})();
+
 process.exit(tudoOk ? 0 : 1);
