@@ -424,4 +424,45 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaColunasSecundarias: fal
   sandbox.window.eoFeriasAll = guardado;
 })();
 
+// ── Registro vazio em escala_dia não pode apagar as férias ──────────
+(function () {
+  const ok = (nome, cond, detalhe) => {
+    console.log(`${cond ? 'PASSOU' : 'FALHOU'}  ${nome}${detalhe ? ` · ${detalhe}` : ''}`);
+    tudoOk &= cond;
+  };
+  const guardadoFer = sandbox.window.eoFeriasAll;
+  const guardadoDias = sandbox.window._escalaDias;
+  const c = sandbox.window._escalaColabs[0];
+
+  sandbox.window.eoFeriasAll = [{ matricula: c.matricula, data_inicio: '2026-09-01', data_fim: '2026-09-30' }];
+  sandbox.window._escalaDias = new Map();
+  sandbox.window._escalaDiasIgnorados = [];
+
+  const conteudo = () => sandbox.escalaConteudoDoMes(c, 2026, 9, 30);
+  ok('férias do mês inteiro viram L', conteudo().filter(i => i.status === 'L').length === 30);
+
+  // O caso do bug: linha existe em escala_dia, mas sem status válido.
+  [null, '', undefined, 'X'].forEach(valor => {
+    sandbox.window._escalaDias = new Map([[`${c.matricula}|10`, { status: valor }]]);
+    sandbox.window._escalaDiasIgnorados = [];
+    const item = conteudo()[9];
+    ok(`status ${JSON.stringify(valor)} em escala_dia não apaga o L`, item.status === 'L');
+  });
+
+  // Marcação de verdade continua tendo prioridade sobre as férias.
+  [['F','F'], ['J','J'], ['K','K'], ['CH','CH']].forEach(([gravado, esperado]) => {
+    sandbox.window._escalaDias = new Map([[`${c.matricula}|10`, { status: gravado }]]);
+    ok(`marcação ${gravado} continua vencendo as férias`, conteudo()[9].status === esperado);
+  });
+
+  // E a exceção 'T' segue anulando o L só naquele dia.
+  sandbox.window._escalaDias = new Map([[`${c.matricula}|10`, { status: 'T' }]]);
+  const r = conteudo();
+  ok('exceção T anula o L do dia 10 e mantém os demais',
+    r[9].status === null && r[8].status === 'L' && r[10].status === 'L');
+
+  sandbox.window.eoFeriasAll = guardadoFer;
+  sandbox.window._escalaDias = guardadoDias;
+})();
+
 process.exit(tudoOk ? 0 : 1);

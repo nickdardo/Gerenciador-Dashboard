@@ -1093,6 +1093,11 @@ function escalaIntervaloPadraoPorCH(ch, entrada) {
   return `${fmt(minMeio)}-${fmt(minFim)}`;
 }
 
+// Status que uma marcação manual pode ter. Qualquer outra coisa gravada em
+// escala_dia (status nulo, string vazia, valor legado desconhecido) NÃO é
+// marcação de verdade e não pode se sobrepor às férias do cadastro.
+const ESCALA_STATUS_MANUAIS = ['F', 'FA', 'L', 'J', 'K', 'CH'];
+
 function escalaConteudoDoMes(c, ano, mesNum, diasNoMes) {
   const brutos = [];
   const detalhes = [];
@@ -1102,7 +1107,16 @@ function escalaConteudoDoMes(c, ano, mesNum, diasNoMes) {
     // 'T' é a exceção de férias: existe só pra anular o L daquele dia nesta
     // escala. Não é status visível — o dia volta a ser dia de trabalho.
     if (manual && manual.status === 'T') { brutos.push(null); detalhes.push(null); continue; }
-    if (manual) { brutos.push(manual.status); detalhes.push(manual.detalhe || null); continue; } // 'F' | 'K' | 'CH' | 'J'
+    // A checagem exige um status RECONHECIDO. Antes era só `if (manual)`, e
+    // com isso uma linha de escala_dia com status nulo/vazio — sobra de
+    // geração ou importação anterior — devolvia null e o dia virava dia de
+    // trabalho normal, sem nunca consultar as férias. O sintoma era
+    // exatamente este: o cadastro tem o período, o diagnóstico conta a
+    // pessoa, e mesmo assim o L não aparece na grade.
+    if (manual && ESCALA_STATUS_MANUAIS.includes(manual.status)) {
+      brutos.push(manual.status); detalhes.push(manual.detalhe || null); continue;
+    }
+    if (manual && window._escalaDiasIgnorados) window._escalaDiasIgnorados.push({ matricula: c.matricula, dia: d, status: manual.status });
     if (escalaEstaDeFerias(c.matricula, ano, mesNum, d)) { brutos.push('L'); detalhes.push(null); continue; }
     brutos.push(null); detalhes.push(null); // dia de trabalho normal
   }
@@ -1595,7 +1609,7 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   // Coletor das saidas cujo valor no banco difere do calculado. Preenchido
   // linha a linha durante a montagem e lido depois pelo aviso do rodape.
   window._escalaSaidasDivergentes = [];
-  escalaLogFerias(ano, mesNum, diasNoMes);
+  window._escalaDiasIgnorados = [];
   const entradaDoColab = (c) => escalaEntradaEfetivaDoColab(c, ano, mesNum, diasNoMes);
 
   // Valor de cada colaborador pra uma coluna clicável específica — mesmo
@@ -1950,6 +1964,9 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     });
   }
 
+  // Log depois da montagem: só agora sabemos quantos registros de escala_dia
+  // foram descartados por status não reconhecido.
+  escalaLogFerias(ano, mesNum, diasNoMes);
   return html + `</tbody></table>`;
 }
 
@@ -3875,7 +3892,12 @@ function escalaLogFerias(ano, mesNum, diasNoMes) {
       if (naEscala.has(escalaNormMatricula(r.matricula))) cruzamNaEscala++;
     }
   }
+  const ignorados = window._escalaDiasIgnorados || [];
   console.log(`[escala/férias] ${window._escalaBase} ${window._escalaMes} — ${todos.length} período(s) carregados · ${cruzam} cruzam o mês · ${cruzamNaEscala} de gente nesta escala${ilegiveis?` · ${ilegiveis} com data ilegível`:''}`);
+  if (ignorados.length) {
+    const valores = [...new Set(ignorados.map(i => JSON.stringify(i.status)))].slice(0, 5).join(', ');
+    console.warn(`[escala/dias] ${ignorados.length} registro(s) de escala_dia com status nao reconhecido foram ignorados (valores: ${valores}). Antes eles apagavam o L das ferias.`);
+  }
   if (todos.length && !cruzam) {
     console.warn(`[escala/férias] Nenhum período cruza ${primeiro}–${ultimo}. Use "Mais ações → Diagnosticar férias do mês" pra ver o que existe no cadastro.`);
   }
