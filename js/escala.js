@@ -3170,6 +3170,38 @@ async function escalaGerarFolgasAuto(grupoFiltro) {
     };
     const ehDomingo = (dia) => new Date(ano, mesNum-1, dia).getDay() === 0;
 
+    // Passo 0 — RESERVA O DOMINGO ANTES DE TUDO.
+    //
+    // Sem isso a regra do domingo simplesmente não acontecia pra boa parte
+    // do efetivo. Motivo: o passo 1 (6x1) coloca folga a cada 7 dias, e 7
+    // dias caem sempre no mesmo dia da semana. Num CH 210 (meta 5) essas
+    // folgas forçadas já fecham a meta sozinhas — o passo 3, que é onde o
+    // domingo era priorizado, nunca chegava a rodar (faltam = 0).
+    // Pior: se o 6x1 cair nos sábados, TODO domingo do mês fica colado num
+    // sábado de folga, e aí nem a rede de segurança do fechamento consegue
+    // encaixar (duas folgas coladas é proibido).
+    // Colocando o domingo primeiro, o 6x1 se organiza em volta dele.
+    const domingosDoMes = [];
+    for (let d = 1; d <= diasNoMes; d++) if (ehDomingo(d)) domingosDoMes.push(d);
+
+    const jaTemDomingoDeFolga = domingosDoMes.some(d => jaFolga(d));
+    if (!jaTemDomingoDeFolga) {
+      const livres = domingosDoMes.filter(d => !escalaDiasCalc.has(`${c.matricula}|${d}`) && !jaFolga(d));
+      // Escolhe pelo mesmo critério de cobertura dos outros passos; o piso
+      // não bloqueia, porque o domingo é obrigatório (regra do cliente).
+      const escolhidoDom = livres.length ? melhorDia(livres, c, false) : null;
+      if (escolhidoDom !== null) {
+        const registro = {
+          base: window._escalaBase, mes: window._escalaMes, matricula: c.matricula,
+          dia: escolhidoDom, status: 'F', origem: 'auto',
+          updated_at: new Date(), updated_by: currentUserProfile?.id || currentUser?.id || null,
+        };
+        inserts.push(registro);
+        escalaDiasCalc.set(`${c.matricula}|${escolhidoDom}`, registro);
+        folgasPorDia[escolhidoDom-1]++;
+      }
+    }
+
     // Passo 1 — regra obrigatória: nunca deixar passar de 6 dias seguidos
     // trabalhados. A sequência não começa do zero — puxa quantos dias
     // seguidos a pessoa já vinha trabalhando no fim do mês anterior. Simula
@@ -3370,6 +3402,7 @@ async function escalaGerarFolgasAuto(grupoFiltro) {
   ];
   if (movidas) partesRelatorio.push(`${movidas} realocada(s) na passada de melhoria`);
   if (domingo.criados.length) partesRelatorio.push(`${domingo.criados.length} domingo(s) garantido(s) no fechamento`);
+  if (domingo.remanejados?.length) partesRelatorio.push(`${domingo.remanejados.length} folga(s) remanejada(s) pra abrir espaço no domingo`);
   if (domingo.semDomingo.length) partesRelatorio.push(`ATENÇÃO: ${domingo.semDomingo.length} sem domingo livre no mês`);
   if (bloqueiosPorPiso) partesRelatorio.push(`${bloqueiosPorPiso} dia(s) descartado(s) por furarem o piso do turno`);
   escalaMsg(`${partesRelatorio.join(' · ')}${avisoForcado}.`);
@@ -4328,6 +4361,7 @@ function escalaGarantirDomingoDeFolga(colabs, ano, mesNum, diasNoMes, escalaDias
 
   const criados = [];
   const semDomingo = [];
+  const movidosParaAbrirDomingo = [];
   for (const c of colabs) {
     const folgas = escalaFolgasDoColab(c, ano, mesNum, diasNoMes, escalaDiasCalc);
     if ([...folgas].some(ehDomingo)) continue;
@@ -4344,11 +4378,65 @@ function escalaGarantirDomingoDeFolga(colabs, ano, mesNum, diasNoMes, escalaDias
       colocado = dom;
       break;
     }
-    if (colocado === null) { semDomingo.push(c.matricula); continue; }
+    // Nenhum domingo encaixa direto. O motivo quase sempre é adjacência:
+    // se as folgas caíram todas em sábado, TODO domingo fica colado numa
+    // folga existente e a regra de "nunca duas coladas" barra as quatro
+    // opções. Nesse caso vale REMANEJAR — tirar a folga que está colada e
+    // devolvê-la em outro dia — em vez de desistir do domingo.
+    if (colocado === null) {
+      const remanejou = escalaAbrirEspacoParaDomingo(
+        c, ano, mesNum, diasNoMes, escalaDiasCalc, domingosDoMes, folgas);
+      if (remanejou) {
+        movidosParaAbrirDomingo.push(c.matricula);
+        const reg = novoRegistro(c.matricula, remanejou.domingo);
+        criados.push(reg);
+        escalaDiasCalc.set(`${c.matricula}|${remanejou.domingo}`, reg);
+        continue;
+      }
+      semDomingo.push(c.matricula);
+      continue;
+    }
 
     const reg = novoRegistro(c.matricula, colocado);
     criados.push(reg);
     escalaDiasCalc.set(`${c.matricula}|${colocado}`, reg);
   }
-  return { criados, semDomingo };
+  return { criados, semDomingo, remanejados: movidosParaAbrirDomingo };
+}
+
+// Tenta liberar um domingo movendo a folga vizinha que o bloqueia para
+// outro dia. Só aceita se o resultado final continuar válido nas três
+// regras duras. Devolve o domingo liberado, ou null se não houve jeito.
+function escalaAbrirEspacoParaDomingo(c, ano, mesNum, diasNoMes, escalaDiasCalc, domingosDoMes, folgasAtuais) {
+  for (const dom of domingosDoMes) {
+    if (escalaDiasCalc.has(`${c.matricula}|${dom}`)) continue;
+    if (escalaEstaDeFerias(c.matricula, ano, mesNum, dom)) continue;
+
+    // Quem está atrapalhando: a folga em dom-1 ou dom+1.
+    for (const vizinho of [dom - 1, dom + 1]) {
+      const reg = escalaDiasCalc.get(`${c.matricula}|${vizinho}`);
+      // Só remaneja folga que o próprio gerador colocou. Marcação manual,
+      // férias e afastamento não se mexe.
+      if (!reg || reg.status !== 'F' || reg.origem !== 'auto') continue;
+
+      for (let destino = 1; destino <= diasNoMes; destino++) {
+        if (destino === vizinho || destino === dom) continue;
+        if (escalaDiasCalc.has(`${c.matricula}|${destino}`)) continue;
+        if (escalaEstaDeFerias(c.matricula, ano, mesNum, destino)) continue;
+
+        const teste = new Set(folgasAtuais);
+        teste.delete(vizinho);
+        teste.add(dom);
+        teste.add(destino);
+        if (!escalaValidarRegrasFolga(teste, ano, mesNum, diasNoMes).ok) continue;
+
+        // Aplica o remanejamento: a folga vizinha muda de dia.
+        escalaDiasCalc.delete(`${c.matricula}|${vizinho}`);
+        reg.dia = destino;
+        escalaDiasCalc.set(`${c.matricula}|${destino}`, reg);
+        return { domingo: dom, de: vizinho, para: destino };
+      }
+    }
+  }
+  return null;
 }

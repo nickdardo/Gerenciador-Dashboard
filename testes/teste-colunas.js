@@ -832,4 +832,57 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaColunasSecundarias: fal
   sandbox.window.eoFeriasAll = guardadoFer;
 })();
 
+// ── O caso do print: 6x1 caindo todo sábado bloqueia todo domingo ──
+(function () {
+  const ok = (nome, cond, detalhe) => {
+    console.log(`${cond ? 'PASSOU' : 'FALHOU'}  ${nome}${detalhe ? ` · ${detalhe}` : ''}`);
+    tudoOk &= cond;
+  };
+  const guardado = sandbox.window.eoFeriasAll;
+  sandbox.window.eoFeriasAll = [];
+
+  // Outubro/2026: sábados 3,10,17,24,31 · domingos 4,11,18,25.
+  // É o padrão que o 6x1 produz sozinho (folga a cada 7 dias) e que fecha
+  // a meta 5 do CH 210 sem nunca passar pelo passo que prioriza domingo.
+  const SAB = [3, 10, 17, 24, 31];
+  const DOM = [4, 11, 18, 25];
+  const val = (dias) => sandbox.escalaValidarRegrasFolga(new Set(dias), 2026, 10, 31);
+
+  ok('as 5 folgas de sábado já batem a meta do CH 210', SAB.length === 5);
+  ok('e são válidas nas regras duras (por isso passavam batido)', val(SAB).ok === true);
+  ok('mas todo domingo fica colado num sábado de folga',
+    DOM.every(d => SAB.includes(d - 1) || SAB.includes(d + 1)));
+  ok('por isso nenhum domingo entra sem remanejar',
+    DOM.every(d => val([...SAB, d]).ok === false));
+
+  // Rede de segurança com remanejamento: tem que abrir espaço.
+  const c = { matricula: 'T100' };
+  const mapa = new Map(SAB.map(d => [`T100|${d}`,
+    { matricula: 'T100', dia: d, status: 'F', origem: 'auto' }]));
+  const r = sandbox.escalaGarantirDomingoDeFolga([c], 2026, 10, 31, mapa,
+    (matricula, dia) => ({ matricula, dia, status: 'F', origem: 'auto' }));
+
+  ok('remanejou pra abrir o domingo', (r.remanejados || []).includes('T100'),
+    `criados=${r.criados.length} remanejados=${(r.remanejados||[]).join(',')}`);
+
+  const depois = sandbox.escalaFolgasDoColab(c, 2026, 10, 31, mapa);
+  const v = sandbox.escalaValidarRegrasFolga(depois, 2026, 10, 31);
+  ok('resultado tem exatamente 1 domingo', v.domingos === 1, `dom=${v.domingos}`);
+  ok('e continua sem folgas coladas', v.coladas === 0);
+  ok('e sem estourar 6 dias seguidos', v.maxSequencia <= 6, `seq=${v.maxSequencia}`);
+  ok('a quantidade de folgas não muda com o remanejamento',
+    depois.size === SAB.length + 1, `${depois.size} folgas`);
+
+  // Marcação manual não pode ser remanejada — só o que o gerador criou.
+  const c2 = { matricula: 'T200' };
+  const mapa2 = new Map(SAB.map(d => [`T200|${d}`,
+    { matricula: 'T200', dia: d, status: 'F', origem: 'manual' }]));
+  const r2 = sandbox.escalaGarantirDomingoDeFolga([c2], 2026, 10, 31, mapa2,
+    (matricula, dia) => ({ matricula, dia, status: 'F', origem: 'auto' }));
+  ok('folga manual não é remanejada — reporta em vez de mexer',
+    r2.criados.length === 0 && r2.semDomingo.includes('T200'));
+
+  sandbox.window.eoFeriasAll = guardado;
+})();
+
 process.exit(tudoOk ? 0 : 1);
