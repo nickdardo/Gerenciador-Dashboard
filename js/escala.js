@@ -1074,23 +1074,43 @@ function escalaIntervaloFixoDoColab(matricula, ano, mesNum, diasNoMes) {
   return melhor;
 }
 
-// Sem ponto batido nenhum pra se basear, cai pra uma duração padrão por
-// carga horária — confirmado com o cliente: CH 210h = 1h de intervalo;
-// CH 180h = 15min. As demais faixas (jornadas mais curtas, tipicamente sem
-// intervalo obrigatório) não têm regra definida ainda, então ficam de fora
-// desse preenchimento automático. Posiciona no meio da jornada.
-function escalaIntervaloPadraoPorCH(ch, entrada) {
+// O intervalo COMEÇA sempre 2h depois da entrada (regra do cliente), e não
+// mais no meio da jornada. Entrada 11:00 → intervalo 13:00.
+const ESCALA_INTERVALO_APOS_ENTRADA_MIN = 120;
+
+function escalaMinutosDeHora(hhmm) {
+  const m = String(hhmm||'').match(/^(\d{1,2}):(\d{2})$/);
+  return m ? parseInt(m[1],10)*60 + parseInt(m[2],10) : null;
+}
+function escalaHoraDeMinutos(min) {
+  const v = ((min % (24*60)) + 24*60) % (24*60);
+  return `${String(Math.floor(v/60)).padStart(2,'0')}:${String(v%60).padStart(2,'0')}`;
+}
+
+// Duração do intervalo por carga horária:
+//   CH 210h  → 1h
+//   CH ≤ 180 → 15 min
+function escalaIntervaloMinutosPorCH(ch) {
   const chNum = parseInt(String(ch||'').replace(/\D/g,''), 10);
-  const minutosIntervalo = chNum >= 210 ? 60 : chNum === 180 ? 15 : null;
-  const regra = ESCALA_CH_REGRAS[chNum];
-  if (!minutosIntervalo || !regra || !entrada) return null;
-  const m = entrada.match(/^(\d{1,2}):(\d{2})$/);
-  if (!m) return null;
-  const minEntrada = parseInt(m[1],10)*60 + parseInt(m[2],10);
-  const minMeio = (minEntrada + Math.floor(regra.jornadaDiaria*60/2)) % (24*60);
-  const minFim  = (minMeio + minutosIntervalo) % (24*60);
-  const fmt = (min) => `${String(Math.floor(min/60)).padStart(2,'0')}:${String(min%60).padStart(2,'0')}`;
-  return `${fmt(minMeio)}-${fmt(minFim)}`;
+  if (!chNum) return 0;
+  return chNum >= 210 ? 60 : 15;
+}
+
+// Só o intervalo de 1h estica a jornada. O de 15 min fica DENTRO dela, por
+// isso não entra na conta da saída: quem é CH 180 e entra 11:00 sai 17:00
+// (6h cravadas), não 17:15. Era daí que vinham as saídas quebradas
+// (07:15, 13:15, 21:45) que não existem na escala real.
+function escalaIntervaloSomaNaSaida(ch) {
+  return escalaIntervaloMinutosPorCH(ch) >= 60;
+}
+
+// Intervalo padrão: começa 2h depois da entrada e dura conforme a CH.
+function escalaIntervaloPadraoPorCH(ch, entrada) {
+  const duracao = escalaIntervaloMinutosPorCH(ch);
+  const minEntrada = escalaMinutosDeHora(entrada);
+  if (!duracao || minEntrada === null) return null;
+  const inicio = minEntrada + ESCALA_INTERVALO_APOS_ENTRADA_MIN;
+  return `${escalaHoraDeMinutos(inicio)}-${escalaHoraDeMinutos(inicio + duracao)}`;
 }
 
 // Status que uma marcação manual pode ter. Qualquer outra coisa gravada em
@@ -1427,7 +1447,9 @@ function escalaLinhaColabHTML(c, ci, ctx) {
     html += `<td style="padding:8px 10px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;border:${BORDA}">${setor}</td>`;
   }
   html += `<td style="padding:8px 10px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:${BORDA}" title="${funcao}">${funcao}</td>`;
-  html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" ${dis} value="${entrada}" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" onchange="escalaEditarHorario('${c.matricula}','entrada',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-secondary);text-align:center;font-size:12px;padding:4px"></td>`;
+  // Entrada leva a cor de destaque que antes estava na Saída: é o único
+  // horário que se digita, e é dele que os outros dois são derivados.
+  html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" ${dis} value="${entrada}" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" onchange="escalaEditarHorario('${c.matricula}','entrada',this.value)" title="Mudar a entrada recalcula a saída e o intervalo pela CH" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:#f6ad55;font-weight:600;text-align:center;font-size:12px;padding:4px"></td>`;
   if (secOn) {
     html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" ${dis} value="${intInicio}" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" onchange="escalaEditarHorario('${c.matricula}','intervalo_inicio',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-muted);text-align:center;font-size:12px;padding:4px" title="Início do intervalo"></td>`;
     html += `<td style="text-align:center;border:${BORDA};padding:2px"><input type="text" ${dis} value="${intFim}" placeholder="--:--" maxlength="5" oninput="escalaMascaraHorario(this)" onchange="escalaEditarHorario('${c.matricula}','intervalo_fim',this.value)" style="width:100%;box-sizing:border-box;background:transparent;border:none;color:var(--text-muted);text-align:center;font-size:12px;padding:4px" title="Fim do intervalo"></td>`;
@@ -1446,7 +1468,10 @@ function escalaLinhaColabHTML(c, ci, ctx) {
   if (divergente && Array.isArray(window._escalaSaidasDivergentes)) {
     window._escalaSaidasDivergentes.push({ matricula: c.matricula, nome: c.nome, salvo: saida, calculado: saidaEsperada });
   }
-  html += `<td class="escala-calculado" style="text-align:center;border:${BORDA};padding:4px;color:${divergente?'#f6ad55':'var(--text-secondary)'};font-size:12px;font-variant-numeric:tabular-nums"
+  // Saída recebe a cor discreta que antes estava na Entrada — é valor
+  // calculado, não campo. Divergência com o banco vira vermelho + sublinhado
+  // pontilhado, pra não se confundir com o laranja da Entrada.
+  html += `<td class="escala-calculado${divergente?' escala-divergente':''}" style="text-align:center;border:${BORDA};padding:4px;color:${divergente?'#fc8181':'var(--text-secondary)'};font-size:12px;font-variant-numeric:tabular-nums"
     title="${divergente
       ? `Calculado ${saidaEsperada} pela CH ${ch}. No banco ainda esta ${saida} — rode \"Recalcular saidas pela CH\" no menu Mais acoes pra gravar.`
       : `Calculado: entrada + jornada da CH ${ch||'?'} + intervalo. Pra mudar, altere a Entrada.`}">${saidaEsperada || saida || '--:--'}</td>`;
@@ -2096,23 +2121,33 @@ async function escalaEditarHorario(matricula, campo, valor) {
 
   const updates = { [coluna]: valor || null };
 
-  // Ao preencher a Entrada, se a Saída ainda estiver vazia, calcula
-  // automaticamente somando a jornada diária da carga horária (CH) do
-  // colaborador — poupa ter que digitar a Saída na mão toda vez. Não
-  // considera o intervalo (são campos separados, editáveis à parte).
+  // Mudou a Entrada → Saída e intervalo são REESCRITOS na hora, mesmo que
+  // já tivessem valor. A saída não é editável, então guardar um valor antigo
+  // ali só criaria divergência silenciosa entre o que está no banco e o que
+  // a grade mostra. Trocar 11:00 por 11:30 num CH 180 leva a saída de 17:00
+  // pra 17:30 e o intervalo de 13:00 pra 13:30, tudo junto.
   const c = (window._escalaColabs||[]).find(x => x.matricula === matricula);
   let saidaAutoCalculada = null;
-  if (campo === 'entrada' && valor && !c?.saida_manual) {
-    const horaMatch = valor.match(/^(\d{1,2}):(\d{2})$/);
-    const ch = window.eoColabs?.get(matricula)?.ch || (window._escalaColabs||[]).find(x=>x.matricula===matricula)?.ch_manual;
-    const chNum = parseInt(String(ch||'').replace(/\D/g,''), 10);
-    const regra = ESCALA_CH_REGRAS[chNum];
-    if (horaMatch && regra) {
-      const minutosEntrada = parseInt(horaMatch[1],10)*60 + parseInt(horaMatch[2],10);
-      const minutosSaida = (minutosEntrada + regra.jornadaDiaria*60) % (24*60);
-      saidaAutoCalculada = `${String(Math.floor(minutosSaida/60)).padStart(2,'0')}:${String(minutosSaida%60).padStart(2,'0')}`;
-      updates.saida_manual = saidaAutoCalculada;
+  let intervaloAutoCalculado = null;
+  if (campo === 'entrada' && valor) {
+    const ch = window.eoColabs?.get(matricula)?.ch || c?.ch_manual;
+    saidaAutoCalculada = escalaSaidaCalculada(valor, ch);
+    if (saidaAutoCalculada) updates.saida_manual = saidaAutoCalculada;
+
+    const intervalo = escalaIntervaloPadraoPorCH(ch, valor);
+    if (intervalo) {
+      const [ini, fim] = intervalo.split('-');
+      updates.intervalo_inicio_manual = ini;
+      updates.intervalo_fim_manual = fim;
+      intervaloAutoCalculado = intervalo;
     }
+  }
+  // Entrada apagada limpa o que dependia dela, em vez de deixar saída e
+  // intervalo órfãos apontando pra um horário que não existe mais.
+  if (campo === 'entrada' && !valor) {
+    updates.saida_manual = null;
+    updates.intervalo_inicio_manual = null;
+    updates.intervalo_fim_manual = null;
   }
 
   const { error } = await db.from('escala_colaborador').update(updates)
@@ -2121,8 +2156,11 @@ async function escalaEditarHorario(matricula, campo, valor) {
 
   if (c) Object.assign(c, updates);
   if (saidaAutoCalculada) {
-    escalaGradeAtualiza(); // precisa re-renderizar pra mostrar a Saída preenchida sozinha
-    escalaMsg(`Horário salvo — Saída calculada automaticamente (${saidaAutoCalculada}) pela carga horária.`);
+    escalaGradeAtualiza(); // re-renderiza pra mostrar saída e intervalo novos
+    escalaMsg(`Entrada ${valor} — saída ${saidaAutoCalculada}${intervaloAutoCalculado ? ` e intervalo ${intervaloAutoCalculado}` : ''} recalculados pela CH.`);
+  } else if (campo === 'entrada' && !valor) {
+    escalaGradeAtualiza();
+    escalaMsg('Entrada apagada — saída e intervalo foram limpos junto.');
   } else {
     escalaMsg('Horário atualizado.');
   }
@@ -2735,27 +2773,17 @@ const ESCALA_CH_REGRAS = {
   210: { jornadaDiaria: 7, teto30: 171, teto31: 177 },
 };
 
-// Minutos de intervalo por carga horária — confirmado com o cliente:
-// CH 210h = 1h; CH 180h = 15min. Jornadas mais curtas não têm intervalo
-// obrigatório definido, então ficam em zero.
-function escalaIntervaloMinutosPorCH(ch) {
-  const chNum = parseInt(String(ch||'').replace(/\D/g,''), 10);
-  return chNum >= 210 ? 60 : chNum === 180 ? 15 : 0;
-}
-
-// Saída = entrada + jornada diária + intervalo. O intervalo entra na conta
-// porque é a saída REAL (a que bate no crachá): quem cumpre 7h de jornada
-// com 1h de almoço fica 8h no local. Antes só somava a jornada, e mesmo
-// assim só quando o campo estava vazio — por isso a base tinha saídas
-// importadas sem relação nenhuma com a entrada (10:00→12:00, 22:00→02:00
-// em gente de CH 210, que deveria ser +8h).
+// Saída = entrada + jornada diária, somando o intervalo APENAS quando ele
+// for de 1 hora (CH 210). O intervalo de 15 min corre dentro da jornada,
+// então não empurra a saída: CH 180 entrando 11:00 sai 17:00, não 17:15.
+// (A definição de escalaIntervaloMinutosPorCH/escalaIntervaloSomaNaSaida
+// está junto do cálculo do intervalo, mais acima.)
 function escalaSaidaCalculada(entrada, ch) {
-  const m = String(entrada||'').match(/^(\d{1,2}):(\d{2})$/);
+  const minEntrada = escalaMinutosDeHora(entrada);
   const regra = ESCALA_CH_REGRAS[parseInt(String(ch||'').replace(/\D/g,''), 10)];
-  if (!m || !regra) return null;
-  const minEntrada = parseInt(m[1],10)*60 + parseInt(m[2],10);
-  const total = (minEntrada + regra.jornadaDiaria*60 + escalaIntervaloMinutosPorCH(ch)) % (24*60);
-  return `${String(Math.floor(total/60)).padStart(2,'0')}:${String(total%60).padStart(2,'0')}`;
+  if (minEntrada === null || !regra) return null;
+  const extra = escalaIntervaloSomaNaSaida(ch) ? escalaIntervaloMinutosPorCH(ch) : 0;
+  return escalaHoraDeMinutos(minEntrada + regra.jornadaDiaria*60 + extra);
 }
 
 // Meta de folgas no mês = dias do mês menos os dias de trabalho necessários

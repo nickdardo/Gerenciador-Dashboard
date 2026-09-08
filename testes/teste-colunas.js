@@ -208,7 +208,9 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaColunasSecundarias: fal
   // ── Saída calculada = entrada + jornada + intervalo ──
   const saida = (e, ch) => sandbox.escalaSaidaCalculada(e, ch);
   ok('CH 210 (7h + 1h intervalo) soma 8h', saida('22:00', 210) === '06:00', `22:00 → ${saida('22:00', 210)}`);
-  ok('CH 180 (6h + 15min) soma 6h15', saida('00:00', 180) === '06:15', `00:00 → ${saida('00:00', 180)}`);
+  // Regra revista com o cliente: o intervalo de 15 min corre DENTRO da
+  // jornada, então não empurra a saída (só o de 1h do CH 210 empurra).
+  ok('CH 180 (6h, intervalo dentro da jornada) soma 6h', saida('00:00', 180) === '06:00', `00:00 → ${saida('00:00', 180)}`);
   ok('CH 100 (4h, sem intervalo) soma 4h', saida('08:00', 100) === '12:00', `08:00 → ${saida('08:00', 100)}`);
   ok('vira o dia sem estourar 24h', saida('20:00', 210) === '04:00', `20:00 → ${saida('20:00', 210)}`);
   ok('sem CH conhecida não inventa saída', saida('08:00', 999) === null);
@@ -637,6 +639,52 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaColunasSecundarias: fal
 
   ok('arquivo sem linhas de dados devolve nulo', sniff.decidirPorLinhas([cabecalho]) === null);
   ok('nome do arquivo continua sendo reconhecido', sniff.test('hrcl107_setembro.xlsx'));
+})();
+
+// ── Regras de horário: saída e intervalo derivados da entrada ──────
+(function () {
+  const ok = (nome, cond, detalhe) => {
+    console.log(`${cond ? 'PASSOU' : 'FALHOU'}  ${nome}${detalhe ? ` · ${detalhe}` : ''}`);
+    tudoOk &= cond;
+  };
+  const saida = (e, ch) => sandbox.escalaSaidaCalculada(e, ch);
+  const inter = (e, ch) => sandbox.escalaIntervaloPadraoPorCH(ch, e);
+
+  // CH 180: 15 min de intervalo DENTRO da jornada — a saída não é
+  // empurrada. Era daqui que vinham os 17:15 / 13:15 / 21:45 na tela.
+  ok('CH 180 entrando 11:00 sai 17:00 (não 17:15)', saida('11:00', 180) === '17:00', saida('11:00',180));
+  ok('CH 180 entrando 00:00 sai 06:00', saida('00:00', 180) === '06:00', saida('00:00',180));
+  ok('CH 180 entrando 15:30 sai 21:30', saida('15:30', 180) === '21:30', saida('15:30',180));
+  ok('nenhuma saída de CH 180 cai em minuto quebrado',
+    ['01:00','07:00','11:00','15:30','23:45'].every(e => /:(00|30|45|15)$/.test(saida(e,180)) &&
+      saida(e,180).slice(3) === e.slice(3)));
+
+  // CH 210: 1h de intervalo fora da jornada — a saída anda 8h.
+  ok('CH 210 entrando 22:00 sai 06:00', saida('22:00', 210) === '06:00', saida('22:00',210));
+  ok('CH 210 entrando 11:00 sai 19:00', saida('11:00', 210) === '19:00', saida('11:00',210));
+
+  // Intervalo começa sempre 2h depois da entrada.
+  ok('intervalo do CH 180 começa 2h após a entrada e dura 15min',
+    inter('11:00', 180) === '13:00-13:15', inter('11:00',180));
+  ok('intervalo do CH 210 começa 2h após a entrada e dura 1h',
+    inter('22:00', 210) === '00:00-01:00', inter('22:00',210));
+  ok('intervalo vira o dia sem estourar 24h',
+    inter('23:00', 180) === '01:00-01:15', inter('23:00',180));
+
+  // O exemplo que o cliente deu: mover a entrada move tudo junto.
+  ok('mudar 11:00 para 11:30 leva a saída de 17:00 pra 17:30',
+    saida('11:00',180) === '17:00' && saida('11:30',180) === '17:30');
+  ok('e o intervalo acompanha (13:00 → 13:30)',
+    inter('11:00',180) === '13:00-13:15' && inter('11:30',180) === '13:30-13:45');
+
+  // Cores trocadas na grade.
+  const alvo = sandbox.window._escalaColabs[0];
+  alvo.entrada_manual = '11:00';
+  alvo.saida_manual = '17:00';
+  sandbox.window.eoColabs.set(alvo.matricula, { nome: alvo.nome, funcao: 'AUX', ch: '180' });
+  const html = sandbox.escalaGradeTabelaHTML(ANO, MES, DIAS);
+  ok('entrada usa a cor de destaque', /entrada&#39;|entrada'/.test(html) && html.includes("color:#f6ad55;font-weight:600"));
+  ok('saída sem divergência fica discreta', html.includes('>17:00<'));
 })();
 
 process.exit(tudoOk ? 0 : 1);

@@ -2888,3 +2888,11 @@ html, body:has(#app-shell) { overflow-x: auto; overflow-y: hidden; }
 #escala-grade-wrap tr > th:first-child,
 #escala-grade-wrap tr > td:first-child { border-left-width: 1px !important; }
 #escala-grade-wrap thead tr:first-child > th { border-top-width: 1px !important; }
+
+/* Saída divergente do banco: vermelho + pontilhado. Não pode usar o mesmo
+   laranja da Entrada, senão as duas colunas passariam a significar coisas
+   diferentes com a mesma cor. */
+#escala-grade-wrap td.escala-divergente {
+  text-decoration: underline dotted currentColor;
+  text-underline-offset: 3px;
+}
