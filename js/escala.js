@@ -107,6 +107,10 @@ async function pageEscala(el) {
   if (window._escalaOrdemDirecao === undefined) {
     try { window._escalaOrdemDirecao = localStorage.getItem('gde_escala_ordem_direcao') || 'asc'; } catch (_) { window._escalaOrdemDirecao = 'asc'; }
   }
+  if (window._escalaFatorPiso === undefined) {
+    try { window._escalaFatorPiso = parseFloat(localStorage.getItem('gde_escala_fator_piso')) || 0.85; }
+    catch (_) { window._escalaFatorPiso = 0.85; }
+  }
   if (window._escalaFiltroSituacao === undefined) {
     try { window._escalaFiltroSituacao = localStorage.getItem('gde_escala_filtro_situacao') || 'todos'; }
     catch (_) { window._escalaFiltroSituacao = 'todos'; }
@@ -850,6 +854,15 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
           <label style="font-size:10.5px;color:var(--text-muted);display:block;margin-bottom:3px">Situação</label>
           <select class="adh-month-select" onchange="escalaSetFiltroSituacao(this.value)" title="Mostra só quem está na situação escolhida — os sub-blocos e as contagens acompanham o filtro">
             ${ESCALA_FILTROS_SITUACAO.map(f => `<option value="${f.valor}" ${(window._escalaFiltroSituacao||'todos')===f.valor?'selected':''}>${f.label}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label style="font-size:10.5px;color:var(--text-muted);display:block;margin-bottom:3px">Piso de cobertura</label>
+          <select class="adh-month-select" onchange="escalaSetFatorPiso(this.value)"
+            title="Quanto do efetivo sustentável precisa estar de pé mesmo no dia mais fraco de cada grupo+turno. Mais alto protege a operação e gera menos folgas; mais baixo libera folgas mas aperta a cobertura.">
+            <option value="0.95" ${escalaFatorPiso()===0.95?'selected':''}>Rígido (95%)</option>
+            <option value="0.85" ${escalaFatorPiso()===0.85?'selected':''}>Equilibrado (85%)</option>
+            <option value="0.75" ${escalaFatorPiso()===0.75?'selected':''}>Flexível (75%)</option>
           </select>
         </div>
         <div>
@@ -2981,6 +2994,88 @@ async function escalaRemoverFolgas(filtro) {
   escalaMsg(`${alvos.length} folga(s) removida(s) ${onde}.`);
 }
 
+// ══════════════════════════════════════════════════════
+// COBERTURA POR GRUPO E TURNO
+//
+// O gerador antigo escolhia o dia da folga por "quem tem menos gente de
+// folga", com a contagem de VOOS só como desempate. Isso equilibra a
+// quantidade de folgas, que não é a mesma coisa que manter gente
+// suficiente: um dia de pico e um dia fraco recebiam o mesmo número de
+// folgas. E como a conta era global, três supervisores do Turno Delta
+// podiam cair no mesmo dia sem nada acusar, porque no total geral o dia
+// continuava "equilibrado".
+//
+// Aqui a unidade passa a ser grupo + turno + dia, e o critério vira SOBRA
+// DE COBERTURA: quantas pessoas ficam disponíveis acima do necessário.
+// ══════════════════════════════════════════════════════
+
+// Fator de piso: fração do efetivo sustentável que precisa estar de pé
+// mesmo no dia mais fraco. 1.0 = exige a média sustentável todo dia (não
+// sobraria folga nenhuma); abaixo de 1 dá margem. Ajustável na tela.
+function escalaFatorPiso() {
+  const v = parseFloat(window._escalaFatorPiso);
+  return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0.85;
+}
+
+function escalaChaveCobertura(c, ano, mesNum, diasNoMes) {
+  const grupo = escalaFuncaoGrupoDoColab(c).label;
+  const turno = escalaSetorDoTurno(escalaEntradaEfetivaDoColab(c, ano, mesNum, diasNoMes)) || '—';
+  return `${grupo}||${turno}`;
+}
+
+// Monta, pra cada grupo+turno, quanta gente precisa estar de pé em cada dia.
+//
+// O piso é derivado dos próprios dados, não de um número inventado:
+//   base = efetivo do grupo − (folgas que o grupo deve no mês ÷ dias)
+// ou seja, quantas pessoas dá pra manter em média sem furar a meta de
+// ninguém. Esse valor é então modulado pela demanda relativa do dia
+// (pico daquele dia ÷ pico médio do mês), então dia forte exige mais que a
+// média e dia fraco exige menos. Como a modulação gira em torno de 1, a
+// soma no mês continua viável.
+function escalaModeloCobertura(colabs, ano, mesNum, diasNoMes) {
+  const picos = [];
+  for (let d = 1; d <= diasNoMes; d++) picos.push(escalaPicoDoDia(d) || 0);
+  const picoMedio = picos.reduce((a, b) => a + b, 0) / diasNoMes;
+
+  const grupos = new Map(); // chave -> { membros[], somaMetas }
+  for (const c of colabs) {
+    const chave = escalaChaveCobertura(c, ano, mesNum, diasNoMes);
+    if (!grupos.has(chave)) grupos.set(chave, { membros: [], somaMetas: 0 });
+    const g = grupos.get(chave);
+    g.membros.push(c);
+    g.somaMetas += escalaMetaFolgasDoColab(
+      window.eoColabs?.get(c.matricula)?.ch || c.ch_manual, diasNoMes);
+  }
+
+  const piso = new Map(); // chave -> array por dia
+  const fator = escalaFatorPiso();
+  for (const [chave, g] of grupos) {
+    const base = g.membros.length - (g.somaMetas / diasNoMes);
+    const porDia = [];
+    for (let d = 1; d <= diasNoMes; d++) {
+      // Sem malha carregada, picoMedio é 0 — nesse caso o piso é liso,
+      // sem modulação, em vez de dividir por zero.
+      const relativo = picoMedio > 0 ? picos[d-1] / picoMedio : 1;
+      porDia.push(Math.max(1, Math.round(base * fator * relativo)));
+    }
+    piso.set(chave, porDia);
+  }
+  return { piso, grupos, picos };
+}
+
+// Quantas pessoas de um grupo+turno estão disponíveis num dia, dado o
+// estado de cálculo atual.
+function escalaDisponiveisNoDia(membros, dia, ano, mesNum, escalaDiasCalc) {
+  let n = 0;
+  for (const c of membros) {
+    if (escalaEstaDeFerias(c.matricula, ano, mesNum, dia)) continue;
+    const st = escalaDiasCalc.get(`${c.matricula}|${dia}`)?.status;
+    if (st === 'F' || st === 'FA' || st === 'J' || st === 'CH') continue;
+    n++;
+  }
+  return n;
+}
+
 async function escalaGerarFolgasAuto(grupoFiltro) {
   if (escalaVerificarTravada()) return;
   const { colabs, rotulo: rotuloFiltro } = escalaFiltrarColabs(grupoFiltro);
@@ -3016,18 +3111,40 @@ async function escalaGerarFolgasAuto(grupoFiltro) {
     }
   }
 
-  // Escolhe o melhor dia dentro de uma lista de candidatos (já filtrada de
-  // quem não serve): menos folgas já colocadas primeiro (equilíbrio); em
-  // empate, menor demanda de voos; em empate total, fica com o PRIMEIRO
-  // candidato da lista — por isso quem chama decide a ordem de entrada
-  // (o passo 1 passa em ordem reversa, pra não cair na cascata de folgas).
-  function melhorDia(candidatos) {
-    let melhor = null, melhorFolgas = Infinity, melhorDemanda = Infinity;
-    for (const d of candidatos) {
-      const folgas = folgasPorDia[d-1];
-      const demanda = voosPorDia[d-1] || 0;
-      if (folgas < melhorFolgas || (folgas === melhorFolgas && demanda < melhorDemanda)) {
-        melhor = d; melhorFolgas = folgas; melhorDemanda = demanda;
+  const modelo = escalaModeloCobertura(colabs, ano, mesNum, diasNoMes);
+  let bloqueiosPorPiso = 0;
+
+  // Sobra de cobertura do grupo+turno da pessoa naquele dia: quantos ficam
+  // de pé acima do mínimo. Negativo = colocar folga aí fura o piso.
+  function sobraNoDia(c, dia) {
+    const chave = escalaChaveCobertura(c, ano, mesNum, diasNoMes);
+    const g = modelo.grupos.get(chave);
+    if (!g) return 0;
+    const disponiveis = escalaDisponiveisNoDia(g.membros, dia, ano, mesNum, escalaDiasCalc);
+    return disponiveis - (modelo.piso.get(chave)?.[dia-1] ?? 0);
+  }
+
+  // Escolhe o dia com MAIOR sobra de cobertura no grupo+turno da pessoa —
+  // ou seja, o dia em que tirar mais uma pessoa dói menos. Empate vai pro
+  // dia com menor pico de malha; empate total fica com o primeiro da lista
+  // (o passo 1 passa em ordem reversa de propósito, pra não encadear
+  // folgas forçadas coladas).
+  //
+  // `respeitarPiso` é falso só no passo obrigatório do 6x1: ali a folga TEM
+  // que sair, porque o limite de 6 dias seguidos é lei e vence a cobertura.
+  function melhorDia(candidatos, c, respeitarPiso = true) {
+    const viaveis = respeitarPiso
+      ? candidatos.filter(d => sobraNoDia(c, d) > 0)
+      : candidatos;
+    if (respeitarPiso && !viaveis.length) return null; // nenhum dia sem furar o piso
+    if (respeitarPiso && viaveis.length < candidatos.length) bloqueiosPorPiso++;
+
+    let melhor = null, melhorSobra = -Infinity, melhorPico = Infinity;
+    for (const d of (viaveis.length ? viaveis : candidatos)) {
+      const sobra = sobraNoDia(c, d);
+      const pico = modelo.picos[d-1] || 0;
+      if (sobra > melhorSobra || (sobra === melhorSobra && pico < melhorPico)) {
+        melhor = d; melhorSobra = sobra; melhorPico = pico;
       }
     }
     return melhor;
@@ -3091,7 +3208,8 @@ async function escalaGerarFolgasAuto(grupoFiltro) {
           if (semDomingo.length) candidatos = semDomingo;
         }
 
-        const escolhido = melhorDia(candidatos) ?? d; // segurança — não deveria acontecer
+        // Lei vence cobertura: aqui o piso não bloqueia.
+        const escolhido = melhorDia(candidatos, c, false) ?? d;
         folgasForcadas.add(escolhido);
         folgasPorDia[escolhido-1]++;
         colabsComQuebraForcada++;
@@ -3163,7 +3281,14 @@ async function escalaGerarFolgasAuto(grupoFiltro) {
         listaFinal = semDomingo.length ? semDomingo : candidatos;
       }
 
-      const escolhido = melhorDia(listaFinal);
+      let escolhido = melhorDia(listaFinal, c, true);
+      if (escolhido === null) {
+        // Todo dia possível furaria o piso desse grupo+turno. Parar aqui é
+        // melhor que espalhar folga em cima da operação: a pessoa fica
+        // abaixo da meta e isso aparece na coluna Folgas (laranja) pra
+        // alguém decidir na mão.
+        break;
+      }
       const registro = {
         base: window._escalaBase, mes: window._escalaMes, matricula: c.matricula, dia: escolhido, status: 'F', origem: 'auto',
         updated_at: new Date(), updated_by: currentUserProfile?.id || currentUser?.id || null,
@@ -3176,6 +3301,14 @@ async function escalaGerarFolgasAuto(grupoFiltro) {
     processados++;
     escalaLoadingAtualiza(processados, colabs.length);
   }
+
+  // ── Passada de melhoria ───────────────────────────────────────────
+  // O laço acima processa uma pessoa por vez, na ordem da lista: quem vem
+  // primeiro pega os melhores dias e quem vem depois fica com as sobras.
+  // Aqui as folgas GERADAS NESTE RUN podem ser movidas de dia se isso
+  // melhorar o pior dia coberto do grupo+turno. Só mexe no que o próprio
+  // gerador criou — marcação manual e férias ficam intocadas.
+  const movidas = escalaMelhorarDistribuicao(inserts, colabs, ano, mesNum, diasNoMes, escalaDiasCalc, modelo);
 
   if (!inserts.length) { escalaGradeAtualiza(); escalaMsg('Ninguém precisava de mais folgas — todo mundo já está na meta do mês.'); return; }
 
@@ -3209,7 +3342,18 @@ async function escalaGerarFolgasAuto(grupoFiltro) {
   const avisoForcado = colabsComQuebraForcada > 0
     ? ` · ${colabsComQuebraForcada} folga(s) extra forçada(s) pra não passar de 6 dias seguidos trabalhando`
     : '';
-  escalaMsg(`${inserts.length} folga(s) geradas, equilibrando a quantidade de gente por dia (meta por CH: ${[...metasUsadas].sort((a,b)=>a-b).join('/')} folgas/mês)${avisoForcado}.`);
+  // Relatório do que o gerador fez E do que ele se recusou a fazer. O
+  // segundo é tão importante quanto o primeiro: quem ficou abaixo da meta
+  // ficou porque não havia dia sem furar a cobertura do turno, e isso
+  // precisa aparecer pra alguém decidir na mão.
+  const partesRelatorio = [
+    `${inserts.length} folga(s) geradas por sobra de cobertura (grupo + turno + dia)`,
+    `meta por CH: ${[...metasUsadas].sort((a,b)=>a-b).join('/')} folgas/mês`,
+  ];
+  if (movidas) partesRelatorio.push(`${movidas} realocada(s) na passada de melhoria`);
+  if (bloqueiosPorPiso) partesRelatorio.push(`${bloqueiosPorPiso} dia(s) descartado(s) por furarem o piso do turno`);
+  escalaMsg(`${partesRelatorio.join(' · ')}${avisoForcado}.`);
+  escalaLogCobertura(colabs, ano, mesNum, diasNoMes, escalaDiasCalc, modelo);
 }
 
 // ── Painel "Voos & demanda" — toggle no cabeçalho ──────
@@ -3972,4 +4116,143 @@ async function escalaAdicionarFeriado() {
   if (error) { escalaMsg('Erro ao salvar feriado: ' + error.message, true); return; }
   escalaMsg(`Feriado "${nome}" adicionado em ${dataStr} pra ${base}.`);
   escalaRenderGrade(document.getElementById('page-content'));
+}
+
+// ══════════════════════════════════════════════════════
+// PASSADA DE MELHORIA DA DISTRIBUIÇÃO
+// ══════════════════════════════════════════════════════
+
+// Tenta mover cada folga recém-gerada para um dia melhor, medindo pelo
+// PIOR dia do grupo+turno (a folga mais apertada da cobertura). Só aceita
+// a troca se o pior dia melhorar de verdade — assim a passada nunca piora
+// o resultado, e para sozinha quando não há mais ganho.
+//
+// Repete no máximo algumas rodadas: é busca local, não otimização exata.
+// A garantia que importa (6x1 e nunca 2 folgas coladas) continua vindo do
+// laço principal; aqui as trocas são checadas contra as mesmas regras.
+function escalaMelhorarDistribuicao(inserts, colabs, ano, mesNum, diasNoMes, escalaDiasCalc, modelo, maxRodadas) {
+  const rodadas = maxRodadas || 3;
+  let movidas = 0;
+
+  // Índice: chave de grupo+turno -> membros
+  const chaveDe = (c) => escalaChaveCobertura(c, ano, mesNum, diasNoMes);
+
+  // Pior sobra de cobertura do grupo num dia qualquer do mês.
+  const piorSobra = (chave) => {
+    const g = modelo.grupos.get(chave);
+    if (!g) return Infinity;
+    const piso = modelo.piso.get(chave) || [];
+    let pior = Infinity;
+    for (let d = 1; d <= diasNoMes; d++) {
+      const sobra = escalaDisponiveisNoDia(g.membros, d, ano, mesNum, escalaDiasCalc) - (piso[d-1] ?? 0);
+      if (sobra < pior) pior = sobra;
+    }
+    return pior;
+  };
+
+  const ehDomingo = (d) => new Date(ano, mesNum-1, d).getDay() === 0;
+
+  // Uma troca só é permitida se o dia novo não cria folga colada e mantém
+  // o 6x1 — as duas regras duras do laço principal.
+  const podeMover = (c, deDia, paraDia) => {
+    if (escalaDiasCalc.has(`${c.matricula}|${paraDia}`)) return false;
+    if (escalaEstaDeFerias(c.matricula, ano, mesNum, paraDia)) return false;
+    const colado = (d) => {
+      const a = escalaDiasCalc.get(`${c.matricula}|${d-1}`)?.status;
+      const b = escalaDiasCalc.get(`${c.matricula}|${d+1}`)?.status;
+      return a === 'F' || a === 'FA' || b === 'F' || b === 'FA';
+    };
+    if (colado(paraDia)) return false;
+
+    // Simula a troca e confere que nenhuma sequência passa de 6 dias.
+    const folgasDoColab = new Set();
+    for (let d = 1; d <= diasNoMes; d++) {
+      const st = escalaDiasCalc.get(`${c.matricula}|${d}`)?.status;
+      if (st === 'F' || st === 'FA' || st === 'J' || st === 'CH') folgasDoColab.add(d);
+      if (escalaEstaDeFerias(c.matricula, ano, mesNum, d)) folgasDoColab.add(d);
+    }
+    folgasDoColab.delete(deDia);
+    folgasDoColab.add(paraDia);
+    let seq = 0;
+    for (let d = 1; d <= diasNoMes; d++) {
+      if (folgasDoColab.has(d)) { seq = 0; continue; }
+      if (++seq >= 7) return false;
+    }
+
+    // Domingo continua sendo exatamente 1 por pessoa.
+    if (ehDomingo(paraDia) && !ehDomingo(deDia)) {
+      const domingos = [...folgasDoColab].filter(ehDomingo).length;
+      if (domingos > 1) return false;
+    }
+    return true;
+  };
+
+  for (let rodada = 0; rodada < rodadas; rodada++) {
+    let mudouNestaRodada = false;
+
+    for (const reg of inserts) {
+      const c = colabs.find(x => x.matricula === reg.matricula);
+      if (!c) continue;
+      const chave = chaveDe(c);
+      const antes = piorSobra(chave);
+
+      let melhorDestino = null, melhorGanho = 0;
+      for (let d = 1; d <= diasNoMes; d++) {
+        if (d === reg.dia) continue;
+        if (!podeMover(c, reg.dia, d)) continue;
+
+        // Aplica a troca no mapa de cálculo, mede, e desfaz.
+        escalaDiasCalc.delete(`${c.matricula}|${reg.dia}`);
+        escalaDiasCalc.set(`${c.matricula}|${d}`, { ...reg, dia: d });
+        const depois = piorSobra(chave);
+        escalaDiasCalc.delete(`${c.matricula}|${d}`);
+        escalaDiasCalc.set(`${c.matricula}|${reg.dia}`, reg);
+
+        const ganho = depois - antes;
+        if (ganho > melhorGanho) { melhorGanho = ganho; melhorDestino = d; }
+      }
+
+      if (melhorDestino !== null) {
+        escalaDiasCalc.delete(`${c.matricula}|${reg.dia}`);
+        reg.dia = melhorDestino;
+        escalaDiasCalc.set(`${c.matricula}|${melhorDestino}`, reg);
+        movidas++;
+        mudouNestaRodada = true;
+      }
+    }
+
+    if (!mudouNestaRodada) break; // convergiu
+  }
+  return movidas;
+}
+
+// Cobertura resultante por grupo+turno, no console. Serve pra conferir se
+// o gerador realmente respeitou o piso — e, quando não deu, em quais dias.
+function escalaLogCobertura(colabs, ano, mesNum, diasNoMes, escalaDiasCalc, modelo) {
+  const linhas = [];
+  let furos = 0;
+  for (const [chave, g] of modelo.grupos) {
+    const piso = modelo.piso.get(chave) || [];
+    const abaixo = [];
+    let pior = Infinity;
+    for (let d = 1; d <= diasNoMes; d++) {
+      const disp = escalaDisponiveisNoDia(g.membros, d, ano, mesNum, escalaDiasCalc);
+      const sobra = disp - (piso[d-1] ?? 0);
+      if (sobra < pior) pior = sobra;
+      if (sobra < 0) abaixo.push(`${d}(${disp}/${piso[d-1]})`);
+    }
+    furos += abaixo.length;
+    const [grupo, turno] = chave.split('||');
+    linhas.push(`   ${grupo} · ${turno}: ${g.membros.length} pessoa(s) · pior sobra ${pior}${abaixo.length ? ` · abaixo do piso nos dias ${abaixo.join(', ')}` : ''}`);
+  }
+  console.log([
+    `[escala/cobertura] fator de piso ${escalaFatorPiso()} · ${furos} dia(s) abaixo do piso no total`,
+    ...linhas,
+  ].join('\n'));
+}
+
+function escalaSetFatorPiso(valor) {
+  window._escalaFatorPiso = parseFloat(valor) || 0.85;
+  try { localStorage.setItem('gde_escala_fator_piso', String(window._escalaFatorPiso)); } catch (_) {}
+  escalaMsg(`Piso de cobertura em ${Math.round(escalaFatorPiso()*100)}% — vale a partir da próxima geração de folgas.`);
 }

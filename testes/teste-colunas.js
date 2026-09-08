@@ -687,4 +687,75 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaColunasSecundarias: fal
   ok('saída sem divergência fica discreta', html.includes('>17:00<'));
 })();
 
+// ── Cobertura por grupo + turno ────────────────────────────────────
+(function () {
+  const ok = (nome, cond, detalhe) => {
+    console.log(`${cond ? 'PASSOU' : 'FALHOU'}  ${nome}${detalhe ? ` · ${detalhe}` : ''}`);
+    tudoOk &= cond;
+  };
+  const guardadoFer = sandbox.window.eoFeriasAll;
+  const guardadoDias = sandbox.window._escalaDias;
+  sandbox.window.eoFeriasAll = [];
+  sandbox.window._escalaDias = new Map();
+  sandbox.window._escalaFatorPiso = 0.85;
+
+  const colabs = sandbox.window._escalaColabs;
+  const DIAS31 = 31;
+  const modelo = sandbox.escalaModeloCobertura(colabs, 2026, 1, DIAS31);
+
+  ok('modelo separa por grupo E turno, não só por grupo',
+    modelo.grupos.size > 1 && [...modelo.grupos.keys()].every(k => k.includes('||')),
+    `${modelo.grupos.size} recorte(s)`);
+
+  ok('todo grupo tem piso de pelo menos 1 pessoa por dia',
+    [...modelo.piso.values()].every(dias => dias.length === DIAS31 && dias.every(v => v >= 1)));
+
+  // O piso tem que ficar ABAIXO do efetivo, senão não sobra folga nenhuma.
+  ok('piso fica abaixo do efetivo do grupo',
+    [...modelo.grupos.entries()].every(([chave, g]) =>
+      modelo.piso.get(chave).every(v => v <= g.membros.length)));
+
+  // Fator mais rígido = piso mais alto. É a alavanca que o gestor controla.
+  sandbox.window._escalaFatorPiso = 0.95;
+  const rigido = sandbox.escalaModeloCobertura(colabs, 2026, 1, DIAS31);
+  sandbox.window._escalaFatorPiso = 0.75;
+  const flexivel = sandbox.escalaModeloCobertura(colabs, 2026, 1, DIAS31);
+  const soma = (m) => [...m.piso.values()].flat().reduce((a, b) => a + b, 0);
+  ok('piso rígido exige mais gente que o flexível',
+    soma(rigido) > soma(flexivel), `${soma(rigido)} vs ${soma(flexivel)}`);
+  sandbox.window._escalaFatorPiso = 0.85;
+
+  ok('fator fora da faixa é limitado a 0..1', (() => {
+    sandbox.window._escalaFatorPiso = 5;   const alto = sandbox.escalaFatorPiso();
+    sandbox.window._escalaFatorPiso = -2;  const baixo = sandbox.escalaFatorPiso();
+    sandbox.window._escalaFatorPiso = 0.85;
+    return alto === 1 && baixo === 0;
+  })());
+
+  // Disponíveis tem que descontar folga, férias, afastado e compensação.
+  const chave = [...modelo.grupos.keys()][0];
+  const membros = modelo.grupos.get(chave).membros;
+  const cheio = sandbox.escalaDisponiveisNoDia(membros, 5, 2026, 1, sandbox.window._escalaDias);
+  ok('com ninguém de folga, todos contam como disponíveis', cheio === membros.length);
+
+  ['F','FA','J','CH'].forEach(st => {
+    const mapa = new Map([[`${membros[0].matricula}|5`, { status: st }]]);
+    ok(`status ${st} sai da contagem de disponíveis`,
+      sandbox.escalaDisponiveisNoDia(membros, 5, 2026, 1, mapa) === membros.length - 1);
+  });
+
+  // Curso (K) NÃO é folga — a pessoa segue indisponível pra operação? Não:
+  // pela regra do painel, K continua sendo dia de trabalho.
+  const comCurso = new Map([[`${membros[0].matricula}|5`, { status: 'K' }]]);
+  ok('curso (K) continua contando como disponível',
+    sandbox.escalaDisponiveisNoDia(membros, 5, 2026, 1, comCurso) === membros.length);
+
+  sandbox.window.eoFeriasAll = [{ matricula: membros[0].matricula, data_inicio: '2026-01-01', data_fim: '2026-01-31' }];
+  ok('quem está de férias sai da contagem de disponíveis',
+    sandbox.escalaDisponiveisNoDia(membros, 5, 2026, 1, new Map()) === membros.length - 1);
+
+  sandbox.window.eoFeriasAll = guardadoFer;
+  sandbox.window._escalaDias = guardadoDias;
+})();
+
 process.exit(tudoOk ? 0 : 1);
