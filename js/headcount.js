@@ -73,6 +73,18 @@ function hcIsFeriasAtiva(mat, dataRef) {
 // Tem férias em algum dia do mês (formato 'YYYY-MM'). É o que o filtro
 // "Férias" da lista precisa: perguntar "está de férias HOJE" devolve zero
 // sempre que o mês tem férias mas nenhuma cobre exatamente a data de hoje.
+// Período que cobre o mês pedido — é ele que aparece na coluna Observação,
+// pra ficar claro POR QUE a pessoa entrou no filtro. Sem isso a lista
+// mostrava "Trabalhando" na coluna Situação (que vem do cadastro de RH,
+// não das datas) e parecia que o filtro tinha trazido gente errada.
+function hcPeriodoNoMes(mat, mesISO) {
+  const mes = mesISO || new Date().toISOString().slice(0,7);
+  const primeiro = `${mes}-01`;
+  const [a, m] = mes.split('-').map(Number);
+  const ultimo = `${mes}-${String(new Date(a, m, 0).getDate()).padStart(2,'0')}`;
+  return hcPeriodosFerias(mat).find(p => p.ini <= ultimo && p.fim >= primeiro) || null;
+}
+
 function hcTemFeriasNoMes(mat, mesISO) {
   const mes = mesISO || new Date().toISOString().slice(0,7);
   const primeiro = `${mes}-01`;
@@ -221,7 +233,7 @@ function hcComputeStats() {
     // Conta férias do MÊS: a meta ao lado é "10% do staff por mês", então
     // comparar com "de férias hoje" misturava duas unidades diferentes e
     // deixava a coluna zerada quase sempre.
-    if (hcTemFeriasNoMes(r.mat)) g.ferias++;
+    if (hcTemFeriasNoMes(r.mat, hcMesFerias())) g.ferias++;
 
     const funcao = String(r.funcao || 'SEM FUNÇÃO').trim();
     const chd = hcChDiario(ch);
@@ -495,6 +507,39 @@ function hcBaseSelectorHTML(renderFnName) {
     </div>`;
 }
 
+// Mês de referência do filtro "Férias". Começa no mês corrente — é o que o
+// gestor quer ver ao montar a escala — e pode voltar/avançar. Antes o
+// filtro perguntava "está de férias exatamente hoje", sem noção de mês.
+function hcMesFerias() {
+  return window._hcMesFerias || new Date().toISOString().slice(0, 7);
+}
+
+function hcSetMesFerias(mes) {
+  window._hcMesFerias = mes;
+  window._hcSituFilter = 'ferias';
+  document.querySelectorAll('.hc-situ-filter-btn').forEach(b =>
+    b.classList.toggle('active', b.textContent.trim() === 'Férias'));
+  hcRerenderColabTable();
+}
+
+// Rótulo curto pro seletor (set/2026), sem depender de locale do sistema.
+function hcMesLabel(mes) {
+  const [a, m] = mes.split('-').map(Number);
+  const nomes = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+  return `${nomes[m-1]}/${a}`;
+}
+
+// Doze meses em torno do atual: seis pra trás, cinco pra frente.
+function hcMesesFeriasDisponiveis() {
+  const hoje = new Date();
+  const lista = [];
+  for (let d = -6; d <= 5; d++) {
+    const dt = new Date(hoje.getFullYear(), hoje.getMonth() + d, 1);
+    lista.push(`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}`);
+  }
+  return lista;
+}
+
 function hcFilterSitu(mode, btn) {
   document.querySelectorAll('.hc-situ-filter-btn').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
@@ -672,6 +717,11 @@ function hcRenderMain(el) {
                 <button class="adh-sort-btn hc-situ-filter-btn" onclick="hcFilterSitu('ativo',this)">Ativos</button>
                 <button class="adh-sort-btn hc-situ-filter-btn" onclick="hcFilterSitu('inativo',this)">Inativos</button>
                 <button class="adh-sort-btn hc-situ-filter-btn" onclick="hcFilterSitu('ferias',this)">Férias</button>
+                <select class="adh-month-select" style="margin-left:6px;padding:4px 8px;font-size:11.5px"
+                  title="Mês de referência do filtro Férias" onchange="hcSetMesFerias(this.value)">
+                  ${hcMesesFeriasDisponiveis().map(m =>
+                    `<option value="${m}" ${m === hcMesFerias() ? 'selected' : ''}>${hcMesLabel(m)}${m === new Date().toISOString().slice(0,7) ? ' (atual)' : ''}</option>`).join('')}
+                </select>
                 <button class="adh-refresh-btn" style="margin-left:8px" onclick="hcExportarExcel(hcColabExportRows(hcColabListFiltered()), [
                   {header:'Matrícula',field:'mat'},{header:'Filial',field:'filial'},{header:'Nome',field:'nome'},
                   {header:'Função',field:'funcao'},{header:'CH',field:'ch'},{header:'Situação',field:'situacao_export'},
@@ -824,7 +874,15 @@ function hcRenderColabRows(list) {
   return list.map(c => {
     const situClass = c.desligado ? 'adh-situ-desligado' : c.emFerias ? 'adh-situ-ferias' : hcIsAtestado(c.situacao) ? 'adh-situ-afastado' : (String(c.situacao||'').trim().toLowerCase()==='trabalhando' ? 'adh-situ-ativo' : 'adh-situ-afastado');
     const situTxt = c.desligado ? 'Desligado' : (c.situacao || '—');
-    const obs = c.desligado ? hcFmtISODate(c.demissao) : (c.emFerias ? `Férias até ${hcFmtISODate(c.feriasFim)}` : '');
+    let obs = c.desligado ? hcFmtISODate(c.demissao) : (c.emFerias ? `Férias até ${hcFmtISODate(c.feriasFim)}` : '');
+    // Com o filtro de férias ligado, mostra o período inteiro do mês
+    // escolhido. A coluna Situação continua vindo do cadastro do RH e pode
+    // dizer "Trabalhando" — são fontes diferentes, e ver as duas lado a
+    // lado é justamente o que revela divergência entre elas.
+    if (window._hcSituFilter === 'ferias') {
+      const per = hcPeriodoNoMes(c.mat, hcMesFerias());
+      if (per) obs = `Férias ${hcFmtISODate(per.ini)} a ${hcFmtISODate(per.fim)}`;
+    }
     const pcdBadge = c.pcd ? `<i class="ti ti-wheelchair" style="color:#a78bfa;font-size:12px;margin-left:5px" title="PCD" aria-hidden="true"></i>` : '';
     return `<tr class="adh-colab-row">
       <td style="font-family:monospace">${c.mat}</td>
@@ -889,7 +947,14 @@ function hcColabListFiltered() {
   // Férias do MÊS, não "de férias exatamente hoje". Com a pergunta antiga a
   // lista vinha vazia sempre que ninguém estivesse no meio das férias na
   // data de hoje, mesmo com dezenas de períodos programados no mês.
-  if (window._hcSituFilter === 'ferias')  list = list.filter(c => c.feriasNoMes || c.emFerias);
+  if (window._hcSituFilter === 'ferias') {
+    const mes = hcMesFerias();
+    list = list.filter(c => hcTemFeriasNoMes(c.mat, mes));
+    // Ordena por início das férias: quem entra primeiro aparece primeiro,
+    // que é a ordem útil pra planejar o mês.
+    list = [...list].sort((a, b) =>
+      String(hcPeriodoNoMes(a.mat, mes)?.ini || '').localeCompare(String(hcPeriodoNoMes(b.mat, mes)?.ini || '')));
+  }
   if (window._hcGrupoFilter) list = list.filter(c => hcCargoGrupo(c.funcao) === window._hcGrupoFilter);
   const q = (window._hcSearch||'').trim().toLowerCase();
   if (q) list = list.filter(c => String(c.mat).includes(q) || String(c.nome||'').toLowerCase().includes(q));
@@ -905,7 +970,12 @@ function hcColabExportRows(list) {
     mat: c.mat, filial: c.filial, nome: c.nome, funcao: c.funcao, ch: c.ch,
     situacao_export: c.desligado ? 'Desligado' : (c.situacao || ''),
     admissao: c.admissao,
-    observacao_export: c.desligado ? (hcFmtISODate(c.demissao)||'') : (c.emFerias ? `Férias até ${hcFmtISODate(c.feriasFim)||''}` : ''),
+    observacao_export: (() => {
+      if (c.desligado) return hcFmtISODate(c.demissao) || '';
+      const per = window._hcSituFilter === 'ferias' ? hcPeriodoNoMes(c.mat, hcMesFerias()) : null;
+      if (per) return `Férias ${hcFmtISODate(per.ini)} a ${hcFmtISODate(per.fim)}`;
+      return c.emFerias ? `Férias até ${hcFmtISODate(c.feriasFim)||''}` : '';
+    })(),
   }));
 }
 

@@ -473,9 +473,13 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaColunasSecundarias: fal
     console.log(`${cond ? 'PASSOU' : 'FALHOU'}  ${nome}${detalhe ? ` · ${detalhe}` : ''}`);
     tudoOk &= cond;
   };
+  // Carrega só os blocos de férias do headcount.js: o arquivo inteiro puxa
+  // DOM e Supabase, que não existem aqui. São dois trechos — o índice de
+  // férias e os helpers de mês, que ficam em partes diferentes do arquivo.
   const fonte = fs.readFileSync(__dirname + '/../js/headcount.js', 'utf8');
-  const trecho = fonte.slice(fonte.indexOf('let _hcFeriasIndice'), fonte.indexOf('function hcIsAtestado'));
-  vm.runInContext(trecho, sandbox);
+  const recorte = (de, ate) => fonte.slice(fonte.indexOf(de), fonte.indexOf(ate));
+  vm.runInContext(recorte('let _hcFeriasIndice', 'function hcIsAtestado'), sandbox);
+  vm.runInContext(recorte('function hcMesFerias', 'function hcFilterSitu'), sandbox);
 
   const guardado = sandbox.window.eoFeriasAll;
 
@@ -506,6 +510,39 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaColunasSecundarias: fal
 
   ok('período sem data_fim não vira férias eterna sem início',
     sandbox.hcPeriodosFerias('999999').length === 0);
+
+  sandbox.window.eoFeriasAll = guardado;
+})();
+
+// ── Staff: mês de referência do filtro de férias ───────────────────
+(function () {
+  const ok = (nome, cond, detalhe) => {
+    console.log(`${cond ? 'PASSOU' : 'FALHOU'}  ${nome}${detalhe ? ` · ${detalhe}` : ''}`);
+    tudoOk &= cond;
+  };
+  const guardado = sandbox.window.eoFeriasAll;
+  sandbox.window.eoFeriasAll = [
+    { matricula: '160590', data_inicio: '2026-09-01', data_fim: '2026-09-30', filial: 'BEL' },
+    { matricula: '160580', data_inicio: '2026-08-20', data_fim: '2026-09-05', filial: 'BEL' },
+    { matricula: '160980', data_inicio: '2026-10-01', data_fim: '2026-10-15', filial: 'BEL' },
+  ];
+
+  const p = sandbox.hcPeriodoNoMes('160580', '2026-09');
+  ok('período que atravessa a virada é devolvido inteiro',
+    p && p.ini === '2026-08-20' && p.fim === '2026-09-05',
+    p ? `${p.ini} a ${p.fim}` : 'nulo');
+  ok('e o mesmo período aparece em agosto', !!sandbox.hcPeriodoNoMes('160580', '2026-08'));
+  ok('outubro traz só quem tem férias em outubro',
+    sandbox.hcTemFeriasNoMes('160980', '2026-10') && !sandbox.hcTemFeriasNoMes('160590', '2026-10'));
+  ok('mês sem férias devolve período nulo', sandbox.hcPeriodoNoMes('160590', '2026-11') === null);
+
+  // O seletor precisa oferecer o mês corrente e marcá-lo como padrão.
+  const meses = sandbox.hcMesesFeriasDisponiveis();
+  const atual = new Date().toISOString().slice(0, 7);
+  ok('seletor inclui o mês corrente', meses.includes(atual));
+  ok('padrão do filtro é o mês corrente', sandbox.hcMesFerias() === atual, sandbox.hcMesFerias());
+  ok('seletor cobre 12 meses', meses.length === 12);
+  ok('rótulo do mês é legível', sandbox.hcMesLabel('2026-09') === 'set/2026', sandbox.hcMesLabel('2026-09'));
 
   sandbox.window.eoFeriasAll = guardado;
 })();
