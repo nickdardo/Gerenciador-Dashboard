@@ -64,6 +64,7 @@ async function pageEscala(el) {
 
   if (typeof hcEnsureData === 'function') await hcEnsureData();
   else if (typeof adhEnsureRoster === 'function') await adhEnsureRoster();
+  await escalaGarantirFerias();
   const bases = isAdmin ? (typeof hcAllBases === 'function' ? hcAllBases() : []) : myBases;
 
   if (!bases.length) {
@@ -604,6 +605,7 @@ async function escalaRenderGrade(el) {
 
   if (typeof hcEnsureData === 'function') await hcEnsureData();
   else if (typeof adhEnsureRoster === 'function') await adhEnsureRoster();
+  await escalaGarantirFerias();
   if (typeof adminLoadFileOnDemand === 'function') {
     await adminLoadFileOnDemand('horarios', () => {});
   }
@@ -1593,6 +1595,7 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   // Coletor das saidas cujo valor no banco difere do calculado. Preenchido
   // linha a linha durante a montagem e lido depois pelo aviso do rodape.
   window._escalaSaidasDivergentes = [];
+  escalaLogFerias(ano, mesNum, diasNoMes);
   const entradaDoColab = (c) => escalaEntradaEfetivaDoColab(c, ano, mesNum, diasNoMes);
 
   // Valor de cada colaborador pra uma coluna clicável específica — mesmo
@@ -3522,10 +3525,8 @@ async function escalaRecalcularSaidas() {
 // lançadas pelo RH com o painel aberto só apareciam depois de um F5.
 async function escalaRecarregarFerias() {
   escalaMostrarLoading('Recarregando férias do cadastro...');
-  window.eoFerias = null;
-  window.eoFeriasAll = null;
   try {
-    if (typeof hcEnsureData === 'function') await hcEnsureData();
+    await escalaGarantirFerias(true);
     const total = (window.eoFeriasAll || []).length;
     const [ano, mesNum] = window._escalaMes.split('-').map(Number);
     const diasNoMes = new Date(ano, mesNum, 0).getDate();
@@ -3825,6 +3826,60 @@ function escalaDiagnosticoFerias() {
 
   console.log(partes.join('\n'));
   alert(partes.join('\n') + `\n\n(o mesmo texto foi impresso no console do navegador, F12)`);
+}
+
+// Garante o histórico COMPLETO de férias, sem depender de quem carregou
+// primeiro. Existiam dois caminhos enchendo esse cache — adminAutoLoadFiles()
+// (disparado por setTimeout de 500ms, sem await) e hcEnsureData() (chamado
+// pela própria tela) — e quem terminasse por último ganhava. Como o do Admin
+// preenchia só window.eoFerias (UM período por matrícula, o de data_fim mais
+// tarde), o resultado dependia de corrida: em uma sessão as férias apareciam,
+// na seguinte não, e sempre sobrava só o período mais recente de cada pessoa.
+// Aqui a Escala carrega por conta própria e só aceita seguir com a lista
+// completa.
+async function escalaGarantirFerias(forcar) {
+  if (!forcar && Array.isArray(window.eoFeriasAll) && window.eoFeriasAll.length) return window.eoFeriasAll;
+  try {
+    const dados = await dbFetchAll('colaboradores_ferias',
+      'matricula,nome,cargo,filial,data_inicio,data_fim,dias', 'matricula');
+    window.eoFeriasAll = dados || [];
+    // Reconstrói o mapa resumido a partir da MESMA fonte, pra não ficarem
+    // divergentes entre si.
+    const porMat = new Map();
+    for (const r of window.eoFeriasAll) {
+      const prev = porMat.get(r.matricula);
+      if (!prev || String(r.data_fim||'') > String(prev.data_fim||'')) porMat.set(r.matricula, r);
+    }
+    window.eoFerias = porMat;
+  } catch (e) {
+    console.warn('[escala] férias:', e.message);
+    window.eoFeriasAll = window.eoFeriasAll || [];
+  }
+  return window.eoFeriasAll;
+}
+
+// Resumo no console a cada abertura da grade. Sem isso, "as férias não
+// aparecem" obriga a abrir o menu e clicar em diagnóstico — e a informação
+// que responde a pergunta já está disponível de graça no carregamento.
+function escalaLogFerias(ano, mesNum, diasNoMes) {
+  const primeiro = `${ano}-${String(mesNum).padStart(2,'0')}-01`;
+  const ultimo   = `${ano}-${String(mesNum).padStart(2,'0')}-${String(diasNoMes).padStart(2,'0')}`;
+  const todos = window.eoFeriasAll || [];
+  const naEscala = new Set((window._escalaColabs || []).map(c => escalaNormMatricula(c.matricula)));
+  let cruzam = 0, cruzamNaEscala = 0, ilegiveis = 0;
+  for (const r of todos) {
+    const ini = escalaNormData(r.data_inicio), fim = escalaNormData(r.data_fim);
+    if (!ini || !fim) { ilegiveis++; continue; }
+    if (ini <= ultimo && fim >= primeiro) {
+      cruzam++;
+      if (naEscala.has(escalaNormMatricula(r.matricula))) cruzamNaEscala++;
+    }
+  }
+  console.log(`[escala/férias] ${window._escalaBase} ${window._escalaMes} — ${todos.length} período(s) carregados · ${cruzam} cruzam o mês · ${cruzamNaEscala} de gente nesta escala${ilegiveis?` · ${ilegiveis} com data ilegível`:''}`);
+  if (todos.length && !cruzam) {
+    console.warn(`[escala/férias] Nenhum período cruza ${primeiro}–${ultimo}. Use "Mais ações → Diagnosticar férias do mês" pra ver o que existe no cadastro.`);
+  }
+  return { total: todos.length, cruzam, cruzamNaEscala, ilegiveis };
 }
 
 function escalaMsg(texto, erro) {

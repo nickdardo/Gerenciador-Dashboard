@@ -381,4 +381,47 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaColunasSecundarias: fal
   [alvo.entrada_manual, alvo.saida_manual] = guardado;
 })();
 
+// ── Independência do cache: a Escala não pode depender de quem carregou
+//    primeiro (autoload do Admin x hcEnsureData da própria tela) ────────
+(function () {
+  const ok = (nome, cond, detalhe) => {
+    console.log(`${cond ? 'PASSOU' : 'FALHOU'}  ${nome}${detalhe ? ` · ${detalhe}` : ''}`);
+    tudoOk &= cond;
+  };
+  const guardado = sandbox.window.eoFeriasAll;
+
+  // Cenário exato do bug: o autoload do Admin deixou só o mapa resumido,
+  // com UM período por matrícula (o de data_fim mais tarde). Setembro
+  // sumia porque a pessoa tinha outro período depois no ano.
+  sandbox.window.eoFeriasAll = undefined;
+  sandbox.window.eoFerias = new Map([
+    ['30100', { matricula: '30100', data_inicio: '2026-12-01', data_fim: '2026-12-20' }],
+  ]);
+  ok('sem o histórico completo, setembro realmente some (bug reproduzido)',
+    sandbox.escalaEstaDeFerias('30100', 2026, 9, 15) === false);
+
+  // Com o histórico completo, os dois períodos valem.
+  sandbox.window.eoFeriasAll = [
+    { matricula: '30100', data_inicio: '2026-09-01', data_fim: '2026-09-30' },
+    { matricula: '30100', data_inicio: '2026-12-01', data_fim: '2026-12-20' },
+  ];
+  ok('com o histórico completo, setembro volta a aparecer',
+    sandbox.escalaEstaDeFerias('30100', 2026, 9, 15) === true);
+  ok('e dezembro continua valendo',
+    sandbox.escalaEstaDeFerias('30100', 2026, 12, 5) === true);
+
+  // O log de diagnóstico precisa contar certo — é o que responde
+  // "as férias estão no banco ou não?" sem abrir menu nenhum.
+  sandbox.window._escalaColabs.push({ matricula: '30100', nome: 'Teste Férias' });
+  const r = sandbox.escalaLogFerias(2026, 9, 30);
+  ok('diagnóstico conta os períodos que cruzam o mês', r.cruzam === 1, `cruzam=${r.cruzam}`);
+  ok('diagnóstico separa quem está na escala', r.cruzamNaEscala === 1);
+  sandbox.window._escalaColabs.pop();
+
+  sandbox.window.eoFeriasAll = [{ matricula: '30100', data_inicio: 'xx', data_fim: '' }];
+  ok('diagnóstico sinaliza data ilegível', sandbox.escalaLogFerias(2026, 9, 30).ilegiveis === 1);
+
+  sandbox.window.eoFeriasAll = guardado;
+})();
+
 process.exit(tudoOk ? 0 : 1);
