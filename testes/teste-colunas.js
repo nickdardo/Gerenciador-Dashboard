@@ -758,4 +758,78 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaColunasSecundarias: fal
   sandbox.window._escalaDias = guardadoDias;
 })();
 
+// ── Regras duras da folga: 6x1, nada colado, domingo ───────────────
+// Outubro/2026: 31 dias, começa quinta. Domingos: 4, 11, 18, 25.
+(function () {
+  const ok = (nome, cond, detalhe) => {
+    console.log(`${cond ? 'PASSOU' : 'FALHOU'}  ${nome}${detalhe ? ` · ${detalhe}` : ''}`);
+    tudoOk &= cond;
+  };
+  const val = (dias) => sandbox.escalaValidarRegrasFolga(new Set(dias), 2026, 10, 31);
+  const DOM = [4, 11, 18, 25];
+  ok('outubro/2026 tem domingo em 4, 11, 18 e 25',
+    DOM.every(d => new Date(2026, 9, d).getDay() === 0));
+
+  // 6x1
+  ok('7 dias seguidos trabalhando é reprovado', val([8, 16]).ok === false, `seq=${val([8,16]).maxSequencia}`);
+  ok('exatamente 6 seguidos passa', val([7, 14, 21, 28, 4]).maxSequencia <= 6);
+
+  // Folgas coladas
+  ok('duas folgas coladas são reprovadas', val([4, 5, 12, 19, 26]).coladas === 1);
+  ok('folgas separadas não acusam colagem', val([4, 11, 18, 25]).coladas === 0);
+
+  // Domingo
+  ok('dois domingos são reprovados', val([4, 11, 15, 22, 29]).ok === false, `dom=${val([4,11,15,22,29]).domingos}`);
+  ok('um domingo é o esperado', val([4, 9, 15, 21, 27]).domingos === 1);
+
+  // O caso do print: 5 folgas, todas em sexta, nenhum domingo. As regras
+  // duras passam (o mínimo de 1 domingo é garantido à parte), mas a rede
+  // de segurança tem que corrigir.
+  const sextas = [2, 9, 16, 23, 30];
+  ok('5 sextas não violam 6x1 nem colagem', val(sextas).ok === true);
+  ok('...mas ficam com zero domingo', val(sextas).domingos === 0);
+
+  const c = { matricula: 'T001' };
+  const mapa = new Map(sextas.map(d => [`T001|${d}`, { status: 'F' }]));
+  const guardadoFer = sandbox.window.eoFeriasAll;
+  sandbox.window.eoFeriasAll = [];
+  const r = sandbox.escalaGarantirDomingoDeFolga([c], 2026, 10, 31, mapa,
+    (matricula, dia) => ({ matricula, dia, status: 'F', origem: 'auto' }));
+
+  ok('rede de segurança cria exatamente 1 domingo', r.criados.length === 1,
+    r.criados.map(x => x.dia).join(','));
+  ok('o dia criado é mesmo um domingo', DOM.includes(r.criados[0]?.dia), String(r.criados[0]?.dia));
+
+  const depois = sandbox.escalaFolgasDoColab(c, 2026, 10, 31, mapa);
+  const vDepois = sandbox.escalaValidarRegrasFolga(depois, 2026, 10, 31);
+  ok('depois da rede, todas as regras duras continuam válidas', vDepois.ok === true);
+  ok('e a pessoa passa a ter 1 domingo', vDepois.domingos === 1);
+
+  // Quem já tem domingo não ganha outro.
+  const mapa2 = new Map([[`T002|4`, { status: 'F' }], [`T002|12`, { status: 'F' }]]);
+  const r2 = sandbox.escalaGarantirDomingoDeFolga([{ matricula: 'T002' }], 2026, 10, 31, mapa2,
+    (matricula, dia) => ({ matricula, dia, status: 'F' }));
+  ok('quem já tem domingo não ganha um segundo', r2.criados.length === 0);
+
+  // Férias caindo em domingo JÁ contam como domingo de descanso — a pessoa
+  // não trabalha nesse dia, então não precisa de folga extra.
+  sandbox.window.eoFeriasAll = [{ matricula: 'T003', data_inicio: '2026-10-01', data_fim: '2026-10-07' }];
+  const r3 = sandbox.escalaGarantirDomingoDeFolga([{ matricula: 'T003' }], 2026, 10, 31, new Map(),
+    (matricula, dia) => ({ matricula, dia, status: 'F' }));
+  ok('férias cobrindo um domingo já satisfazem a regra',
+    r3.criados.length === 0 && !r3.semDomingo.includes('T003'));
+  sandbox.window.eoFeriasAll = [];
+
+  // Agora o caso sem saída: todo domingo já ocupado por curso (K), que
+  // ocupa o dia mas NÃO é folga. Aqui tem que reportar, não inventar.
+  const mapa3 = new Map(DOM.map(d => [`T004|${d}`, { status: 'K' }]));
+  const r4 = sandbox.escalaGarantirDomingoDeFolga([{ matricula: 'T004' }], 2026, 10, 31, mapa3,
+    (matricula, dia) => ({ matricula, dia, status: 'F' }));
+  ok('sem domingo livre, reporta em vez de inventar',
+    r4.criados.length === 0 && r4.semDomingo.includes('T004'),
+    `criados=${r4.criados.length} semDomingo=${r4.semDomingo.join(',')}`);
+
+  sandbox.window.eoFeriasAll = guardadoFer;
+})();
+
 process.exit(tudoOk ? 0 : 1);

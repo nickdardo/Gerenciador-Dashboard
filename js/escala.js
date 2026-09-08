@@ -3282,6 +3282,13 @@ async function escalaGerarFolgasAuto(grupoFiltro) {
       }
 
       let escolhido = melhorDia(listaFinal, c, true);
+      if (escolhido === null && !temDomingo && listaFinal.some(d => new Date(ano, mesNum-1, d).getDay() === 0)) {
+        // Domingo obrigatório vence o piso, mesma lógica do 6x1: é regra
+        // do cliente, não preferência. Sem isso a pessoa saía do mês sem
+        // nenhum domingo sempre que todos os domingos apertassem a
+        // cobertura do turno — que é justamente o caso comum.
+        escolhido = melhorDia(listaFinal, c, false);
+      }
       if (escolhido === null) {
         // Todo dia possível furaria o piso desse grupo+turno. Parar aqui é
         // melhor que espalhar folga em cima da operação: a pessoa fica
@@ -3309,6 +3316,17 @@ async function escalaGerarFolgasAuto(grupoFiltro) {
   // melhorar o pior dia coberto do grupo+turno. Só mexe no que o próprio
   // gerador criou — marcação manual e férias ficam intocadas.
   const movidas = escalaMelhorarDistribuicao(inserts, colabs, ano, mesNum, diasNoMes, escalaDiasCalc, modelo);
+
+  // Rede de segurança do domingo, DEPOIS da passada de melhoria — antes
+  // dela não adiantaria, porque a melhoria ainda poderia tirar o domingo.
+  const domingo = escalaGarantirDomingoDeFolga(
+    colabs, ano, mesNum, diasNoMes, escalaDiasCalc,
+    (matricula, dia) => ({
+      base: window._escalaBase, mes: window._escalaMes, matricula, dia,
+      status: 'F', origem: 'auto',
+      updated_at: new Date(), updated_by: currentUserProfile?.id || currentUser?.id || null,
+    }));
+  inserts.push(...domingo.criados);
 
   if (!inserts.length) { escalaGradeAtualiza(); escalaMsg('Ninguém precisava de mais folgas — todo mundo já está na meta do mês.'); return; }
 
@@ -3351,6 +3369,8 @@ async function escalaGerarFolgasAuto(grupoFiltro) {
     `meta por CH: ${[...metasUsadas].sort((a,b)=>a-b).join('/')} folgas/mês`,
   ];
   if (movidas) partesRelatorio.push(`${movidas} realocada(s) na passada de melhoria`);
+  if (domingo.criados.length) partesRelatorio.push(`${domingo.criados.length} domingo(s) garantido(s) no fechamento`);
+  if (domingo.semDomingo.length) partesRelatorio.push(`ATENÇÃO: ${domingo.semDomingo.length} sem domingo livre no mês`);
   if (bloqueiosPorPiso) partesRelatorio.push(`${bloqueiosPorPiso} dia(s) descartado(s) por furarem o piso do turno`);
   escalaMsg(`${partesRelatorio.join(' · ')}${avisoForcado}.`);
   escalaLogCobertura(colabs, ano, mesNum, diasNoMes, escalaDiasCalc, modelo);
@@ -4152,38 +4172,28 @@ function escalaMelhorarDistribuicao(inserts, colabs, ano, mesNum, diasNoMes, esc
 
   const ehDomingo = (d) => new Date(ano, mesNum-1, d).getDay() === 0;
 
-  // Uma troca só é permitida se o dia novo não cria folga colada e mantém
-  // o 6x1 — as duas regras duras do laço principal.
+  // Uma troca só vale se o resultado continuar respeitando TODAS as regras
+  // duras. A versão anterior conferia só a ida: bloqueava mover PARA um
+  // domingo quando isso criaria o segundo, mas não bloqueava mover para
+  // FORA do único domingo da pessoa. Era assim que a passada de melhoria
+  // desmontava a regra do domingo obrigatório enquanto perseguia cobertura
+  // — gente terminava o mês com 5 folgas e nenhum domingo.
   const podeMover = (c, deDia, paraDia) => {
     if (escalaDiasCalc.has(`${c.matricula}|${paraDia}`)) return false;
     if (escalaEstaDeFerias(c.matricula, ano, mesNum, paraDia)) return false;
-    const colado = (d) => {
-      const a = escalaDiasCalc.get(`${c.matricula}|${d-1}`)?.status;
-      const b = escalaDiasCalc.get(`${c.matricula}|${d+1}`)?.status;
-      return a === 'F' || a === 'FA' || b === 'F' || b === 'FA';
-    };
-    if (colado(paraDia)) return false;
 
-    // Simula a troca e confere que nenhuma sequência passa de 6 dias.
-    const folgasDoColab = new Set();
-    for (let d = 1; d <= diasNoMes; d++) {
-      const st = escalaDiasCalc.get(`${c.matricula}|${d}`)?.status;
-      if (st === 'F' || st === 'FA' || st === 'J' || st === 'CH') folgasDoColab.add(d);
-      if (escalaEstaDeFerias(c.matricula, ano, mesNum, d)) folgasDoColab.add(d);
-    }
-    folgasDoColab.delete(deDia);
-    folgasDoColab.add(paraDia);
-    let seq = 0;
-    for (let d = 1; d <= diasNoMes; d++) {
-      if (folgasDoColab.has(d)) { seq = 0; continue; }
-      if (++seq >= 7) return false;
-    }
+    const antes = escalaFolgasDoColab(c, ano, mesNum, diasNoMes, escalaDiasCalc);
+    const depois = new Set(antes);
+    depois.delete(deDia);
+    depois.add(paraDia);
 
-    // Domingo continua sendo exatamente 1 por pessoa.
-    if (ehDomingo(paraDia) && !ehDomingo(deDia)) {
-      const domingos = [...folgasDoColab].filter(ehDomingo).length;
-      if (domingos > 1) return false;
-    }
+    const vAntes = escalaValidarRegrasFolga(depois, ano, mesNum, diasNoMes);
+    if (!vAntes.ok) return false;
+
+    // Não pode PIORAR o domingo: se a pessoa já tinha o dela, tem que
+    // continuar tendo.
+    const domingosAntes = escalaValidarRegrasFolga(antes, ano, mesNum, diasNoMes).domingos;
+    if (domingosAntes >= 1 && vAntes.domingos === 0) return false;
     return true;
   };
 
@@ -4255,4 +4265,90 @@ function escalaSetFatorPiso(valor) {
   window._escalaFatorPiso = parseFloat(valor) || 0.85;
   try { localStorage.setItem('gde_escala_fator_piso', String(window._escalaFatorPiso)); } catch (_) {}
   escalaMsg(`Piso de cobertura em ${Math.round(escalaFatorPiso()*100)}% — vale a partir da próxima geração de folgas.`);
+}
+
+// ══════════════════════════════════════════════════════
+// REGRAS DURAS DA FOLGA — validador único
+//
+// Existia a mesma regra escrita em três lugares (passo 1 do 6x1, passo 3
+// da meta, e a passada de melhoria), cada um conferindo um subconjunto
+// diferente. A passada de melhoria, por exemplo, checava o domingo só na
+// ida e deixava tirar o único domingo da pessoa. Com um validador só, as
+// três passam pelo mesmo crivo.
+// ══════════════════════════════════════════════════════
+
+// Conjunto de dias em que o colaborador NÃO trabalha no mês (folga, férias,
+// afastamento ou compensação). Curso (K) não entra: é dia de trabalho.
+function escalaFolgasDoColab(c, ano, mesNum, diasNoMes, escalaDiasCalc) {
+  const dias = new Set();
+  for (let d = 1; d <= diasNoMes; d++) {
+    const st = escalaDiasCalc.get(`${c.matricula}|${d}`)?.status;
+    if (st === 'F' || st === 'FA' || st === 'J' || st === 'CH') { dias.add(d); continue; }
+    if (escalaEstaDeFerias(c.matricula, ano, mesNum, d)) dias.add(d);
+  }
+  return dias;
+}
+
+// Confere as três regras duras de uma vez e devolve o diagnóstico, não só
+// um booleano — quem chama às vezes precisa saber QUAL regra falhou.
+//   1. Nunca mais de 6 dias seguidos trabalhando (6x1 — é lei)
+//   2. Nunca duas folgas coladas
+//   3. No máximo 1 domingo de folga (o mínimo de 1 é garantido à parte,
+//      porque depende de haver domingo livre no mês)
+function escalaValidarRegrasFolga(diasFolga, ano, mesNum, diasNoMes) {
+  const folgas = diasFolga instanceof Set ? diasFolga : new Set(diasFolga);
+  const ehDomingo = (d) => new Date(ano, mesNum-1, d).getDay() === 0;
+
+  let maxSequencia = 0, seq = 0;
+  for (let d = 1; d <= diasNoMes; d++) {
+    if (folgas.has(d)) { seq = 0; continue; }
+    seq++;
+    if (seq > maxSequencia) maxSequencia = seq;
+  }
+
+  let coladas = 0;
+  for (const d of folgas) if (folgas.has(d + 1)) coladas++;
+
+  const domingos = [...folgas].filter(ehDomingo).length;
+
+  return {
+    maxSequencia, coladas, domingos,
+    ok: maxSequencia <= 6 && coladas === 0 && domingos <= 1,
+  };
+}
+
+// Rede de segurança: quem terminou o mês sem nenhum domingo de folga ganha
+// um. Roda depois de tudo, inclusive da passada de melhoria, porque é o
+// único ponto em que dá pra afirmar que a pessoa realmente ficou sem.
+// Devolve os registros novos, pra entrarem no mesmo lote de gravação.
+function escalaGarantirDomingoDeFolga(colabs, ano, mesNum, diasNoMes, escalaDiasCalc, novoRegistro) {
+  const ehDomingo = (d) => new Date(ano, mesNum-1, d).getDay() === 0;
+  const domingosDoMes = [];
+  for (let d = 1; d <= diasNoMes; d++) if (ehDomingo(d)) domingosDoMes.push(d);
+
+  const criados = [];
+  const semDomingo = [];
+  for (const c of colabs) {
+    const folgas = escalaFolgasDoColab(c, ano, mesNum, diasNoMes, escalaDiasCalc);
+    if ([...folgas].some(ehDomingo)) continue;
+
+    // Tenta cada domingo livre; fica com o primeiro que não quebre as
+    // outras regras duras.
+    let colocado = null;
+    for (const dom of domingosDoMes) {
+      if (escalaDiasCalc.has(`${c.matricula}|${dom}`)) continue;
+      if (escalaEstaDeFerias(c.matricula, ano, mesNum, dom)) continue;
+      const teste = new Set(folgas);
+      teste.add(dom);
+      if (!escalaValidarRegrasFolga(teste, ano, mesNum, diasNoMes).ok) continue;
+      colocado = dom;
+      break;
+    }
+    if (colocado === null) { semDomingo.push(c.matricula); continue; }
+
+    const reg = novoRegistro(c.matricula, colocado);
+    criados.push(reg);
+    escalaDiasCalc.set(`${c.matricula}|${colocado}`, reg);
+  }
+  return { criados, semDomingo };
 }
