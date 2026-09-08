@@ -106,6 +106,10 @@ async function pageEscala(el) {
   if (window._escalaOrdemDirecao === undefined) {
     try { window._escalaOrdemDirecao = localStorage.getItem('gde_escala_ordem_direcao') || 'asc'; } catch (_) { window._escalaOrdemDirecao = 'asc'; }
   }
+  if (window._escalaFiltroSituacao === undefined) {
+    try { window._escalaFiltroSituacao = localStorage.getItem('gde_escala_filtro_situacao') || 'todos'; }
+    catch (_) { window._escalaFiltroSituacao = 'todos'; }
+  }
   if (window._escalaGruposVisiveis === undefined) {
     try {
       const salvo = localStorage.getItem('gde_escala_grupos_visiveis');
@@ -134,6 +138,10 @@ async function pageEscala(el) {
     try { densLocal = localStorage.getItem('gde_escala_densidade'); } catch (_) {}
     window._escalaDensidade = densLocal === 'compacto' ? 'compacto' : 'confortavel';
   }
+  // Filtro de situação NÃO é restaurado de propósito: abrir a escala já
+  // filtrada (e sem lembrar disso) faria parecer que sumiu gente da base.
+  // Toda visita começa em "Todos".
+  window._escalaFiltroSituacao = 'todos';
 
   await escalaRenderGrade(el);
 }
@@ -824,6 +832,23 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
           </select>
         </div>
         <div>
+          <label style="font-size:10.5px;color:var(--text-muted);display:block;margin-bottom:3px">Situação</label>
+          <select class="adh-month-select" onchange="escalaSetFiltroSituacao(this.value)" title="Filtra quem aparece na grade pelo que acontece com a pessoa nesse mês">
+            <option value="todos"        ${!window._escalaFiltroSituacao||window._escalaFiltroSituacao==='todos'?'selected':''}>Todos</option>
+            <option value="ferias"       ${window._escalaFiltroSituacao==='ferias'?'selected':''}>Só quem está de férias</option>
+            <option value="sem_ferias"   ${window._escalaFiltroSituacao==='sem_ferias'?'selected':''}>Só quem NÃO está de férias</option>
+            <option value="sem_folgas"   ${window._escalaFiltroSituacao==='sem_folgas'?'selected':''}>Só quem está sem folga marcada</option>
+            <option value="meta_aberta"  ${window._escalaFiltroSituacao==='meta_aberta'?'selected':''}>Só quem está abaixo da meta de folgas</option>
+            <option value="fora_cadastro"${window._escalaFiltroSituacao==='fora_cadastro'?'selected':''}>Só quem está fora do cadastro do RH</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:10.5px;color:var(--text-muted);display:block;margin-bottom:3px">Situação</label>
+          <select class="adh-month-select" onchange="escalaSetFiltroSituacao(this.value)" title="Mostra só quem está na situação escolhida — os sub-blocos e as contagens acompanham o filtro">
+            ${ESCALA_FILTROS_SITUACAO.map(f => `<option value="${f.valor}" ${(window._escalaFiltroSituacao||'todos')===f.valor?'selected':''}>${f.label}</option>`).join('')}
+          </select>
+        </div>
+        <div>
           <label style="font-size:10.5px;color:var(--text-muted);display:block;margin-bottom:3px">Densidade</label>
           <select class="adh-month-select" onchange="escalaSetDensidade(this.value)">
             <option value="confortavel" ${window._escalaDensidade!=='compacto'?'selected':''}>Confortável</option>
@@ -1317,7 +1342,7 @@ function escalaLinhaColabHTML(c, ci, ctx) {
   // congeladas precisam pintar SÓLIDO com a mesma cor — antes usavam
   // background:inherit e herdavam "transparent", deixando o conteúdo dos
   // dias passar por baixo de Matrícula e Nome na rolagem horizontal.
-  let html = `<tr class="${ci % 2 === 0 ? '' : 'escala-zebra'}" data-escala-linha="${c.matricula}"`
+  let html = `<tr data-mat="${c.matricula}" class="${ci % 2 === 0 ? '' : 'escala-zebra'}" data-escala-linha="${c.matricula}"`
     + ` data-grupo="${escalaEscapeAttr(ctx.grupoDaLinha || '')}" data-subbloco="${escalaEscapeAttr(ctx.subBlocoDaLinha || '')}"`
     + ` ondragover="escalaDragOver(event,'${c.matricula}')" ondragleave="escalaDragLeave(event)" ondrop="escalaDrop(event,'${c.matricula}')">`;
   html += `<td class="escala-fixa escala-alca" style="text-align:center;position:sticky;left:0;border:${BORDA};padding:0"
@@ -1482,7 +1507,7 @@ function escalaBlocoHeaderHTML(label, contagem, nivel, NCOLS, filtroBotoes) {
       <button class="adh-refresh-btn" style="padding:3px 10px;font-size:10px;margin-left:6px;color:#fc8181" onclick='escalaRemoverFolgas(${arg})' title="Apaga as folgas (F e FA) só de ${alvo} — não mexe em férias, afastamento nem curso">${escalaIcone('trash')}Remover folgas</button>`;
   }
 
-  return `<tr><td colspan="${NCOLS}" style="padding:6px ${paddingLeft};background:${bg}">
+  return `<tr class="escala-bloco-header"><td colspan="${NCOLS}" style="padding:6px ${paddingLeft};background:${bg}">
     <div style="display:flex;align-items:center">
       <span style="font-weight:600;color:${cor};font-size:${nivel==='funcao'?'12.5px':'11.5px'}">${label}</span>
       <span style="color:${cor};opacity:.75;font-size:11px;margin-left:8px">${contagem} pessoa${contagem===1?'':'s'}</span>
@@ -1556,6 +1581,10 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
       return fa.localeCompare(fb) || entradaDoColab(a).localeCompare(entradaDoColab(b)) || String(a.nome||'').localeCompare(String(b.nome||''));
     });
   }
+  // Filtro por situação — roda antes de tudo, então as contagens por
+  // sub-bloco e o total do grupo refletem só quem ficou na tela.
+  colabs = escalaAplicarFiltroSituacao(colabs, ano, mesNum, diasNoMes);
+
   const temOrdemManual = colabs.some(c => c.ordem_manual != null);
   const secOn = window._escalaColunasSecundarias !== false; // Setor/Turno/Bloco/Intervalos — ocultáveis
   // ATENÇÃO: tem que bater EXATAMENTE com o número de <th> do cabeçalho e
@@ -1615,7 +1644,7 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     + LARG.saida + LARG.ch + LARG.folgas;
   const larguraMinima = larguraFixas + LARG.diaMin * diasNoMes;
 
-  let html = `<table style="border-collapse:collapse;font-size:13px;width:100%;min-width:${larguraMinima}px;table-layout:fixed"><colgroup>
+  let html = `<table style="border-collapse:separate;border-spacing:0;font-size:13px;width:100%;min-width:${larguraMinima}px;table-layout:fixed"><colgroup>
     <col style="width:${LARG.remover}px"><col style="width:${LARG.mat}px"><col style="width:${LARG.nome}px">
     ${secOn?`<col style="width:${LARG.turno}px">`:''}
     <col style="width:${LARG.funcao}px"><col style="width:${LARG.entrada}px">
@@ -1635,13 +1664,12 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     const estilo = thBase(`
       color:${ativa ? 'var(--blue)' : 'var(--text-muted)'};
       text-align:${align || 'left'};
-      z-index:${fixaLeft != null ? 3 : 2};
       ${fixaLeft != null ? `left:${fixaLeft}px;` : ''}
       ${col ? 'cursor:pointer;user-select:none;' : ''}`.replace(/\s+/g, ' '));
     return `<th class="${classe || ''}" style="${estilo}"${col ? ` onclick="escalaOrdenarPorColuna('${col}')"` : ''}${titulo ? ` title="${titulo}"` : ''}>${label}${col ? seta(col) : ''}</th>`;
   };
 
-  html += `<th class="escala-fixa" style="${thBase('text-align:center;z-index:3;left:0')}"><input type="checkbox" onchange="escalaSelecionarTodos(this.checked)" title="Selecionar todos" style="margin:0"></th>`;
+  html += `<th class="escala-fixa" style="${thBase('text-align:center;left:0')}"><input type="checkbox" onchange="escalaSelecionarTodos(this.checked)" title="Selecionar todos" style="margin:0"></th>`;
   html += th({ label:'Matrícula', col:'matricula', fixaLeft:leftMat, titulo:'Clique pra ordenar por matrícula', classe:'escala-fixa' });
   html += th({ label:'Nome', col:'nome', fixaLeft:leftNome, titulo:'Clique pra ordenar por nome', classe:'escala-fixa escala-fixa-borda' });
   if (secOn) {
@@ -1662,9 +1690,14 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     const feriado = window._escalaFeriados?.get(dataISO);
     const fimDeSemana = dow === 0 || dow === 6;
     const bg = feriado ? 'rgba(252,129,129,.14)' : fimDeSemana ? 'var(--weekend-tint)' : 'var(--bg-surface)';
-    html += `<th style="padding:5px 2px;color:${feriado?'#fc8181':'var(--text-muted)'};font-size:10.5px;font-weight:600;text-align:center;position:sticky;top:0;background:${bg};z-index:2;border:${BORDA}" title="${feriado?feriado.nome:''}">${ESCALA_DIAS_SEMANA[dow]}<br><span style="color:${feriado?'#fc8181':'var(--text-secondary)'};font-size:11px">${d}</span></th>`;
+    html += `<th style="padding:5px 2px;color:${feriado?'#fc8181':'var(--text-muted)'};font-size:10.5px;font-weight:600;text-align:center;position:sticky;top:0;background:${bg};border:${BORDA}" title="${feriado?feriado.nome:''}">${ESCALA_DIAS_SEMANA[dow]}<br><span style="color:${feriado?'#fc8181':'var(--text-secondary)'};font-size:11px">${d}</span></th>`;
   }
-  html += `</tr></thead><tbody>`;
+  html += `</tr>`;
+  // Daqui até o fim da linha de cadastro continua tudo dentro do <thead>:
+  // as faixas "Trabalhando no dia", "Pico da malha" e a linha de adicionar
+  // são cabeçalho, não conteúdo. Estavam no <tbody> e o navegador só
+  // garante o comportamento de sticky empilhado pra linhas de cabeçalho —
+  // era por isso que as linhas do corpo subiam por cima ao rolar.
 
   // Linha pra adicionar por matrícula direto na tabela — digita e aperta
   // Enter, o nome aparece sozinho (mesma busca do campo de cima). Fica no
@@ -1689,10 +1722,10 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     return { bg: 'var(--bg-surface)', cor: 'var(--text-primary)', aviso: '' };
   };
   html += `<tr class="escala-linha-trabalhando" style="background:rgba(0,160,210,.06)">
-    <td colspan="${NCOLS_FIXAS}" class="escala-fixa" style="border:${BORDA};padding:6px 10px;color:var(--text-secondary);font-size:11px;text-align:right;font-weight:600;position:sticky;top:var(--escala-thead-h, 36px);left:0;z-index:16;white-space:nowrap">Trabalhando no dia ${escalaIconeSolto('arrowRight', 11)}</td>
+    <td colspan="${NCOLS_FIXAS}" class="escala-fixa" style="border:${BORDA};padding:6px 10px;color:var(--text-secondary);font-size:11px;text-align:right;font-weight:600;position:sticky;top:var(--escala-thead-h, 36px);left:0;white-space:nowrap">Trabalhando no dia ${escalaIconeSolto('arrowRight', 11)}</td>
     ${contagemPorDia.map(n => {
       const { bg, cor, aviso } = corDoDia(n);
-      return `<td style="text-align:center;border:${BORDA};color:${cor};font-weight:700;font-size:12px;position:sticky;top:var(--escala-thead-h, 36px);z-index:15;background:${bg}" title="${n} trabalhando${aviso}">${n}</td>`;
+      return `<td style="text-align:center;border:${BORDA};color:${cor};font-weight:700;font-size:12px;position:sticky;top:var(--escala-thead-h, 36px);background:${bg}" title="${n} trabalhando${aviso}">${n}</td>`;
     }).join('')}
   </tr>`;
 
@@ -1711,11 +1744,11 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     for (let d = 1; d <= diasNoMes; d++) picos.push(escalaPicoDoDia(d));
     const picoMax = Math.max(1, ...picos);
     html += `<tr class="escala-linha-pico">
-      <td colspan="${NCOLS_FIXAS}" class="escala-fixa" style="border:${BORDA};padding:4px 10px;color:var(--text-muted);font-size:10.5px;text-align:right;position:sticky;left:0;top:var(--escala-topo-pico,72px);z-index:14;white-space:nowrap">Pico da malha no dia ${escalaIconeSolto('arrowRight', 10)}</td>
+      <td colspan="${NCOLS_FIXAS}" class="escala-fixa" style="border:${BORDA};padding:4px 10px;color:var(--text-muted);font-size:10.5px;text-align:right;position:sticky;left:0;top:var(--escala-topo-pico,72px);white-space:nowrap">Pico da malha no dia ${escalaIconeSolto('arrowRight', 10)}</td>
       ${picos.map(p => {
         const forca = p / picoMax;
         const cor = forca > .9 ? 'var(--blue)' : 'var(--text-muted)';
-        return `<td style="text-align:center;border:${BORDA};color:${cor};font-size:10px;font-weight:${forca>.9?'700':'500'};position:sticky;top:var(--escala-topo-pico,72px);z-index:13" title="Pico de ${p} pessoas simultâneas pela malha de voos">${p}</td>`;
+        return `<td style="text-align:center;border:${BORDA};color:${cor};font-size:10px;font-weight:${forca>.9?'700':'500'};position:sticky;top:var(--escala-topo-pico,72px)" title="Pico de ${p} pessoas simultâneas pela malha de voos">${p}</td>`;
       }).join('')}
     </tr>`;
   }
@@ -1770,7 +1803,7 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
         </div>
       </div>
     </td>
-  </tr>`;
+  </tr></thead><tbody>`;
 
   if (!colabs.length) {
     html += `<tr><td colspan="${NCOLS}" style="padding:24px;text-align:center;color:var(--text-muted);font-size:12.5px;border:${BORDA}">Nenhum colaborador ativo encontrado pra essa base+mês — busque por matrícula ou nome acima.</td></tr>`;
@@ -3572,6 +3605,116 @@ async function escalaSalvarColabManual() {
 // que ninguém esqueça que existe gente pendente de regularização.
 function escalaContarForaCadastro() {
   return (window._escalaColabs || []).filter(c => c.fora_cadastro).length;
+}
+
+// ══════════════════════════════════════════════════════
+// FILTRO POR SITUAÇÃO
+// ══════════════════════════════════════════════════════
+
+function escalaSetFiltroSituacao(valor) {
+  window._escalaFiltroSituacao = valor || 'todos';
+  escalaGradeAtualiza();
+
+  if (valor === 'ferias') {
+    // Filtro de férias vazio quase sempre significa cadastro não importado
+    // pro mês, não escala errada. Diz isso na hora, em vez de deixar a
+    // pessoa achando que a tela quebrou.
+    const total = (window.eoFeriasAll || []).length;
+    const visiveis = document.querySelectorAll('#escala-grade-wrap tbody tr[data-mat]').length;
+    if (!visiveis) {
+      escalaMsg(total
+        ? `Ninguém dessa base está de férias em ${window._escalaMes}. O cadastro tem ${total} período(s), mas nenhum cruza esse mês.`
+        : 'O cadastro de férias está vazio — nenhum período foi importado ainda. Use "Recarregar férias do sistema" no menu Mais ações; se continuar zerado, o arquivo de férias precisa ser subido em Admin.', true);
+    } else {
+      escalaMsg(`${visiveis} colaborador(es) com férias nesse mês.`);
+    }
+  }
+}
+
+function escalaAplicarFiltroSituacao(colabs, ano, mesNum, diasNoMes) {
+  const filtro = window._escalaFiltroSituacao || 'todos';
+  if (filtro === 'todos') return colabs;
+
+  const deFerias = (c) => {
+    for (let d = 1; d <= diasNoMes; d++) if (escalaEstaDeFerias(c.matricula, ano, mesNum, d)) return true;
+    return false;
+  };
+  const folgasDe = (c) => escalaConteudoDoMes(c, ano, mesNum, diasNoMes)
+    .filter(i => i.status === 'F' || i.status === 'FA').length;
+  const metaDe = (c) => escalaMetaFolgasDoColab(
+    window.eoColabs?.get(c.matricula)?.ch || c.ch_manual, diasNoMes);
+
+  switch (filtro) {
+    case 'ferias':        return colabs.filter(deFerias);
+    case 'sem_ferias':    return colabs.filter(c => !deFerias(c));
+    case 'sem_folgas':    return colabs.filter(c => folgasDe(c) === 0);
+    case 'meta_aberta':   return colabs.filter(c => folgasDe(c) < metaDe(c));
+    case 'fora_cadastro': return colabs.filter(c => c.fora_cadastro);
+    default:              return colabs;
+  }
+}
+
+// ══════════════════════════════════════════════════════
+// FILTRO POR SITUAÇÃO
+// ══════════════════════════════════════════════════════
+
+const ESCALA_FILTROS_SITUACAO = [
+  { valor: 'todos',         label: 'Todos' },
+  { valor: 'ferias',        label: 'Só de férias no mês' },
+  { valor: 'sem_ferias',    label: 'Sem férias no mês' },
+  { valor: 'sem_folgas',    label: 'Sem folga marcada' },
+  { valor: 'meta_aberta',   label: 'Abaixo da meta de folgas' },
+  { valor: 'fora_cadastro', label: 'Fora do cadastro do RH' },
+];
+
+// Filtra a lista antes de agrupar. Fica fora do agrupamento de propósito:
+// assim os sub-blocos e as contagens por dia já refletem só quem passou no
+// filtro, em vez de mostrar cabeçalho de turno vazio.
+function escalaAplicarFiltroSituacao(colabs, ano, mesNum, diasNoMes) {
+  const filtro = window._escalaFiltroSituacao || 'todos';
+  if (filtro === 'todos') return colabs;
+
+  const temFerias = (c) => {
+    for (let d = 1; d <= diasNoMes; d++) if (escalaEstaDeFerias(c.matricula, ano, mesNum, d)) return true;
+    return false;
+  };
+  const folgasDe = (c) => escalaConteudoDoMes(c, ano, mesNum, diasNoMes)
+    .filter(i => i.status === 'F' || i.status === 'FA').length;
+  const metaDe = (c) => escalaMetaFolgasDoColab(
+    window.eoColabs?.get(c.matricula)?.ch || c.ch_manual, diasNoMes);
+
+  switch (filtro) {
+    case 'ferias':        return colabs.filter(temFerias);
+    case 'sem_ferias':    return colabs.filter(c => !temFerias(c));
+    case 'sem_folgas':    return colabs.filter(c => folgasDe(c) === 0);
+    case 'meta_aberta':   return colabs.filter(c => folgasDe(c) < metaDe(c));
+    case 'fora_cadastro': return colabs.filter(c => c.fora_cadastro);
+    default:              return colabs;
+  }
+}
+
+function escalaSetFiltroSituacao(valor) {
+  window._escalaFiltroSituacao = valor || 'todos';
+  try { localStorage.setItem('gde_escala_filtro_situacao', window._escalaFiltroSituacao); } catch (_) {}
+  escalaGradeAtualiza();
+
+  // Filtro que não acha ninguém é indistinguível de tela quebrada — a
+  // mensagem diz o que foi procurado e, no caso de férias, quantos
+  // períodos existem no cadastro (a causa mais comum é o arquivo do mês
+  // ainda não ter sido subido).
+  const achados = document.querySelectorAll('#escala-grade-wrap tbody tr[data-mat]').length;
+  const rotulo = (ESCALA_FILTROS_SITUACAO.find(f => f.valor === window._escalaFiltroSituacao) || {}).label || '';
+  if (window._escalaFiltroSituacao === 'todos') { escalaMsg(''); return; }
+  if (achados) { escalaMsg(`${rotulo}: ${achados} colaborador(es).`); return; }
+
+  if (window._escalaFiltroSituacao === 'ferias') {
+    const periodos = (window.eoFeriasAll || []).length;
+    escalaMsg(periodos
+      ? `Ninguém de férias nesse mês. O cadastro tem ${periodos} período(s), mas nenhum cruza ${window._escalaMes}. Se o arquivo do mês ainda não subiu, use "Recarregar férias do sistema" depois de importar.`
+      : 'Nenhum período de férias carregado. Importe o arquivo de férias no Staff e use "Recarregar férias do sistema".', true);
+    return;
+  }
+  escalaMsg(`${rotulo}: ninguém nessa situação.`);
 }
 
 function escalaMsg(texto, erro) {

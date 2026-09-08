@@ -608,7 +608,6 @@ html, body:has(#app-shell) { overflow-x: auto; overflow-y: hidden; }
 #escala-grade-wrap tbody tr > td      { background: var(--escala-row-bg); }
 #escala-grade-wrap tbody tr > td.escala-fixa {
   background: var(--escala-row-bg);
-  z-index: 3;
 }
 /* Sombra na borda da última coluna congelada — deixa claro que o resto
    da tabela passa por baixo. */
@@ -2806,14 +2805,12 @@ html, body:has(#app-shell) { overflow-x: auto; overflow-y: hidden; }
 #escala-grade-wrap tr.escala-linha-add > td {
   position: sticky;
   top: var(--escala-topo-add, 96px);
-  z-index: 12;
 }
 /* Borda grossa fechando a área fixa — deixa explícito onde acaba o que
    está preso e começa o que rola. */
 #escala-grade-wrap tr.escala-linha-add > td {
   border-bottom: 2px solid var(--blue) !important;
 }
-#escala-grade-wrap tr.escala-linha-add .escala-fixa { z-index: 22; }
 
 /* Saída é calculada, não editável — some o affordance de campo. */
 #escala-grade-wrap td.escala-calculado { cursor: default; user-select: text; }
@@ -2831,3 +2828,63 @@ html, body:has(#app-shell) { overflow-x: auto; overflow-y: hidden; }
   text-transform: uppercase;
   vertical-align: 1px;
 }
+
+/* ══════════════════════════════════════════════════════
+   ESCALA ONLINE — ordem de empilhamento (z-index)
+   
+   TODA a pilha da grade é definida aqui, num lugar só. Antes cada célula
+   trazia o próprio z-index inline e os números colidiam: o cabeçalho
+   congelado usava z-index 3 e as células congeladas do CORPO também. Com
+   valores iguais quem ganha é quem vem depois no HTML — ou seja, as linhas
+   de colaborador passavam POR CIMA do cabeçalho. Era o efeito de
+   sobreposição ao rolar (Matrícula e Nome apareciam sobre o topo, mas as
+   colunas de dia não, porque essas não são posicionadas).
+
+   Regra: quanto mais alto na tela algo fica preso, maior o número. E a
+   coluna congelada de cada faixa fica sempre 1 acima da própria faixa,
+   pra passar por cima das colunas de dia dela na rolagem horizontal.
+
+     60  cabeçalho · colunas congeladas
+     50  cabeçalho · colunas de dia
+     46/45  linha "Trabalhando no dia"
+     44/43  linha "Pico da malha"
+     42/41  linha de cadastro (fecha o bloco fixo)
+      5  cabeçalhos de grupo e de sub-bloco
+      3  colunas congeladas das linhas de colaborador
+════════════════════════════════════════════════════════ */
+#escala-grade-wrap thead th                                  { z-index: 50; }
+#escala-grade-wrap thead th.escala-fixa                      { z-index: 60; }
+
+#escala-grade-wrap tr.escala-linha-trabalhando > td          { z-index: 45; }
+#escala-grade-wrap tr.escala-linha-trabalhando > td.escala-fixa { z-index: 46; }
+
+#escala-grade-wrap tr.escala-linha-pico > td                 { z-index: 43; }
+#escala-grade-wrap tr.escala-linha-pico > td.escala-fixa     { z-index: 44; }
+
+#escala-grade-wrap tr.escala-linha-add > td                  { z-index: 41; }
+#escala-grade-wrap tr.escala-linha-add > td.escala-fixa      { z-index: 42; }
+
+/* Cabeçalhos de grupo/sub-bloco rolam junto com o corpo, então ficam bem
+   abaixo do bloco preso — mas acima das linhas comuns. */
+#escala-grade-wrap tbody tr.escala-bloco-header > td         { z-index: 5; }
+
+/* Linhas de colaborador: só a parte congelada precisa de camada, e ela
+   fica embaixo de tudo que está preso no topo. */
+#escala-grade-wrap tbody tr[data-mat] > td.escala-fixa       { z-index: 3; }
+
+/* A célula selecionada sobe um degrau pra borda azul não ser cortada pela
+   vizinha, mas continua muito abaixo do cabeçalho. */
+#escala-grade-wrap td.escala-cel-sel                         { z-index: 4; }
+
+/* Com border-collapse:separate cada célula desenha a própria borda, o que
+   dobraria as linhas internas (2px em vez de 1px). Mantendo só direita e
+   baixo, a malha volta a ter 1px — e a borda externa fica por conta da
+   primeira coluna e do topo. Foi preciso sair do "collapse" porque nele as
+   bordas pertencem à TABELA, não às células, e o fundo das células
+   congeladas deixa de cobrir o conteúdo que passa por baixo: era a causa
+   das linhas do corpo aparecendo sobre o cabeçalho ao rolar. */
+#escala-grade-wrap th,
+#escala-grade-wrap td { border-width: 0 1px 1px 0 !important; }
+#escala-grade-wrap tr > th:first-child,
+#escala-grade-wrap tr > td:first-child { border-left-width: 1px !important; }
+#escala-grade-wrap thead tr:first-child > th { border-top-width: 1px !important; }

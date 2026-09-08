@@ -267,7 +267,35 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaColunasSecundarias: fal
   ok('com Setor preenchido, o critério volta',
     sandbox.escalaCriteriosSubBlocoDisponiveis().map(c => c.valor).includes('setor'));
   sandbox.window._escalaColabs[0].turno = guardado[0][0];
+
+  // ── Pilha de camadas: nenhum z-index inline na grade ─────────────
+  // A ordem de empilhamento vive só no CSS. Se voltar a aparecer z-index
+  // inline aqui, o cabeçalho volta a colidir com as linhas do corpo.
+  ok('sem z-index inline na tabela da grade', !/z-index:\s*\d/.test(html));
+  // Precisa ser render AGRUPADO — sem agrupamento não existe cabeçalho de
+  // bloco nenhum, e a asserção passaria/falharia por motivo errado.
+  ok('cabeçalhos de bloco marcados pra camada própria', (() => {
+    sandbox.window._escalaAgruparPorTurno = true;
+    const h = sandbox.escalaGradeTabelaHTML(ANO, MES, DIAS);
+    sandbox.window._escalaAgruparPorTurno = false;
+    return h.includes('escala-bloco-header');
+  })());
+
+  // ── Filtro por situação ─────────────────────────────────────────
+  const totalColabs = sandbox.window._escalaColabs.length;
+  const filtrar = (v) => {
+    sandbox.window._escalaFiltroSituacao = v;
+    const h = sandbox.escalaGradeTabelaHTML(ANO, MES, DIAS);
+    sandbox.window._escalaFiltroSituacao = 'todos';
+    return (h.match(/<tr[^>]*data-mat=/g) || []).length;
+  };
+  ok('filtro "todos" mostra todo mundo', filtrar('todos') === totalColabs, `${totalColabs} pessoas`);
+  ok('filtro "fora do cadastro" fica vazio sem ninguém marcado', filtrar('fora_cadastro') === 0);
+
+  sandbox.window.eoFeriasAll = [{ matricula: '30100', data_inicio: '2026-09-01', data_fim: '2026-09-15' }];
+  ok('filtro "só de férias" isola quem tem período no mês', filtrar('ferias') === 1);
+  ok('filtro "só quem NÃO está de férias" é o complemento', filtrar('sem_ferias') === totalColabs - 1);
+  sandbox.window.eoFeriasAll = [];
 })();
 
 process.exit(tudoOk ? 0 : 1);
-
