@@ -86,7 +86,10 @@ function hcAllBases() {
 // Garante que os 4 datasets estejam carregados (roster, férias, desligados, pcd)
 async function hcEnsureData() {
   if (typeof adhEnsureRoster === 'function') await adhEnsureRoster();
-  if (!window.eoFerias) {
+  // Condição olha eoFeriasAll, não eoFerias: o autoload do Admin preenche
+  // só o eoFerias (um período por matrícula) e, com a condição antiga, este
+  // bloco nunca rodava — o histórico completo ficava indefinido pra sempre.
+  if (!window.eoFeriasAll) {
     try {
       const data = await dbFetchAll('colaboradores_ferias', 'matricula,nome,cargo,filial,data_inicio,data_fim,dias', 'matricula');
       const byMat = new Map();

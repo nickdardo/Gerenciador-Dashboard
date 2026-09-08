@@ -738,6 +738,7 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
         <p class="page-sub">Montar escala · ${base} · ${typeof adhMonthLabel==='function'?adhMonthLabel(mes):mes} · <span id="escala-contador-colabs" style="color:var(--text-primary);font-weight:600">${(window._escalaColabs||[]).length} colaborador${(window._escalaColabs||[]).length===1?'':'es'}</span></p>
         <p id="escala-save-indicator" style="font-size:11px;margin:4px 0 0;color:var(--text-muted)">Nenhuma alteração ainda</p>
         <p id="escala-fora-cadastro" style="font-size:11px;margin:4px 0 0;display:none"></p>
+        <p id="escala-saidas-divergentes" style="font-size:11px;margin:4px 0 0;display:none"></p>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
         ${bases.length>1
@@ -894,6 +895,20 @@ function escalaGradeAtualiza() {
   }
   escalaAjustarStickyOffset();
   escalaRestaurarSelecaoVisual();
+
+  // Aviso de saidas divergentes: a grade ja mostra o valor certo, mas o
+  // banco ainda tem o antigo, e e ele que vai pro Excel e pras outras telas.
+  const div = (window._escalaSaidasDivergentes || []).length;
+  const avisoSaida = document.getElementById('escala-saidas-divergentes');
+  if (avisoSaida) {
+    avisoSaida.style.display = div ? 'flex' : 'none';
+    avisoSaida.style.alignItems = 'center';
+    avisoSaida.style.gap = '5px';
+    avisoSaida.style.color = 'var(--amber)';
+    avisoSaida.innerHTML = div
+      ? `${escalaIconeSolto('alert', 12)}${div} saida(s) gravadas no banco divergem do calculo pela CH — a grade ja mostra o valor certo. Use "Recalcular saidas pela CH" em Mais acoes pra gravar.`
+      : '';
+  }
 
   const fora = escalaContarForaCadastro();
   const aviso = document.getElementById('escala-fora-cadastro');
@@ -1404,12 +1419,21 @@ function escalaLinhaColabHTML(c, ci, ctx) {
   // Saída não é mais editável: é sempre entrada + jornada + intervalo, pela
   // CH da pessoa. Deixar aberto convidava a digitar 07:00 num colaborador de
   // 180h que entra 00:00 e deveria sair 06:15, sem nada barrar.
+  // A grade mostra o valor CALCULADO, nao o que esta gravado. A base veio de
+  // importacao com saidas sem relacao com a entrada (11:00 com CH 210 saindo
+  // 14:00, quando o certo e 19:00). Mostrar o valor salvo e esperar alguem
+  // rodar "Recalcular saidas" deixava a tela errada ate la. O banco continua
+  // sendo o que vale pra exportacao, entao a divergencia e contada e
+  // sinalizada em vez de escondida.
   const saidaEsperada = escalaSaidaCalculada(entrada, ch);
-  const divergente = saidaEsperada && saida && saida !== saidaEsperada;
-  html += `<td class="escala-calculado" style="text-align:center;border:${BORDA};padding:4px;color:${divergente?'#f6ad55':'var(--text-muted)'};font-size:12px;font-variant-numeric:tabular-nums"
+  const divergente = !!(saidaEsperada && saida && saida !== saidaEsperada);
+  if (divergente && Array.isArray(window._escalaSaidasDivergentes)) {
+    window._escalaSaidasDivergentes.push({ matricula: c.matricula, nome: c.nome, salvo: saida, calculado: saidaEsperada });
+  }
+  html += `<td class="escala-calculado" style="text-align:center;border:${BORDA};padding:4px;color:${divergente?'#f6ad55':'var(--text-secondary)'};font-size:12px;font-variant-numeric:tabular-nums"
     title="${divergente
-      ? `Valor salvo (${saida}) não bate com o calculado pela CH ${ch} (${saidaEsperada}). Use \"Recalcular saídas\" no menu Mais ações.`
-      : `Calculado: entrada + jornada da CH ${ch||'?'} + intervalo. Pra mudar, altere a Entrada.`}">${saida || '--:--'}</td>`;
+      ? `Calculado ${saidaEsperada} pela CH ${ch}. No banco ainda esta ${saida} — rode \"Recalcular saidas pela CH\" no menu Mais acoes pra gravar.`
+      : `Calculado: entrada + jornada da CH ${ch||'?'} + intervalo. Pra mudar, altere a Entrada.`}">${saidaEsperada || saida || '--:--'}</td>`;
   html += `<td style="text-align:center;color:var(--text-secondary);border:${BORDA}">${ch}</td>`;
   html += `<td style="text-align:center;border:${BORDA};color:${corFolgas};font-weight:700;font-size:11px;font-variant-numeric:tabular-nums" title="${dicaFolgas}">${folgasFeitas}/${folgasMeta}</td>`;
   conteudo.forEach((item, i) => {
@@ -1566,6 +1590,9 @@ function escalaBlocoSubtotalHTML(label, colabsDoBloco, ano, mesNum, diasNoMes, N
 }
 
 function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
+  // Coletor das saidas cujo valor no banco difere do calculado. Preenchido
+  // linha a linha durante a montagem e lido depois pelo aviso do rodape.
+  window._escalaSaidasDivergentes = [];
   const entradaDoColab = (c) => escalaEntradaEfetivaDoColab(c, ano, mesNum, diasNoMes);
 
   // Valor de cada colaborador pra uma coluna clicável específica — mesmo

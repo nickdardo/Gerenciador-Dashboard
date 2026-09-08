@@ -2705,9 +2705,9 @@ async function adminAutoLoadFiles() {
     // ── Férias, Desligamentos, PCD — podem passar de 1000 linhas com o
     //    histórico acumulado, então usamos dbFetchAll (pagina sozinho) ──
     const [feriasData, desligData, pcdData] = await Promise.all([
-      dbFetchAll('colaboradores_ferias', 'matricula,data_inicio,data_fim,dias'),
-      dbFetchAll('colaboradores_desligados', 'matricula,data_demissao,causa_texto'),
-      dbFetchAll('colaboradores_pcd', 'matricula,deficiencia,base'),
+      dbFetchAll('colaboradores_ferias', 'matricula,nome,filial,data_inicio,data_fim,dias', 'matricula'),
+      dbFetchAll('colaboradores_desligados', 'matricula,data_demissao,causa_texto', 'matricula'),
+      dbFetchAll('colaboradores_pcd', 'matricula,deficiencia,base', 'matricula'),
     ]);
 
     if (feriasData.length) {
@@ -2719,6 +2719,14 @@ async function adminAutoLoadFiles() {
         if (!prev || (r.data_fim||'') > (prev.data_fim||'')) byMat.set(r.matricula, r);
       }
       window.eoFerias = byMat;
+      // O histórico COMPLETO também precisa ficar disponível. Este bloco
+      // roda no autoload, antes de qualquer tela abrir, e o hcEnsureData()
+      // só preenche eoFeriasAll quando eoFerias ainda está vazio — ou seja,
+      // ele nunca rodava e eoFeriasAll ficava indefinido. A Escala Online
+      // então caía no mapa acima, que guarda UM período por matrícula (o de
+      // data_fim mais tarde): quem tinha férias em setembro e outro período
+      // depois no ano simplesmente não aparecia de férias em setembro.
+      window.eoFeriasAll = feriasData;
       adminFiles.ferias = { count: feriasData.length, date: 'banco' };
       console.log(`[autoLoad] ferias: ${feriasData.length} registros no banco`);
     }
@@ -3003,7 +3011,7 @@ async function adminPrecomputeAderencia(mes) {
   // excluir essas matrículas do cálculo de aderência).
   if (!window.eoDesligados) {
     try {
-      const data = await dbFetchAll('colaboradores_desligados', 'matricula,data_demissao,causa_texto');
+      const data = await dbFetchAll('colaboradores_desligados', 'matricula,data_demissao,causa_texto', 'matricula');
       if (data?.length) {
         const byMat = new Map();
         for (const r of data) {

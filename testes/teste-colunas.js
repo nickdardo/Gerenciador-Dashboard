@@ -350,4 +350,35 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaColunasSecundarias: fal
   sandbox.window.eoFeriasAll = guardado;
 })();
 
+// ── Saída exibida é a calculada, não a gravada errada ──────────────
+(function () {
+  const ok = (nome, cond, detalhe) => {
+    console.log(`${cond ? 'PASSOU' : 'FALHOU'}  ${nome}${detalhe ? ` · ${detalhe}` : ''}`);
+    tudoOk &= cond;
+  };
+
+  // Caso exato do print: entra 11:00, CH 210, e no banco está 14:00.
+  const alvo = sandbox.window._escalaColabs[0];
+  const guardado = [alvo.entrada_manual, alvo.saida_manual];
+  alvo.entrada_manual = '11:00';
+  alvo.saida_manual = '14:00';
+  sandbox.window.eoColabs.set(alvo.matricula, { nome: alvo.nome, funcao: 'SUPERVISOR', ch: '210' });
+
+  const html = sandbox.escalaGradeTabelaHTML(ANO, MES, DIAS);
+  ok('grade mostra a saída calculada (19:00), não a gravada (14:00)',
+    html.includes('>19:00<') && !html.includes('>14:00<'));
+  ok('divergência com o banco é contabilizada',
+    (sandbox.window._escalaSaidasDivergentes || []).some(d => d.salvo === '14:00' && d.calculado === '19:00'));
+
+  // Escopo na própria matrícula: os outros do fixture têm saídas de
+  // importação que divergem de propósito, e contar o total daria falso
+  // negativo aqui.
+  alvo.saida_manual = '19:00';
+  sandbox.escalaGradeTabelaHTML(ANO, MES, DIAS);
+  ok('sem divergência quando o banco já bate',
+    !(sandbox.window._escalaSaidasDivergentes || []).some(d => d.matricula === alvo.matricula));
+
+  [alvo.entrada_manual, alvo.saida_manual] = guardado;
+})();
+
 process.exit(tudoOk ? 0 : 1);
