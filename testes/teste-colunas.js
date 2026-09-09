@@ -941,4 +941,28 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaColunasSecundarias: fal
   sandbox.window._escalaHistoricoFA = new Map();
 })();
 
+// ── Erros do banco viram instrução, não texto do Postgres ──────────
+(function () {
+  const ok = (nome, cond, detalhe) => {
+    console.log(`${cond ? 'PASSOU' : 'FALHOU'}  ${nome}${detalhe ? ` · ${detalhe}` : ''}`);
+    tudoOk &= cond;
+  };
+  const t = (m) => sandbox.escalaTraduzirErroBanco(m, 'Erro ao salvar');
+
+  // O erro exato que apareceu ao apertar A.
+  const real = 'new row for relation "escala_dia" violates check constraint "escala_dia_status_check"';
+  ok('reconhece a restrição de status', /escala_dia_status\.sql/.test(t(real)));
+  ok('e diz que nada foi perdido', /não foi perdido|nada do que você marcou/i.test(t(real)));
+  ok('não repassa o texto cru do Postgres', !t(real).includes('violates check constraint'));
+
+  ok('reconhece coluna faltando do cadastro manual',
+    /escala_colaborador/.test(t('column "ch_manual" does not exist')));
+  ok('reconhece falta de permissão',
+    /permissão/i.test(t('permission denied for table escala_dia')));
+  ok('reconhece queda de conexão',
+    /conexão/i.test(t('Failed to fetch')));
+  ok('erro desconhecido mantém a mensagem original pra não esconder nada',
+    t('erro esquisito qualquer').includes('erro esquisito qualquer'));
+})();
+
 process.exit(tudoOk ? 0 : 1);

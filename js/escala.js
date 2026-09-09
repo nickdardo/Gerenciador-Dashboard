@@ -2817,7 +2817,7 @@ async function escalaAplicarTeclaNaCelula(tecla) {
   }));
 
   const { error } = await db.from('escala_dia').upsert(payloads, { onConflict: 'base,mes,matricula,dia' });
-  if (error) { escalaMsg('Erro ao salvar: ' + error.message, true); return; }
+  if (error) { escalaMsg(escalaTraduzirErroBanco(error.message, 'Erro ao salvar'), true); return; }
   payloads.forEach(p => window._escalaDias.set(`${p.matricula}|${p.dia}`, p));
   escalaGradeAtualiza();
 
@@ -3949,7 +3949,7 @@ async function escalaRecalcularSaidas() {
       matricula: m.c.matricula, nome: m.c.nome, saida_manual: m.para,
     }));
     const { error } = await db.from('escala_colaborador').upsert(linhas, { onConflict: 'base,mes,matricula' });
-    if (error) { escalaMsg('Erro ao recalcular saídas: ' + error.message, true); return; }
+    if (error) { escalaMsg(escalaTraduzirErroBanco(error.message, 'Erro ao recalcular saídas'), true); return; }
   }
   mudancas.forEach(m => { m.c.saida_manual = m.para; });
   escalaGradeAtualiza();
@@ -4003,7 +4003,7 @@ async function escalaRemoverFeriasDoMes(matricula) {
     status: 'T', origem: 'excecao_ferias', updated_at: agora, updated_by: autor,
   }));
   const { error } = await db.from('escala_dia').upsert(payloads, { onConflict: 'base,mes,matricula,dia' });
-  if (error) { escalaMsg('Erro ao salvar exceção: ' + error.message, true); return; }
+  if (error) { escalaMsg(escalaTraduzirErroBanco(error.message, 'Erro ao salvar a exceção de férias'), true); return; }
   payloads.forEach(p => window._escalaDias.set(`${p.matricula}|${p.dia}`, p));
   escalaGradeAtualiza();
   escalaMsg(`${dias.length} dia(s) de férias ignorados nesta escala para ${c?.nome || matricula}. O RH segue com o período cadastrado.`);
@@ -4079,7 +4079,7 @@ async function escalaSalvarColabManual() {
     saida_manual: entrada ? escalaSaidaCalculada(entrada, ch) : null,
   };
   const { error } = await db.from('escala_colaborador').upsert(linha, { onConflict: 'base,mes,matricula' });
-  if (error) { escalaMsg('Erro ao cadastrar: ' + error.message, true); return; }
+  if (error) { escalaMsg(escalaTraduzirErroBanco(error.message, 'Erro ao cadastrar'), true); return; }
 
   // Espelha no cache de cadastro pra Função e CH aparecerem na grade sem
   // recarregar — a fonte da verdade continua sendo o RH pra quem existe lá.
@@ -4977,4 +4977,33 @@ async function escalaCarregarHistoricoFA() {
 
 function escalaTeveFANoMesAnterior(matricula) {
   return (window._escalaHistoricoFA?.get(matricula) || []).length > 0;
+}
+
+// Traduz erro cru do Postgres em instrução acionável. "violates check
+// constraint escala_dia_status_check" não diz a ninguém o que fazer; a
+// causa real é o banco não conhecer os status novos (FA e T), e a solução
+// é rodar a migração — não mexer na escala.
+function escalaTraduzirErroBanco(mensagem, contexto) {
+  const m = String(mensagem || '');
+
+  if (/escala_dia_status_check|violates check constraint.*status/i.test(m)) {
+    return 'O banco ainda não aceita esse status. A tabela escala_dia tem uma '
+      + 'restrição criada quando só existiam F, J, K e CH — falta liberar FA '
+      + '(folga agrupada) e T (exceção de férias). Rode sql/escala_dia_status.sql '
+      + 'no SQL Editor do Supabase. Nada do que você marcou foi perdido: é só repetir depois.';
+  }
+  if (/column .*(funcao_manual|ch_manual|fora_cadastro).* does not exist/i.test(m)) {
+    return 'Faltam colunas em escala_colaborador para o cadastro manual '
+      + '(funcao_manual, ch_manual, fora_cadastro). Crie-as no Supabase antes de usar essa função.';
+  }
+  if (/duplicate key|already exists/i.test(m)) {
+    return 'Esse registro já existe. Recarregue a tela (F5) pra ver o estado atual antes de marcar de novo.';
+  }
+  if (/permission denied|row-level security|RLS/i.test(m)) {
+    return 'Seu usuário não tem permissão pra gravar nessa base. Fale com o administrador do painel.';
+  }
+  if (/Failed to fetch|NetworkError|timeout/i.test(m)) {
+    return 'Sem conexão com o banco. Verifique a internet e tente de novo — nada foi gravado.';
+  }
+  return `${contexto || 'Erro ao salvar'}: ${m}`;
 }
