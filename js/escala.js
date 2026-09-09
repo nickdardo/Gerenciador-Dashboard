@@ -1191,6 +1191,13 @@ function escalaConteudoDoMes(c, ano, mesNum, diasNoMes) {
       // manual; sempre mostra "F" simples, mesmo com folga agrupada do lado.
       return { status: 'F', exibido: 'F', editavel: true };
     }
+    // FA (folga agrupada). Faltava este branch: o status era gravado no
+    // banco e guardado em _escalaDias, mas na hora de desenhar caía no
+    // return final — que significa "dia de trabalho". Resultado: a célula
+    // ficava vazia mesmo com a mensagem verde de salvo, a folga não entrava
+    // na contagem do colaborador e ainda somava como pessoa disponível na
+    // linha "trabalhando no dia".
+    if (s === 'FA') return { status: 'FA', exibido: 'FA', editavel: true };
     if (s === 'K')  return { status: 'K',  exibido: 'K',  editavel: true, detalhe: detalhes[i] };
     if (s === 'CH') return { status: 'CH', exibido: 'CH', editavel: true };
     if (s === 'J')  return { status: 'J',  exibido: 'J',  editavel: true };
@@ -1203,7 +1210,15 @@ function escalaCelHTML(item) {
   if (!item.exibido) return '';
   const cores = { F:'#8896aa', FA:'#a78bfa', L:'#c9a24a', K:'#38bdf8', CH:'#fb923c', J:'#fc8181' };
   const cor = cores[item.exibido] || '#8896aa';
-  const titulo = item.status === 'L' ? 'Férias — automático, vem do cadastro' : item.status === 'CH' ? 'Folga compensa (banco de horas)' : item.status === 'J' ? 'Afastado' : '';
+  const titulos = {
+    L: 'Férias — automático, vem do cadastro',
+    CH: 'Folga compensa (banco de horas)',
+    J: 'Afastado',
+    FA: 'Folga agrupada — colada no domingo (sábado+domingo ou domingo+segunda)',
+    K: 'Curso',
+    F: 'Folga',
+  };
+  const titulo = titulos[item.status] || '';
   return `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:${cor}22;color:${cor};border-radius:4px;font-weight:700;font-size:10px" title="${titulo}">${item.exibido}</div>`;
 }
 

@@ -1000,4 +1000,54 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaColunasSecundarias: fal
   sandbox.document.getElementById = orig;
 })();
 
+// ── FA precisa APARECER na grade ───────────────────────────────────
+// Regressão: o status era gravado e guardado em _escalaDias, mas não
+// existia branch pra ele no mapeamento de exibição — caía no return final
+// ("dia de trabalho"). A célula ficava vazia mesmo com a mensagem verde de
+// salvo, a folga sumia da contagem do colaborador e a pessoa ainda contava
+// como disponível na linha "trabalhando no dia".
+(function () {
+  const ok = (nome, cond, detalhe) => {
+    console.log(`${cond ? 'PASSOU' : 'FALHOU'}  ${nome}${detalhe ? ` · ${detalhe}` : ''}`);
+    tudoOk &= cond;
+  };
+  const guardadoDias = sandbox.window._escalaDias;
+  const guardadoFer = sandbox.window.eoFeriasAll;
+  sandbox.window.eoFeriasAll = [];
+
+  const c = { matricula: 'FA01' };
+  // Outubro/2026: sáb 3 · dom 4 · seg 5
+  sandbox.window._escalaDias = new Map([
+    ['FA01|3', { status: 'FA' }], ['FA01|4', { status: 'F' }],
+    ['FA01|12', { status: 'F' }], ['FA01|19', { status: 'F' }],
+  ]);
+  const r = sandbox.escalaConteudoDoMes(c, 2026, 10, 31);
+
+  ok('FA aparece como status na célula', r[2].status === 'FA', JSON.stringify(r[2]));
+  ok('FA tem texto visível na célula', r[2].exibido === 'FA');
+  ok('FA gera HTML, não célula vazia', sandbox.escalaCelHTML(r[2]).length > 0);
+  ok('FA usa a cor roxa da legenda', sandbox.escalaCelHTML(r[2]).includes('a78bfa'));
+  ok('FA tem tooltip explicando o agrupamento',
+    /agrupada/i.test(sandbox.escalaCelHTML(r[2])));
+
+  ok('FA entra na contagem de folgas do colaborador',
+    r.filter(i => i.status === 'F' || i.status === 'FA').length === 4);
+  ok('dia de trabalho continua vazio', r[5].status === null && r[5].exibido === null);
+
+  // E não pode contar como pessoa disponível na cobertura.
+  ok('quem está de FA não conta como disponível',
+    sandbox.escalaDisponiveisNoDia([c], 3, 2026, 10, sandbox.window._escalaDias) === 0);
+  ok('e no dia de trabalho conta normalmente',
+    sandbox.escalaDisponiveisNoDia([c], 6, 2026, 10, sandbox.window._escalaDias) === 1);
+
+  // Todos os status da legenda precisam desenhar alguma coisa.
+  ['F', 'FA', 'L', 'J', 'K', 'CH'].forEach(st => {
+    const html = sandbox.escalaCelHTML({ status: st, exibido: st });
+    ok(`status ${st} é desenhado na célula`, html.includes(`>${st}<`), html ? 'ok' : 'vazio');
+  });
+
+  sandbox.window._escalaDias = guardadoDias;
+  sandbox.window.eoFeriasAll = guardadoFer;
+})();
+
 process.exit(tudoOk ? 0 : 1);
