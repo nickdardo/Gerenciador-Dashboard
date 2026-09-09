@@ -111,7 +111,8 @@ const violacoesAntes = colabs.filter(c =>
 
 const modelo = sandbox.escalaModeloCobertura(colabs, ANO, MES, DIAS);
 const t0 = Date.now();
-const movidas = sandbox.escalaMelhorarDistribuicao(regs, colabs, ANO, MES, DIAS, mapa, modelo);
+const otim = sandbox.escalaMelhorarDistribuicao(regs, colabs, ANO, MES, DIAS, mapa, modelo);
+const movidas = otim.movidas;
 const ms = Date.now() - t0;
 const depois = medir(mapa);
 
@@ -122,6 +123,7 @@ console.log(`          ${antes.porDia.join(' ')}`);
 console.log(`  depois: ${linha(depois)}`);
 console.log(`          ${depois.porDia.join(' ')}`);
 console.log(`\n  ${movidas} folga(s) realocada(s) em ${ms}ms`);
+console.log(`  ${otim.tentativas} tentativas · custos ${otim.historico.map(v => v.toFixed(0)).join(' → ')} · melhor ${otim.custo.toFixed(0)}`);
 
 // ── Verificações ────────────────────────────────────────────────────
 let ok = true;
@@ -185,5 +187,32 @@ check('sobra de gente usa cor fria, não de alerta',
   cor(21, 18) === '#63b3ed' && cor(20, 18) === '#8fb8d8');
 check('falta e sobra do mesmo tamanho não usam a mesma cor',
   cor(15, 18) !== cor(21, 18));
+
+// ── Multi-tentativa: cliques diferentes, resultados diferentes ─────
+check('a busca faz mais de uma tentativa', otim.tentativas > 1, `${otim.tentativas}`);
+check('o custo final é o melhor de todas as tentativas',
+  Math.abs(otim.custo - Math.min(...otim.historico)) < 1e-6,
+  `final ${otim.custo.toFixed(1)} · melhor do histórico ${Math.min(...otim.historico).toFixed(1)}`);
+check('a busca nunca termina pior do que a primeira descida',
+  otim.custo <= otim.historico[0] + 1e-6,
+  `${otim.historico[0].toFixed(1)} → ${otim.custo.toFixed(1)}`);
+
+// Rodar de novo, com a semente que ficou, tem que explorar outro caminho.
+const segunda = (() => {
+  const { mapa: m2, regs: r2 } = distribuicaoIngenua();
+  sandbox.window._escalaDias = m2;
+  const mod2 = sandbox.escalaModeloCobertura(colabs, ANO, MES, DIAS);
+  return { r: sandbox.escalaMelhorarDistribuicao(r2, colabs, ANO, MES, DIAS, m2, mod2), mapa: m2 };
+})();
+check('o segundo clique não repete exatamente o mesmo histórico',
+  segunda.r.historico.join(',') !== otim.historico.join(','),
+  'as buscas partem de sementes diferentes');
+check('e o resultado do segundo clique também é válido', (() => {
+  return colabs.every(c => {
+    let n = 0;
+    for (let d = 1; d <= DIAS; d++) if (segunda.mapa.get(`${c.matricula}|${d}`)) n++;
+    return n === META;
+  });
+})());
 
 process.exit(ok ? 0 : 1);

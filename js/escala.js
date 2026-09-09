@@ -3468,7 +3468,8 @@ async function escalaGerarFolgasAuto(grupoFiltro) {
   // Aqui as folgas GERADAS NESTE RUN podem ser movidas de dia se isso
   // melhorar o pior dia coberto do grupo+turno. Só mexe no que o próprio
   // gerador criou — marcação manual e férias ficam intocadas.
-  const movidas = escalaMelhorarDistribuicao(inserts, colabs, ano, mesNum, diasNoMes, escalaDiasCalc, modelo);
+  const otimizacao = escalaMelhorarDistribuicao(inserts, colabs, ano, mesNum, diasNoMes, escalaDiasCalc, modelo);
+  const movidas = otimizacao.movidas;
 
   // Rede de segurança do domingo, DEPOIS da passada de melhoria — antes
   // dela não adiantaria, porque a melhoria ainda poderia tirar o domingo.
@@ -3521,7 +3522,28 @@ async function escalaGerarFolgasAuto(grupoFiltro) {
     `${inserts.length} folga(s) geradas por sobra de cobertura (grupo + turno + dia)`,
     `meta por CH: ${[...metasUsadas].sort((a,b)=>a-b).join('/')} folgas/mês`,
   ];
-  if (movidas) partesRelatorio.push(`${movidas} realocada(s) na passada de melhoria`);
+  if (movidas) partesRelatorio.push(`${movidas} realocada(s) na busca`);
+
+  // Placar da distribuição: quanto menor, mais plana a cobertura. Guardado
+  // por base+mês+recorte pra comparar com o clique anterior — é assim que
+  // dá pra saber se vale insistir em "Gerar folgas" mais uma vez.
+  const chavePlacar = `${window._escalaBase}|${window._escalaMes}|${typeof grupoFiltro === 'string' ? grupoFiltro : JSON.stringify(grupoFiltro||'')}`;
+  window._escalaMelhorPlacar = window._escalaMelhorPlacar || {};
+  const anterior = window._escalaMelhorPlacar[chavePlacar];
+  const atual = otimizacao.custo;
+  window._escalaMelhorPlacar[chavePlacar] = anterior === undefined ? atual : Math.min(anterior, atual);
+
+  const placar = atual.toFixed(0);
+  if (anterior === undefined) {
+    partesRelatorio.push(`distribuição ${placar} (1ª tentativa — clique de novo pra buscar melhor)`);
+  } else if (atual < anterior - 0.5) {
+    partesRelatorio.push(`distribuição ${placar} — MELHOROU (antes ${anterior.toFixed(0)})`);
+  } else if (atual > anterior + 0.5) {
+    partesRelatorio.push(`distribuição ${placar} — pior que a melhor já vista (${anterior.toFixed(0)}), clique de novo`);
+  } else {
+    partesRelatorio.push(`distribuição ${placar} — empatou com a melhor, provavelmente já está no limite`);
+  }
+  console.log(`[escala/otimização] ${otimizacao.tentativas} tentativas · custos: ${otimizacao.historico.map(v => v.toFixed(0)).join(' → ')} · melhor ${placar}`);
   if (domingo.criados.length) partesRelatorio.push(`${domingo.criados.length} domingo(s) garantido(s) no fechamento`);
   if (domingo.remanejados?.length) partesRelatorio.push(`${domingo.remanejados.length} folga(s) remanejada(s) pra abrir espaço no domingo`);
   if (domingo.semDomingo.length) partesRelatorio.push(`ATENÇÃO: ${domingo.semDomingo.length} sem domingo livre no mês`);
@@ -4398,6 +4420,83 @@ function escalaMelhorarDistribuicao(inserts, colabs, ano, mesNum, diasNoMes, esc
     return true;
   };
 
+  // Custo total da distribuição: é o placar que decide se uma tentativa
+  // ficou melhor que a anterior.
+  const custoTotal = () => {
+    let total = 0;
+    for (const [chave, disp] of disponiveis) {
+      for (let d = 1; d <= diasNoMes; d++) total += custoDia(chave, d, disp[d-1]);
+    }
+    for (const c of colabs) total += custoEspacamento(folgasOrdenadas(c)) * PESO_ESPACAMENTO;
+    return total;
+  };
+
+  // Fotografia do estado atual, pra poder voltar se a tentativa piorar.
+  const salvar = () => inserts.map(r => r.dia);
+  // Restaura em DUAS FASES. Numa fase só, se duas folgas trocam de dia
+  // entre si (A vai pro dia da B e vice-versa), a primeira grava por cima
+  // da chave da segunda e a segunda depois apaga a chave da primeira — o
+  // resultado é uma folga sumindo do mapa. Apagar tudo antes de regravar
+  // elimina a colisão.
+  const restaurar = (foto) => {
+    const mudam = [];
+    inserts.forEach((reg, i) => {
+      if (reg.dia !== foto[i]) mudam.push({ reg, destino: foto[i] });
+    });
+    if (!mudam.length) return;
+
+    for (const { reg } of mudam) {
+      const c = colabs.find(x => x.matricula === reg.matricula);
+      const disp = c ? disponiveis.get(chaveDe(c)) : null;
+      escalaDiasCalc.delete(`${reg.matricula}|${reg.dia}`);
+      if (disp) disp[reg.dia-1]++;
+    }
+    for (const { reg, destino } of mudam) {
+      const c = colabs.find(x => x.matricula === reg.matricula);
+      const disp = c ? disponiveis.get(chaveDe(c)) : null;
+      reg.dia = destino;
+      escalaDiasCalc.set(`${reg.matricula}|${destino}`, reg);
+      if (disp) disp[destino-1]--;
+      folgasDoColabCache.delete(reg.matricula);
+    }
+  };
+
+  // Gerador pseudoaleatório com semente: a semente muda a cada clique
+  // (por isso o resultado é diferente), mas dentro de uma execução a
+  // sequência é reprodutível — dá pra investigar um caso ruim.
+  let semente = (window._escalaSementeGeracao ?? Date.now()) >>> 0;
+  const aleatorio = () => {
+    semente = (semente * 1664525 + 1013904223) >>> 0;
+    return semente / 4294967296;
+  };
+
+  // "Sacode" parte das folgas pra dias aleatórios válidos. É o que tira a
+  // busca de um mínimo local: sem isso a descida sempre termina no mesmo
+  // ponto e clicar duas vezes dá exatamente o mesmo resultado.
+  const perturbar = (fracao) => {
+    for (const reg of inserts) {
+      if (aleatorio() > fracao) continue;
+      const c = colabs.find(x => x.matricula === reg.matricula);
+      if (!c) continue;
+      const chave = chaveDe(c);
+      const disp = disponiveis.get(chave);
+      if (!disp) continue;
+      const candidatos = [];
+      for (let d = 1; d <= diasNoMes; d++) {
+        if (d !== reg.dia && podeMover(c, reg.dia, d)) candidatos.push(d);
+      }
+      if (!candidatos.length) continue;
+      const destino = candidatos[Math.floor(aleatorio() * candidatos.length)];
+      escalaDiasCalc.delete(`${c.matricula}|${reg.dia}`);
+      disp[reg.dia-1]++;
+      reg.dia = destino;
+      escalaDiasCalc.set(`${c.matricula}|${destino}`, reg);
+      disp[destino-1]--;
+      folgasDoColabCache.delete(c.matricula);
+    }
+  };
+
+  const descer = () => {
   for (let rodada = 0; rodada < rodadas; rodada++) {
     let ganhoDaRodada = 0;
 
@@ -4448,7 +4547,40 @@ function escalaMelhorarDistribuicao(inserts, colabs, ano, mesNum, diasNoMes, esc
 
     if (ganhoDaRodada < 0.5) break; // convergiu
   }
-  return movidas;
+  };
+
+  // ── Multi-tentativa ───────────────────────────────────────────────
+  // Descida simples só encontra o mínimo mais próximo do ponto de partida,
+  // e o ponto de partida é sempre o mesmo — daí clicar duas vezes em
+  // "Gerar folgas" produzir a escala idêntica. Aqui cada tentativa parte
+  // de um embaralhamento diferente e a melhor de todas é a que fica.
+  descer();
+  let melhorCusto = custoTotal();
+  let melhorFoto = salvar();
+  const historico = [melhorCusto];
+
+  const TENTATIVAS = 7;
+  for (let t = 1; t < TENTATIVAS; t++) {
+    // Sacode mais nas primeiras tentativas (explora) e menos nas últimas
+    // (refina) — 40% caindo até 12%.
+    perturbar(0.40 - (0.28 * t / (TENTATIVAS - 1)));
+    descer();
+    const custo = custoTotal();
+    historico.push(custo);
+    if (custo < melhorCusto - 1e-9) {
+      melhorCusto = custo;
+      melhorFoto = salvar();
+    } else {
+      restaurar(melhorFoto);
+    }
+  }
+  restaurar(melhorFoto);
+
+  // Semente nova pra próxima vez: é isso que faz o próximo clique explorar
+  // uma região diferente em vez de repetir a mesma busca.
+  window._escalaSementeGeracao = (semente + 0x9E3779B9) >>> 0;
+
+  return { movidas, custo: melhorCusto, tentativas: TENTATIVAS, historico };
 }
 
 
