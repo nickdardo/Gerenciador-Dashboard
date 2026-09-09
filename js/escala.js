@@ -65,7 +65,8 @@ async function pageEscala(el) {
   if (typeof hcEnsureData === 'function') await hcEnsureData();
   else if (typeof adhEnsureRoster === 'function') await adhEnsureRoster();
   await escalaGarantirFerias();
-  await escalaCarregarHistoricoFA();
+  // O histórico de FA depende de base + mês, que só existem depois que a
+  // escala é carregada — a chamada fica no escalaRenderGrade, não aqui.
   const bases = isAdmin ? (typeof hcAllBases === 'function' ? hcAllBases() : []) : myBases;
 
   if (!bases.length) {
@@ -615,13 +616,16 @@ async function escalaRenderGrade(el) {
   if (typeof hcEnsureData === 'function') await hcEnsureData();
   else if (typeof adhEnsureRoster === 'function') await adhEnsureRoster();
   await escalaGarantirFerias();
-  await escalaCarregarHistoricoFA();
   if (typeof adminLoadFileOnDemand === 'function') {
     await adminLoadFileOnDemand('horarios', () => {});
   }
 
   const base = window._escalaBase;
   const mes  = window._escalaMes;
+
+  // Só aqui, depois de base e mês definidos — é deles que sai o mês
+  // anterior a consultar.
+  await escalaCarregarHistoricoFA();
 
   const [{ data: colabsIniciais }, dias, { data: travaRow }] = await Promise.all([
     db.from('escala_colaborador').select('*').eq('base', base).eq('mes', mes).order('created_at'),
@@ -4930,6 +4934,7 @@ function escalaSetAmortecimentoDemanda(valor) {
 // ══════════════════════════════════════════════════════
 
 function escalaMesAnteriorDe(mesISO) {
+  if (!mesISO || typeof mesISO !== 'string' || !/^\d{4}-\d{2}$/.test(mesISO)) return null;
   const [ano, mes] = mesISO.split('-').map(Number);
   const d = new Date(ano, mes - 2, 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -4940,6 +4945,12 @@ function escalaMesAnteriorDe(mesISO) {
 // consulta por redesenho.
 async function escalaCarregarHistoricoFA() {
   const base = window._escalaBase;
+  // Chamada antes da escala carregar não pode derrubar a página inteira:
+  // sem base ou mês, devolve histórico vazio e segue.
+  if (!base || !window._escalaMes) {
+    window._escalaHistoricoFA = window._escalaHistoricoFA || new Map();
+    return window._escalaHistoricoFA;
+  }
   const mesAnterior = escalaMesAnteriorDe(window._escalaMes);
   const chave = `${base}|${mesAnterior}`;
   if (window._escalaHistoricoFAChave === chave) return window._escalaHistoricoFA;

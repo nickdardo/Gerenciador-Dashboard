@@ -908,6 +908,14 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaColunasSecundarias: fal
     val([12, 13, 4, 19, 26], []).coladas === 1);
 
   // Mês anterior
+  // Regressão: a tela ficava presa em "Carregando..." porque o histórico
+  // era pedido antes de _escalaMes existir e o split estourava.
+  ok('mês anterior tolera entrada indefinida em vez de derrubar a tela',
+    sandbox.escalaMesAnteriorDe(undefined) === null &&
+    sandbox.escalaMesAnteriorDe(null) === null &&
+    sandbox.escalaMesAnteriorDe('') === null &&
+    sandbox.escalaMesAnteriorDe('lixo') === null);
+
   ok('mês anterior de janeiro volta pro ano passado',
     sandbox.escalaMesAnteriorDe('2026-01') === '2025-12',
     sandbox.escalaMesAnteriorDe('2026-01'));
