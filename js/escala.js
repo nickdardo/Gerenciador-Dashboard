@@ -745,6 +745,7 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
         <p id="escala-save-indicator" style="font-size:11px;margin:4px 0 0;color:var(--text-muted)">Nenhuma alteração ainda</p>
         <p id="escala-fora-cadastro" style="font-size:11px;margin:4px 0 0;display:none"></p>
         <p id="escala-saidas-divergentes" style="font-size:11px;margin:4px 0 0;display:none"></p>
+        <p id="escala-avisos-regras" style="font-size:11px;margin:4px 0 0;display:none"></p>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
         ${bases.length>1
@@ -899,8 +900,12 @@ function escalaGradeAtualiza() {
   // Guarda e devolve a rolagem: trocar o innerHTML zera scrollTop/scrollLeft,
   // e como isso roda a cada tecla digitada, a grade voltava pro canto
   // superior esquerdo toda vez que alguém marcava uma folga no meio do mês.
-  const sl = wrap?.scrollLeft || 0;
-  const st = wrap?.scrollTop  || 0;
+  // Se a grade acabou de sair de um estado de loading, a rolagem atual é 0 —
+  // vale a que foi guardada antes da troca.
+  const guardado = window._escalaScrollGuardado;
+  const sl = guardado ? guardado.left : (wrap?.scrollLeft || 0);
+  const st = guardado ? guardado.top  : (wrap?.scrollTop  || 0);
+  window._escalaScrollGuardado = null;
   if (wrap) wrap.innerHTML = escalaGradeTabelaHTML(ano, mesNum, diasNoMes);
   if (wrap) { wrap.scrollLeft = sl; wrap.scrollTop = st; }
   const contador = document.getElementById('escala-contador-colabs');
@@ -924,6 +929,13 @@ function escalaGradeAtualiza() {
       ? `${escalaIconeSolto('alert', 12)}${div} saida(s) gravadas no banco divergem do calculo pela CH — a grade ja mostra o valor certo. Use "Recalcular saidas pela CH" em Mais acoes pra gravar.`
       : '';
   }
+
+  // Auditoria das regras roda a cada redesenho — pega tanto o que o gerador
+  // fez quanto o que alguém digitou na mão logo depois.
+  try {
+    const [a, m] = window._escalaMes.split('-').map(Number);
+    escalaRenderAvisos(escalaAuditarRegras(a, m, new Date(a, m, 0).getDate()));
+  } catch (e) { console.warn('[escala/auditoria]', e.message); }
 
   const fora = escalaContarForaCadastro();
   const aviso = document.getElementById('escala-fora-cadastro');
@@ -1489,7 +1501,25 @@ function escalaLinhaColabHTML(c, ci, ctx) {
       ? `Calculado ${saidaEsperada} pela CH ${ch}. No banco ainda esta ${saida} — rode \"Recalcular saidas pela CH\" no menu Mais acoes pra gravar.`
       : `Calculado: entrada + jornada da CH ${ch||'?'} + intervalo. Pra mudar, altere a Entrada.`}">${saidaEsperada || saida || '--:--'}</td>`;
   html += `<td style="text-align:center;color:var(--text-secondary);border:${BORDA}">${ch}</td>`;
-  html += `<td style="text-align:center;border:${BORDA};color:${corFolgas};font-weight:700;font-size:11px;font-variant-numeric:tabular-nums" title="${dicaFolgas}">${folgasFeitas}/${folgasMeta}</td>`;
+  // Marca na própria linha quando o colaborador está fora das regras — o
+  // resumo no rodapé diz QUANTOS, aqui mostra QUEM.
+  const dias = escalaFolgasDoColab(c, ano, mesNum, diasNoMes, window._escalaDias);
+  const agrupadas = new Set();
+  for (let d = 1; d <= diasNoMes; d++) {
+    if (window._escalaDias.get(`${c.matricula}|${d}`)?.status === 'FA') agrupadas.add(d);
+  }
+  const regras = escalaValidarRegrasFolga(dias, ano, mesNum, diasNoMes, agrupadas);
+  const alertas = [];
+  if (regras.maxSequencia > 6) alertas.push(`${regras.maxSequencia} dias seguidos trabalhando (limite 6)`);
+  if (regras.domingos === 0) alertas.push('sem domingo de folga no mês');
+  if (regras.domingos > 1) alertas.push(`${regras.domingos} domingos de folga`);
+  if (regras.coladas > 0) alertas.push(`${regras.coladas} par(es) de folgas coladas`);
+  regras.faInvalidas.forEach(f => alertas.push(`FA no dia ${f.dia}: ${f.motivo}`));
+  const marcaRegra = alertas.length
+    ? `<span style="color:${regras.maxSequencia > 6 || regras.domingos === 0 ? '#fc8181' : 'var(--amber)'};margin-left:3px">${escalaIconeSolto('alert', 10)}</span>`
+    : '';
+  const tituloCel = alertas.length ? `${dicaFolgas}\n\n${alertas.map(a => '⚠ ' + a).join('\n')}` : dicaFolgas;
+  html += `<td style="text-align:center;border:${BORDA};color:${corFolgas};font-weight:700;font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap" title="${escalaEscapeAttr(tituloCel)}">${folgasFeitas}/${folgasMeta}${marcaRegra}</td>`;
   conteudo.forEach((item, i) => {
     const dia = i+1;
     const dow = new Date(ano, mesNum-1, dia).getDay();
@@ -2294,7 +2324,13 @@ function escalaLoadingHTML(label) {
 }
 function escalaMostrarLoading(label) {
   const wrap = document.getElementById('escala-grade-wrap');
-  if (wrap) wrap.innerHTML = escalaLoadingHTML(label);
+  if (!wrap) return;
+  // Guarda ONDE a pessoa estava antes de trocar o conteúdo pela barra de
+  // progresso. O escalaGradeAtualiza() também preserva a rolagem, mas àquela
+  // altura o conteúdo já tinha sido substituído e o scroll já estava zerado —
+  // por isso gerar folgas dentro de um grupo jogava a tela de volta pro topo.
+  window._escalaScrollGuardado = { top: wrap.scrollTop, left: wrap.scrollLeft };
+  wrap.innerHTML = escalaLoadingHTML(label);
 }
 function escalaLoadingAtualiza(feito, total) {
   const fill = document.getElementById('escala-load-fill');
@@ -2654,6 +2690,20 @@ async function escalaAplicarTeclaNaCelula(tecla) {
   // e pra contar em Aderência); só o atalho de digitação é de uma tecla,
   // pro mesmo jeito de usar F/J/K.
   const statusFinal = tecla === 'C' ? 'CH' : tecla === 'A' ? 'FA' : tecla;
+
+  // FA (folga agrupada) só faz sentido colada no domingo: sábado+domingo ou
+  // domingo+segunda. Marcar FA numa quarta não agrupa nada — vira só uma
+  // folga com nome errado, e depois some da contagem de folgas coladas.
+  if (statusFinal === 'FA') {
+    const foraDeSabSeg = alvos.filter(({ dia }) => {
+      const dow = new Date(ano, mesNum-1, dia).getDay();
+      return dow !== 6 && dow !== 1;
+    });
+    if (foraDeSabSeg.length) {
+      escalaMsg(`FA (folga agrupada) só pode ser marcada em sábado ou segunda — é ela que agrupa com o domingo. ${foraDeSabSeg.length === alvos.length ? 'Nenhum dia selecionado serve' : `${foraDeSabSeg.length} de ${alvos.length} dias selecionados não servem`}. Use F para folga comum.`, true);
+      return;
+    }
+  }
 
   if (ESCALA_TECLAS_VALIDAS.indexOf(statusFinal) === -1) {
     escalaMsg(`"${tecla}" não é uma letra válida nessa célula. Use F, J, K, C (compensa) ou A (folga agrupada).`, true);
@@ -4184,33 +4234,79 @@ async function escalaAdicionarFeriado() {
 // A garantia que importa (6x1 e nunca 2 folgas coladas) continua vindo do
 // laço principal; aqui as trocas são checadas contra as mesmas regras.
 function escalaMelhorarDistribuicao(inserts, colabs, ano, mesNum, diasNoMes, escalaDiasCalc, modelo, maxRodadas) {
-  const rodadas = maxRodadas || 3;
+  const rodadas = maxRodadas || 8;
   let movidas = 0;
 
-  // Índice: chave de grupo+turno -> membros
   const chaveDe = (c) => escalaChaveCobertura(c, ano, mesNum, diasNoMes);
 
-  // Pior sobra de cobertura do grupo num dia qualquer do mês.
-  const piorSobra = (chave) => {
-    const g = modelo.grupos.get(chave);
-    if (!g) return Infinity;
-    const piso = modelo.piso.get(chave) || [];
-    let pior = Infinity;
+  // ── Estado incremental ────────────────────────────────────────────
+  // Mover uma folga do dia A pro dia B só muda dois números do grupo:
+  // disponíveis[A] sobe 1, disponíveis[B] desce 1. Guardando esse vetor,
+  // o custo de cada candidato sai em tempo constante — sem isso seriam
+  // centenas de milhares de varreduras do mês e a tela travaria.
+  const disponiveis = new Map(); // chave -> array por dia
+  for (const [chave, g] of modelo.grupos) {
+    const arr = new Array(diasNoMes);
     for (let d = 1; d <= diasNoMes; d++) {
-      const sobra = escalaDisponiveisNoDia(g.membros, d, ano, mesNum, escalaDiasCalc) - (piso[d-1] ?? 0);
-      if (sobra < pior) pior = sobra;
+      arr[d-1] = escalaDisponiveisNoDia(g.membros, d, ano, mesNum, escalaDiasCalc);
     }
-    return pior;
+    disponiveis.set(chave, arr);
+  }
+
+  // Alvo por dia = efetivo sustentável do grupo modulado pela demanda.
+  // O piso (modelo.piso) continua sendo o limite que não se cruza; o alvo
+  // é onde a cobertura DEVERIA ficar.
+  const alvo = new Map();
+  for (const [chave, g] of modelo.grupos) {
+    const somaMetas = g.somaMetas;
+    const base = g.membros.length - (somaMetas / diasNoMes);
+    const picoMedio = modelo.picos.reduce((a, b) => a + b, 0) / diasNoMes;
+    const arr = new Array(diasNoMes);
+    for (let d = 1; d <= diasNoMes; d++) {
+      const relativo = picoMedio > 0 ? modelo.picos[d-1] / picoMedio : 1;
+      arr[d-1] = base * relativo;
+    }
+    alvo.set(chave, arr);
+  }
+
+  // Custo de cobertura de um dia: desvio ao quadrado em relação ao alvo.
+  // Elevar ao quadrado é o que faz a otimização ESPALHAR: dois dias com
+  // desvio 1 custam menos que um dia com desvio 2. O critério anterior
+  // olhava só o pior dia e parava assim que ele não melhorava mais — por
+  // isso sobravam dias com 20 pessoas ao lado de dias com 15.
+  const custoDia = (chave, dia, valor) => {
+    const a = alvo.get(chave)[dia-1];
+    const piso = modelo.piso.get(chave)?.[dia-1] ?? 0;
+    let c = (valor - a) ** 2;
+    // Furar o piso é muito pior que ficar acima do alvo.
+    if (valor < piso) c += 25 * (piso - valor) ** 2;
+    return c;
   };
+
+  // ── Regularidade do intervalo entre folgas ────────────────────────
+  // Sem isso a escala fica com folga em dia 5, 6 e depois só no 19 — cada
+  // pessoa vira um sorteio. O intervalo ideal é o mês dividido pelo número
+  // de folgas da pessoa; desvios grandes pesam.
+  const folgasDoColabCache = new Map();
+  const folgasOrdenadas = (c) => {
+    const chave = c.matricula;
+    if (!folgasDoColabCache.has(chave)) {
+      folgasDoColabCache.set(chave,
+        [...escalaFolgasDoColab(c, ano, mesNum, diasNoMes, escalaDiasCalc)].sort((a, b) => a - b));
+    }
+    return folgasDoColabCache.get(chave);
+  };
+  const custoEspacamento = (lista) => {
+    if (lista.length < 2) return 0;
+    const ideal = diasNoMes / lista.length;
+    let c = 0;
+    for (let i = 1; i < lista.length; i++) c += (lista[i] - lista[i-1] - ideal) ** 2;
+    return c;
+  };
+  const PESO_ESPACAMENTO = 0.35; // cobertura manda; regularidade ajusta
 
   const ehDomingo = (d) => new Date(ano, mesNum-1, d).getDay() === 0;
 
-  // Uma troca só vale se o resultado continuar respeitando TODAS as regras
-  // duras. A versão anterior conferia só a ida: bloqueava mover PARA um
-  // domingo quando isso criaria o segundo, mas não bloqueava mover para
-  // FORA do único domingo da pessoa. Era assim que a passada de melhoria
-  // desmontava a regra do domingo obrigatório enquanto perseguia cobertura
-  // — gente terminava o mês com 5 folgas e nenhum domingo.
   const podeMover = (c, deDia, paraDia) => {
     if (escalaDiasCalc.has(`${c.matricula}|${paraDia}`)) return false;
     if (escalaEstaDeFerias(c.matricula, ano, mesNum, paraDia)) return false;
@@ -4220,85 +4316,71 @@ function escalaMelhorarDistribuicao(inserts, colabs, ano, mesNum, diasNoMes, esc
     depois.delete(deDia);
     depois.add(paraDia);
 
-    const vAntes = escalaValidarRegrasFolga(depois, ano, mesNum, diasNoMes);
-    if (!vAntes.ok) return false;
+    const agrupadas = new Set();
+    for (let d = 1; d <= diasNoMes; d++) {
+      if (escalaDiasCalc.get(`${c.matricula}|${d}`)?.status === 'FA') agrupadas.add(d);
+    }
+    const v = escalaValidarRegrasFolga(depois, ano, mesNum, diasNoMes, agrupadas);
+    if (!v.ok) return false;
 
-    // Não pode PIORAR o domingo: se a pessoa já tinha o dela, tem que
-    // continuar tendo.
-    const domingosAntes = escalaValidarRegrasFolga(antes, ano, mesNum, diasNoMes).domingos;
-    if (domingosAntes >= 1 && vAntes.domingos === 0) return false;
+    const domingosAntes = escalaValidarRegrasFolga(antes, ano, mesNum, diasNoMes, agrupadas).domingos;
+    if (domingosAntes >= 1 && v.domingos === 0) return false;
     return true;
   };
 
   for (let rodada = 0; rodada < rodadas; rodada++) {
-    let mudouNestaRodada = false;
+    let ganhoDaRodada = 0;
 
     for (const reg of inserts) {
       const c = colabs.find(x => x.matricula === reg.matricula);
       if (!c) continue;
       const chave = chaveDe(c);
-      const antes = piorSobra(chave);
+      const disp = disponiveis.get(chave);
+      if (!disp) continue;
 
-      let melhorDestino = null, melhorGanho = 0;
-      for (let d = 1; d <= diasNoMes; d++) {
-        if (d === reg.dia) continue;
-        if (!podeMover(c, reg.dia, d)) continue;
+      const de = reg.dia;
+      const listaAtual = folgasOrdenadas(c);
+      const espacamentoAtual = custoEspacamento(listaAtual);
 
-        // Aplica a troca no mapa de cálculo, mede, e desfaz.
-        escalaDiasCalc.delete(`${c.matricula}|${reg.dia}`);
-        escalaDiasCalc.set(`${c.matricula}|${d}`, { ...reg, dia: d });
-        const depois = piorSobra(chave);
-        escalaDiasCalc.delete(`${c.matricula}|${d}`);
-        escalaDiasCalc.set(`${c.matricula}|${reg.dia}`, reg);
+      let melhorDestino = null, melhorGanho = 1e-6; // só aceita ganho real
 
-        const ganho = depois - antes;
-        if (ganho > melhorGanho) { melhorGanho = ganho; melhorDestino = d; }
+      for (let para = 1; para <= diasNoMes; para++) {
+        if (para === de) continue;
+
+        // Delta de cobertura em O(1): sai do dia `de`, entra no dia `para`.
+        const deltaCobertura =
+          (custoDia(chave, de,   disp[de-1]   + 1) - custoDia(chave, de,   disp[de-1])) +
+          (custoDia(chave, para, disp[para-1] - 1) - custoDia(chave, para, disp[para-1]));
+
+        // Delta de regularidade.
+        const nova = listaAtual.filter(d => d !== de).concat(para).sort((a, b) => a - b);
+        const deltaEspacamento = (custoEspacamento(nova) - espacamentoAtual) * PESO_ESPACAMENTO;
+
+        const ganho = -(deltaCobertura + deltaEspacamento);
+        if (ganho <= melhorGanho) continue;
+        if (!podeMover(c, de, para)) continue; // checagem cara só nos promissores
+
+        melhorGanho = ganho;
+        melhorDestino = para;
       }
 
       if (melhorDestino !== null) {
-        escalaDiasCalc.delete(`${c.matricula}|${reg.dia}`);
+        escalaDiasCalc.delete(`${c.matricula}|${de}`);
         reg.dia = melhorDestino;
         escalaDiasCalc.set(`${c.matricula}|${melhorDestino}`, reg);
+        disp[de-1]++;
+        disp[melhorDestino-1]--;
+        folgasDoColabCache.delete(c.matricula);
         movidas++;
-        mudouNestaRodada = true;
+        ganhoDaRodada += melhorGanho;
       }
     }
 
-    if (!mudouNestaRodada) break; // convergiu
+    if (ganhoDaRodada < 0.5) break; // convergiu
   }
   return movidas;
 }
 
-// Cobertura resultante por grupo+turno, no console. Serve pra conferir se
-// o gerador realmente respeitou o piso — e, quando não deu, em quais dias.
-function escalaLogCobertura(colabs, ano, mesNum, diasNoMes, escalaDiasCalc, modelo) {
-  const linhas = [];
-  let furos = 0;
-  for (const [chave, g] of modelo.grupos) {
-    const piso = modelo.piso.get(chave) || [];
-    const abaixo = [];
-    let pior = Infinity;
-    for (let d = 1; d <= diasNoMes; d++) {
-      const disp = escalaDisponiveisNoDia(g.membros, d, ano, mesNum, escalaDiasCalc);
-      const sobra = disp - (piso[d-1] ?? 0);
-      if (sobra < pior) pior = sobra;
-      if (sobra < 0) abaixo.push(`${d}(${disp}/${piso[d-1]})`);
-    }
-    furos += abaixo.length;
-    const [grupo, turno] = chave.split('||');
-    linhas.push(`   ${grupo} · ${turno}: ${g.membros.length} pessoa(s) · pior sobra ${pior}${abaixo.length ? ` · abaixo do piso nos dias ${abaixo.join(', ')}` : ''}`);
-  }
-  console.log([
-    `[escala/cobertura] fator de piso ${escalaFatorPiso()} · ${furos} dia(s) abaixo do piso no total`,
-    ...linhas,
-  ].join('\n'));
-}
-
-function escalaSetFatorPiso(valor) {
-  window._escalaFatorPiso = parseFloat(valor) || 0.85;
-  try { localStorage.setItem('gde_escala_fator_piso', String(window._escalaFatorPiso)); } catch (_) {}
-  escalaMsg(`Piso de cobertura em ${Math.round(escalaFatorPiso()*100)}% — vale a partir da próxima geração de folgas.`);
-}
 
 // ══════════════════════════════════════════════════════
 // REGRAS DURAS DA FOLGA — validador único
@@ -4328,9 +4410,16 @@ function escalaFolgasDoColab(c, ano, mesNum, diasNoMes, escalaDiasCalc) {
 //   2. Nunca duas folgas coladas
 //   3. No máximo 1 domingo de folga (o mínimo de 1 é garantido à parte,
 //      porque depende de haver domingo livre no mês)
-function escalaValidarRegrasFolga(diasFolga, ano, mesNum, diasNoMes) {
+// `agrupadas` (opcional) traz os dias marcados como FA — folga agrupada.
+// A FA é a ÚNICA exceção à regra de "nunca duas folgas coladas": ela existe
+// justamente pra colar no domingo, formando sábado+domingo ou
+// domingo+segunda. Por isso só pode cair em sábado ou segunda, e só vale
+// como par se o domingo vizinho também for folga.
+function escalaValidarRegrasFolga(diasFolga, ano, mesNum, diasNoMes, agrupadas) {
   const folgas = diasFolga instanceof Set ? diasFolga : new Set(diasFolga);
-  const ehDomingo = (d) => new Date(ano, mesNum-1, d).getDay() === 0;
+  const fa = agrupadas instanceof Set ? agrupadas : new Set(agrupadas || []);
+  const diaSemana = (d) => new Date(ano, mesNum-1, d).getDay();
+  const ehDomingo = (d) => diaSemana(d) === 0;
 
   let maxSequencia = 0, seq = 0;
   for (let d = 1; d <= diasNoMes; d++) {
@@ -4339,14 +4428,34 @@ function escalaValidarRegrasFolga(diasFolga, ano, mesNum, diasNoMes) {
     if (seq > maxSequencia) maxSequencia = seq;
   }
 
+  // Par sábado+domingo ou domingo+segunda formado por uma FA é intencional
+  // e não conta como colagem.
+  const parDeFA = (a, b) => {
+    const [dom, outro] = ehDomingo(a) ? [a, b] : ehDomingo(b) ? [b, a] : [null, null];
+    return dom !== null && fa.has(outro) && (diaSemana(outro) === 6 || diaSemana(outro) === 1);
+  };
+
   let coladas = 0;
-  for (const d of folgas) if (folgas.has(d + 1)) coladas++;
+  for (const d of folgas) {
+    if (!folgas.has(d + 1)) continue;
+    if (parDeFA(d, d + 1)) continue;
+    coladas++;
+  }
+
+  // FA fora de sábado/segunda, ou sem o domingo do lado, é marcação inválida.
+  const faInvalidas = [];
+  for (const d of fa) {
+    const dow = diaSemana(d);
+    if (dow !== 6 && dow !== 1) { faInvalidas.push({ dia: d, motivo: 'FA só pode cair em sábado ou segunda' }); continue; }
+    const domVizinho = dow === 6 ? d + 1 : d - 1;
+    if (!folgas.has(domVizinho)) faInvalidas.push({ dia: d, motivo: 'FA sem o domingo do lado — não está agrupando nada' });
+  }
 
   const domingos = [...folgas].filter(ehDomingo).length;
 
   return {
-    maxSequencia, coladas, domingos,
-    ok: maxSequencia <= 6 && coladas === 0 && domingos <= 1,
+    maxSequencia, coladas, domingos, faInvalidas,
+    ok: maxSequencia <= 6 && coladas === 0 && domingos <= 1 && faInvalidas.length === 0,
   };
 }
 
@@ -4439,4 +4548,111 @@ function escalaAbrirEspacoParaDomingo(c, ano, mesNum, diasNoMes, escalaDiasCalc,
     }
   }
   return null;
+}
+
+// ══════════════════════════════════════════════════════
+// AUDITORIA DAS REGRAS — avisos de marcação manual
+//
+// O gerador automático respeita as regras por construção. Quem digita F/A
+// na mão, não: dá pra deixar alguém sem domingo, criar 7 dias seguidos ou
+// colar duas folgas sem querer. Esta auditoria roda a cada redesenho da
+// grade e aponta quem está fora.
+// ══════════════════════════════════════════════════════
+
+function escalaAuditarRegras(ano, mesNum, diasNoMes) {
+  const problemas = [];
+  const colabs = window._escalaColabs || [];
+
+  for (const c of colabs) {
+    const folgas = escalaFolgasDoColab(c, ano, mesNum, diasNoMes, window._escalaDias);
+    const agrupadas = new Set();
+    for (let d = 1; d <= diasNoMes; d++) {
+      if (window._escalaDias.get(`${c.matricula}|${d}`)?.status === 'FA') agrupadas.add(d);
+    }
+    const v = escalaValidarRegrasFolga(folgas, ano, mesNum, diasNoMes, agrupadas);
+    const meta = escalaMetaFolgasDoColab(
+      window.eoColabs?.get(c.matricula)?.ch || c.ch_manual, diasNoMes);
+
+    const desteColab = [];
+    if (v.maxSequencia > 6) {
+      desteColab.push({ tipo: 'sequencia', grave: true,
+        texto: `${v.maxSequencia} dias seguidos trabalhando (o limite é 6)` });
+    }
+    if (v.domingos === 0) {
+      desteColab.push({ tipo: 'domingo', grave: true,
+        texto: 'sem nenhum domingo de folga no mês' });
+    }
+    if (v.domingos > 1) {
+      desteColab.push({ tipo: 'domingo', grave: false,
+        texto: `${v.domingos} domingos de folga (o previsto é 1)` });
+    }
+    if (v.coladas > 0) {
+      desteColab.push({ tipo: 'coladas', grave: false,
+        texto: `${v.coladas} par(es) de folgas coladas fora de FA` });
+    }
+    v.faInvalidas.forEach(f => desteColab.push({ tipo: 'fa', grave: false,
+      texto: `FA no dia ${f.dia}: ${f.motivo}` }));
+
+    // Contagem de folgas contra a meta — só F e FA contam.
+    const contadas = [...folgas].filter(d => {
+      const st = window._escalaDias.get(`${c.matricula}|${d}`)?.status;
+      return st === 'F' || st === 'FA' || escalaEstaDeFerias(c.matricula, ano, mesNum, d);
+    }).length;
+    if (contadas > meta) {
+      desteColab.push({ tipo: 'meta', grave: false,
+        texto: `${contadas} folgas contra meta de ${meta}` });
+    }
+
+    if (desteColab.length) {
+      problemas.push({ matricula: c.matricula, nome: c.nome, itens: desteColab,
+        grave: desteColab.some(i => i.grave) });
+    }
+  }
+  return problemas;
+}
+
+// Resumo no rodapé + detalhe sob demanda. Fica sempre visível quando há
+// problema, porque avisar só no console não serve pra quem monta escala.
+function escalaRenderAvisos(problemas) {
+  const el = document.getElementById('escala-avisos-regras');
+  if (!el) return;
+  if (!problemas.length) {
+    el.style.display = 'none';
+    el.innerHTML = '';
+    return;
+  }
+  const graves = problemas.filter(p => p.grave).length;
+  const leves = problemas.length - graves;
+  const partes = [];
+  if (graves) partes.push(`${graves} com problema grave`);
+  if (leves) partes.push(`${leves} com aviso`);
+
+  el.style.display = 'flex';
+  el.style.alignItems = 'center';
+  el.style.gap = '6px';
+  el.style.color = graves ? '#fc8181' : 'var(--amber)';
+  el.style.cursor = 'pointer';
+  el.title = 'Clique pra ver a lista';
+  el.onclick = () => escalaMostrarDetalheAvisos(problemas);
+  el.innerHTML = `${escalaIconeSolto('alert', 12)}Regras da escala: ${partes.join(' · ')} — clique pra ver`;
+}
+
+function escalaMostrarDetalheAvisos(problemas) {
+  const linhas = problemas.map(p =>
+    `${p.grave ? '[GRAVE] ' : '        '}${p.matricula} ${String(p.nome||'').slice(0,30)}\n` +
+    p.itens.map(i => `           · ${i.texto}`).join('\n')
+  );
+  const texto = [
+    `REGRAS DA ESCALA — ${window._escalaBase} · ${window._escalaMes}`,
+    ``,
+    `${problemas.length} colaborador(es) fora das regras:`,
+    ``,
+    ...linhas,
+    ``,
+    `Regras conferidas: máximo 6 dias seguidos trabalhando · 1 domingo de`,
+    `folga por mês · nunca duas folgas coladas (exceto FA) · FA só em`,
+    `sábado ou segunda, colada no domingo · folgas dentro da meta da CH.`,
+  ].join('\n');
+  console.log(texto);
+  alert(texto + `\n\n(o mesmo texto está no console, F12)`);
 }
