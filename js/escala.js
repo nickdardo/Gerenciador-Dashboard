@@ -65,6 +65,7 @@ async function pageEscala(el) {
   if (typeof hcEnsureData === 'function') await hcEnsureData();
   else if (typeof adhEnsureRoster === 'function') await adhEnsureRoster();
   await escalaGarantirFerias();
+  await escalaCarregarHistoricoFA();
   const bases = isAdmin ? (typeof hcAllBases === 'function' ? hcAllBases() : []) : myBases;
 
   if (!bases.length) {
@@ -614,6 +615,7 @@ async function escalaRenderGrade(el) {
   if (typeof hcEnsureData === 'function') await hcEnsureData();
   else if (typeof adhEnsureRoster === 'function') await adhEnsureRoster();
   await escalaGarantirFerias();
+  await escalaCarregarHistoricoFA();
   if (typeof adminLoadFileOnDemand === 'function') {
     await adminLoadFileOnDemand('horarios', () => {});
   }
@@ -1475,7 +1477,12 @@ function escalaLinhaColabHTML(c, ci, ctx) {
   const selo = c.fora_cadastro
     ? `<span class="escala-selo-fora" title="Fora do cadastro do RH — não aparece em Aderência nem no Headcount. Peça a regularização.">fora do RH</span>`
     : '';
-  html += `<td class="escala-fixa escala-fixa-borda" style="padding:8px;color:var(--text-primary);font-weight:500;position:sticky;left:${leftNome}px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:${BORDA}" title="${escalaEscapeAttr(c.nome||'')}">${c.nome||''}${selo}</td>`;
+  // Quem já teve folga agrupada no mês passado: a FA roda entre a equipe,
+  // então esta pessoa não tem prioridade agora.
+  const seloFA = escalaTeveFANoMesAnterior(c.matricula)
+    ? `<span class="escala-selo-fa" title="Teve folga agrupada em ${window._escalaHistoricoFAMes || 'no mês anterior'} — não é obrigatório repetir neste mês.">FA mês ant.</span>`
+    : '';
+  html += `<td class="escala-fixa escala-fixa-borda" style="padding:8px;color:var(--text-primary);font-weight:500;position:sticky;left:${leftNome}px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:${BORDA}" title="${escalaEscapeAttr(c.nome||'')}">${c.nome||''}${selo}${seloFA}</td>`;
   // Setor e Bloco saíram da grade: com o sub-bloco por Turno fazendo a
   // separação sozinho, eram duas colunas de 82px sempre em "—" nesta base.
   // O espaço foi pro Nome e pra Função, que viviam cortados. Os campos
@@ -1876,8 +1883,25 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     const dataISO = `${ano}-${String(mesNum).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const feriado = window._escalaFeriados?.get(dataISO);
     const fimDeSemana = dow === 0 || dow === 6;
-    const bg = feriado ? 'rgba(252,129,129,.14)' : fimDeSemana ? 'var(--weekend-tint)' : 'var(--bg-surface)';
-    html += `<th style="padding:5px 2px;color:${feriado?'#fc8181':'var(--text-muted)'};font-size:10.5px;font-weight:600;text-align:center;position:sticky;top:0;background:${bg};border:${BORDA}" title="${feriado?feriado.nome:''}">${ESCALA_DIAS_SEMANA[dow]}<br><span style="color:${feriado?'#fc8181':'var(--text-secondary)'};font-size:11px">${d}</span></th>`;
+    const bg = feriado ? 'rgba(252,129,129,.14)'
+      : dow === 0 ? 'rgba(246,173,85,.12)'   // domingo
+      : dow === 6 ? 'rgba(99,179,237,.10)'   // sábado
+      : 'var(--bg-surface)';
+    // Cabeçalho do dia: a sigla da semana estava em 10,5px cinza, difícil
+    // de ler numa grade de 31 colunas. Subiu de tamanho e ganhou peso, e o
+    // fim de semana agora tem cor própria — sábado e domingo em tons
+    // distintos, não só um fundo levemente diferente.
+    const corSemana = feriado ? '#fc8181'
+      : dow === 0 ? '#f6ad55'      // domingo
+      : dow === 6 ? '#63b3ed'      // sábado
+      : 'var(--text-secondary)';
+    const corNumero = feriado ? '#fc8181'
+      : (dow === 0 || dow === 6) ? corSemana
+      : 'var(--text-primary)';
+    const pesoFDS = (dow === 0 || dow === 6 || feriado) ? '800' : '700';
+    html += `<th style="padding:4px 2px;text-align:center;position:sticky;top:0;background:${bg};border:${BORDA};line-height:1.2" title="${feriado?feriado.nome:''}">`
+      + `<span style="display:block;color:${corSemana};font-size:12px;font-weight:${pesoFDS};text-transform:uppercase;letter-spacing:.02em">${ESCALA_DIAS_SEMANA[dow]}</span>`
+      + `<span style="display:block;color:${corNumero};font-size:13.5px;font-weight:${pesoFDS};font-variant-numeric:tabular-nums">${d}</span></th>`;
   }
   html += `</tr>`;
   // Daqui até o fim da linha de cadastro continua tudo dentro do <thead>:
@@ -2751,6 +2775,29 @@ async function escalaAplicarTeclaNaCelula(tecla) {
       escalaMsg(`FA (folga agrupada) só pode ser marcada em sábado ou segunda — é ela que agrupa com o domingo. ${foraDeSabSeg.length === alvos.length ? 'Nenhum dia selecionado serve' : `${foraDeSabSeg.length} de ${alvos.length} dias selecionados não servem`}. Use F para folga comum.`, true);
       return;
     }
+
+    // FA só existe agrupada: sábado+domingo ou domingo+segunda. Marcar a FA
+    // sozinha deixaria a pessoa com uma folga isolada de nome errado, então
+    // o domingo vizinho é marcado JUNTO, no mesmo lote. É isso que torna a
+    // distribuição manual do FA prática — antes exigia duas marcações
+    // separadas e na ordem certa, senão a validação reclamava.
+    const bloqueados = [];
+    for (const { matricula, dia } of alvos) {
+      const dow = new Date(ano, mesNum-1, dia).getDay();
+      const domingo = dow === 6 ? dia + 1 : dia - 1;
+      if (domingo < 1 || domingo > diasNoMes) { bloqueados.push(`dia ${dia}: o domingo do par cai fora do mês`); continue; }
+      const atual = window._escalaDias.get(`${matricula}|${domingo}`)?.status;
+      if (atual && atual !== 'F' && atual !== 'FA') {
+        bloqueados.push(`dia ${dia}: o domingo ${domingo} já está como ${atual}`);
+        continue;
+      }
+      if (escalaEstaDeFerias(matricula, ano, mesNum, domingo)) continue; // férias já cobrem
+      if (atual !== 'F' && atual !== 'FA') alvos.push({ matricula, dia: domingo, forcarStatus: 'F' });
+    }
+    if (bloqueados.length) {
+      escalaMsg(`Não dá pra agrupar: ${bloqueados.join(' · ')}. Limpe o domingo antes ou use F.`, true);
+      return;
+    }
   }
 
   if (ESCALA_TECLAS_VALIDAS.indexOf(statusFinal) === -1) {
@@ -2760,8 +2807,8 @@ async function escalaAplicarTeclaNaCelula(tecla) {
 
   const agora = new Date();
   const autor = currentUserProfile?.id || currentUser?.id || null;
-  const payloads = alvos.map(({ matricula, dia }) => ({
-    base, mes, matricula, dia, status: statusFinal, origem: 'manual',
+  const payloads = alvos.map(({ matricula, dia, forcarStatus }) => ({
+    base, mes, matricula, dia, status: forcarStatus || statusFinal, origem: 'manual',
     updated_at: agora, updated_by: autor,
   }));
 
@@ -4090,6 +4137,9 @@ function escalaAplicarFiltroSituacao(colabs, ano, mesNum, diasNoMes) {
     case 'sem_folgas':    return colabs.filter(c => folgasDe(c) === 0);
     case 'meta_aberta':   return colabs.filter(c => folgasDe(c) < metaDe(c));
     case 'fora_cadastro': return colabs.filter(c => c.fora_cadastro);
+    // Pra distribuir a FA com justiça: quem ainda não teve entra primeiro.
+    case 'fa_mes_anterior': return colabs.filter(c => escalaTeveFANoMesAnterior(c.matricula));
+    case 'sem_fa_anterior':  return colabs.filter(c => !escalaTeveFANoMesAnterior(c.matricula));
     default:              return colabs;
   }
 }
@@ -4105,6 +4155,8 @@ const ESCALA_FILTROS_SITUACAO = [
   { valor: 'sem_folgas',    label: 'Sem folga marcada' },
   { valor: 'meta_aberta',   label: 'Abaixo da meta de folgas' },
   { valor: 'fora_cadastro', label: 'Fora do cadastro do RH' },
+  { valor: 'fa_mes_anterior', label: 'Teve FA no mês anterior' },
+  { valor: 'sem_fa_anterior',  label: 'Ainda não teve FA' },
 ];
 
 // Filtra a lista antes de agrupar. Fica fora do agrupamento de propósito:
@@ -4129,6 +4181,9 @@ function escalaAplicarFiltroSituacao(colabs, ano, mesNum, diasNoMes) {
     case 'sem_folgas':    return colabs.filter(c => folgasDe(c) === 0);
     case 'meta_aberta':   return colabs.filter(c => folgasDe(c) < metaDe(c));
     case 'fora_cadastro': return colabs.filter(c => c.fora_cadastro);
+    // Pra distribuir a FA com justiça: quem ainda não teve entra primeiro.
+    case 'fa_mes_anterior': return colabs.filter(c => escalaTeveFANoMesAnterior(c.matricula));
+    case 'sem_fa_anterior':  return colabs.filter(c => !escalaTeveFANoMesAnterior(c.matricula));
     default:              return colabs;
   }
 }
@@ -4863,4 +4918,52 @@ function escalaSetAmortecimentoDemanda(valor) {
   window._escalaAmortecimentoDemanda = parseFloat(valor);
   try { localStorage.setItem('gde_escala_amortecimento', String(window._escalaAmortecimentoDemanda)); } catch (_) {}
   escalaMsg(`Sensibilidade à malha em ${Math.round(escalaAmortecimentoDemanda()*100)}% — vale a partir da próxima geração de folgas.`);
+}
+
+// ══════════════════════════════════════════════════════
+// HISTÓRICO DE FOLGA AGRUPADA (FA)
+//
+// A FA é um benefício que roda entre a equipe: quem recebeu num mês não
+// tem prioridade no seguinte. O histórico não precisa de tabela nova —
+// as marcações já ficam em escala_dia com status 'FA', então basta olhar
+// o mês anterior da mesma base.
+// ══════════════════════════════════════════════════════
+
+function escalaMesAnteriorDe(mesISO) {
+  const [ano, mes] = mesISO.split('-').map(Number);
+  const d = new Date(ano, mes - 2, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+// Carrega quem teve FA no mês anterior. Guardado em cache por base+mês
+// porque a grade é redesenhada a cada tecla e isso não pode virar uma
+// consulta por redesenho.
+async function escalaCarregarHistoricoFA() {
+  const base = window._escalaBase;
+  const mesAnterior = escalaMesAnteriorDe(window._escalaMes);
+  const chave = `${base}|${mesAnterior}`;
+  if (window._escalaHistoricoFAChave === chave) return window._escalaHistoricoFA;
+
+  try {
+    const { data, error } = await db.from('escala_dia')
+      .select('matricula,dia')
+      .eq('base', base).eq('mes', mesAnterior).eq('status', 'FA');
+    if (error) throw new Error(error.message);
+    const mapa = new Map();
+    for (const r of (data || [])) {
+      if (!mapa.has(r.matricula)) mapa.set(r.matricula, []);
+      mapa.get(r.matricula).push(r.dia);
+    }
+    window._escalaHistoricoFA = mapa;
+  } catch (e) {
+    console.warn('[escala/FA] não consegui ler o histórico:', e.message);
+    window._escalaHistoricoFA = new Map();
+  }
+  window._escalaHistoricoFAChave = chave;
+  window._escalaHistoricoFAMes = mesAnterior;
+  return window._escalaHistoricoFA;
+}
+
+function escalaTeveFANoMesAnterior(matricula) {
+  return (window._escalaHistoricoFA?.get(matricula) || []).length > 0;
 }

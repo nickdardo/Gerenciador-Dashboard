@@ -2896,3 +2896,20 @@ html, body:has(#app-shell) { overflow-x: auto; overflow-y: hidden; }
   text-decoration: underline dotted currentColor;
   text-underline-offset: 3px;
 }
+
+/* Selo de quem já teve folga agrupada no mês anterior. Discreto de
+   propósito: é informação de apoio pra decidir a rotação da FA, não um
+   alerta de problema. */
+.escala-selo-fa {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(159,122,234,.16);
+  color: #b794f4;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+}

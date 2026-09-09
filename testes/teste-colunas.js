@@ -885,4 +885,52 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaColunasSecundarias: fal
   sandbox.window.eoFeriasAll = guardado;
 })();
 
+// ── FA: par com o domingo e histórico do mês anterior ──────────────
+(function () {
+  const ok = (nome, cond, detalhe) => {
+    console.log(`${cond ? 'PASSOU' : 'FALHOU'}  ${nome}${detalhe ? ` · ${detalhe}` : ''}`);
+    tudoOk &= cond;
+  };
+  // Outubro/2026: sáb 3,10,17,24,31 · dom 4,11,18,25 · seg 5,12,19,26
+  const val = (folgas, fa) =>
+    sandbox.escalaValidarRegrasFolga(new Set(folgas), 2026, 10, 31, new Set(fa));
+
+  ok('sábado FA + domingo F é par válido, não conta como colado',
+    val([3, 4, 12, 19, 26], [3]).coladas === 0);
+  ok('domingo F + segunda FA também é par válido',
+    val([4, 5, 12, 19, 26], [5]).coladas === 0);
+  ok('FA numa quarta é marcação inválida',
+    val([7, 14, 21, 28, 4], [7]).faInvalidas.length === 1);
+  ok('FA sem o domingo do lado é sinalizada',
+    val([3, 12, 19, 26, 8], [3]).faInvalidas.length === 1,
+    JSON.stringify(val([3,12,19,26,8],[3]).faInvalidas));
+  ok('duas folgas coladas SEM FA continuam sendo erro',
+    val([12, 13, 4, 19, 26], []).coladas === 1);
+
+  // Mês anterior
+  ok('mês anterior de janeiro volta pro ano passado',
+    sandbox.escalaMesAnteriorDe('2026-01') === '2025-12',
+    sandbox.escalaMesAnteriorDe('2026-01'));
+  ok('mês anterior de outubro é setembro',
+    sandbox.escalaMesAnteriorDe('2026-10') === '2026-09');
+
+  // Histórico
+  sandbox.window._escalaHistoricoFA = new Map([['160580', [3, 4]]]);
+  ok('quem teve FA no mês passado é identificado',
+    sandbox.escalaTeveFANoMesAnterior('160580') === true);
+  ok('quem não teve, não', sandbox.escalaTeveFANoMesAnterior('999999') === false);
+
+  // Os dois filtros novos são complementares.
+  const colabs = [{ matricula: '160580' }, { matricula: '999999' }];
+  sandbox.window._escalaFiltroSituacao = 'fa_mes_anterior';
+  const comFA = sandbox.escalaAplicarFiltroSituacao(colabs, 2026, 10, 31);
+  sandbox.window._escalaFiltroSituacao = 'sem_fa_anterior';
+  const semFA = sandbox.escalaAplicarFiltroSituacao(colabs, 2026, 10, 31);
+  sandbox.window._escalaFiltroSituacao = 'todos';
+  ok('filtro "teve FA" e "ainda não teve" se complementam',
+    comFA.length === 1 && semFA.length === 1 && comFA[0].matricula !== semFA[0].matricula);
+
+  sandbox.window._escalaHistoricoFA = new Map();
+})();
+
 process.exit(tudoOk ? 0 : 1);
