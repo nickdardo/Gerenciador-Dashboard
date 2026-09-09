@@ -965,4 +965,39 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaColunasSecundarias: fal
     t('erro esquisito qualquer').includes('erro esquisito qualquer'));
 })();
 
+// ── Aviso não é erro ───────────────────────────────────────────────
+// Marcar FA pode deixar a pessoa com 7 dias seguidos em outro trecho do
+// mês. Isso é um AVISO — a marcação foi gravada. Mostrar em vermelho,
+// começando pelo problema, fazia parecer que tinha falhado.
+(function () {
+  const ok = (nome, cond, detalhe) => {
+    console.log(`${cond ? 'PASSOU' : 'FALHOU'}  ${nome}${detalhe ? ` · ${detalhe}` : ''}`);
+    tudoOk &= cond;
+  };
+  const capturado = [];
+  const orig = sandbox.document.getElementById;
+  sandbox.document.getElementById = (id) => {
+    if (id === 'escala-status-msg') return { set innerHTML(v) { capturado.push(v); } };
+    return null;
+  };
+
+  sandbox.escalaMsg('teste', 'erro');
+  ok('erro usa vermelho', capturado.pop().includes('#fc8181'));
+  sandbox.escalaMsg('teste', 'aviso');
+  const aviso = capturado.pop();
+  ok('aviso usa laranja, não vermelho', aviso.includes('#f6ad55') && !aviso.includes('#fc8181'));
+  sandbox.escalaMsg('teste', 'ok');
+  ok('sucesso usa verde', capturado.pop().includes('#5fa87a'));
+
+  // Compatibilidade com as chamadas antigas, que passavam booleano.
+  sandbox.escalaMsg('teste', true);
+  ok('true continua sendo erro', capturado.pop().includes('#fc8181'));
+  sandbox.escalaMsg('teste', false);
+  ok('false continua sendo sucesso', capturado.pop().includes('#5fa87a'));
+  sandbox.escalaMsg('teste');
+  ok('sem nível é sucesso', capturado.pop().includes('#5fa87a'));
+
+  sandbox.document.getElementById = orig;
+})();
+
 process.exit(tudoOk ? 0 : 1);

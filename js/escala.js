@@ -2718,15 +2718,26 @@ function escalaRestaurarSelecaoVisual() {
 // carregado do fim do mês anterior), esse colaborador tem algum trecho de
 // mais de 6 dias seguidos trabalhando no mês — sinaliza sem bloquear a
 // edição, já que às vezes a gestão precisa mesmo fazer exceção.
+// Devolve null quando está tudo certo, ou { dias, inicio, fim } apontando o
+// trecho problemático. Antes devolvia só o número, e a mensagem dizia
+// "ficou com 7 dias seguidos" sem dizer ONDE — quem monta a escala tinha
+// que varrer o mês inteiro no olho pra achar.
 async function escalaVerificarSequencia(matricula, ano, mesNum, diasNoMes) {
-  let seq = await escalaDiasSeguidosNoFimDoMesAnterior(window._escalaBase, matricula, window._escalaMes);
-  let maxSeq = seq;
+  const anteriores = await escalaDiasSeguidosNoFimDoMesAnterior(window._escalaBase, matricula, window._escalaMes);
+  let seq = anteriores;
+  let inicioSeq = anteriores > 0 ? 1 - anteriores : 1;
+  let pior = null;
+
   for (let d = 1; d <= diasNoMes; d++) {
     const manual = window._escalaDias.get(`${matricula}|${d}`);
     const folga = (manual && ['F','FA','J','CH'].includes(manual.status)) || escalaEstaDeFerias(matricula, ano, mesNum, d);
-    if (folga) { seq = 0; } else { seq++; maxSeq = Math.max(maxSeq, seq); }
+    if (folga) { seq = 0; inicioSeq = d + 1; continue; }
+    seq++;
+    if (seq > 6 && (!pior || seq > pior.dias)) {
+      pior = { dias: seq, inicio: Math.max(1, inicioSeq), fim: d };
+    }
   }
-  return maxSeq > 6 ? maxSeq : null;
+  return pior;
 }
 
 async function escalaAplicarTeclaNaCelula(tecla) {
@@ -2750,8 +2761,8 @@ async function escalaAplicarTeclaNaCelula(tecla) {
     escalaGradeAtualiza();
     const violacao = await escalaVerificarSequencia(sel.matricula, ano, mesNum, diasNoMes);
     escalaMsg(violacao
-      ? `${emLote ? `${alvos.length} células limpas` : 'Célula limpa'} — atenção: esse colaborador ficou com ${violacao} dias seguidos trabalhando em algum trecho do mês (o máximo é 6, regra 6x1).`
-      : (emLote ? `${alvos.length} células limpas.` : 'Célula limpa.'), !!violacao);
+      ? `${emLote ? `${alvos.length} células limpas` : 'Célula limpa'} — ficou ${violacao.dias} dias seguidos trabalhando do dia ${violacao.inicio} ao ${violacao.fim} (o máximo é 6). Coloque uma folga nesse trecho.`
+      : (emLote ? `${alvos.length} células limpas.` : 'Célula limpa.'), violacao ? 'aviso' : 'ok');
     return;
   }
 
@@ -2822,10 +2833,14 @@ async function escalaAplicarTeclaNaCelula(tecla) {
   escalaGradeAtualiza();
 
   const violacao = await escalaVerificarSequencia(sel.matricula, ano, mesNum, diasNoMes);
-  const feito = emLote ? `${alvos.length} células marcadas como ${statusFinal}` : `Marcado como ${statusFinal}`;
+  const feito = emLote ? `${alvos.length} células marcadas como ${statusFinal}` : `${statusFinal} marcado`;
+  const parFA = statusFinal === 'FA' ? ' (com o domingo do par)' : '';
   escalaMsg(violacao
-    ? `${feito} — mas esse colaborador ficou com ${violacao} dias seguidos trabalhando em algum trecho do mês (o máximo é 6, regra 6x1). Confira se precisa de uma folga a mais em algum ponto.`
-    : `${feito}.`, !!violacao);
+    // "Salvo" na frente de propósito: a marcação FOI gravada, isto é aviso
+    // e não erro. A versão anterior começava com o problema e usava a cor
+    // de erro, então parecia que a marcação tinha falhado.
+    ? `Salvo: ${feito}${parFA}. Atenção: ficou ${violacao.dias} dias seguidos trabalhando do dia ${violacao.inicio} ao ${violacao.fim} (o máximo é 6). Coloque uma folga nesse trecho.`
+    : `${feito}${parFA}.`, violacao ? 'aviso' : 'ok');
 }
 
 // Ordem das matrículas como estão na tela agora (respeita agrupamento,
@@ -4331,10 +4346,17 @@ function escalaLogFerias(ano, mesNum, diasNoMes) {
   return { total: todos.length, cruzam, cruzamNaEscala, ilegiveis };
 }
 
-function escalaMsg(texto, erro) {
+// `nivel` aceita: 'ok' (ou false), 'aviso', 'erro' (ou true).
+// A distinção importa: "salvei, mas confira X" e "não consegui salvar" são
+// coisas diferentes, e mostrar as duas em vermelho fazia o usuário achar
+// que a marcação tinha falhado quando ela tinha sido gravada.
+function escalaMsg(texto, nivel) {
+  const grau = nivel === true ? 'erro' : nivel === false || nivel == null ? 'ok' : String(nivel);
+  const erro = grau === 'erro';
+  const aviso = grau === 'aviso';
   const limpo = String(texto || '').replace(/^[\u2713\u26a0\u2714\u2717]\s*/, '');
-  const icone = limpo ? escalaIconeSolto(erro ? 'alert' : 'check', 12) : '';
-  const cor = erro ? '#fc8181' : '#5fa87a';
+  const icone = limpo ? escalaIconeSolto(erro || aviso ? 'alert' : 'check', 12) : '';
+  const cor = erro ? '#fc8181' : aviso ? '#f6ad55' : '#5fa87a';
 
   const el = document.getElementById('escala-status-msg');
   if (el) el.innerHTML = limpo
@@ -4345,6 +4367,11 @@ function escalaMsg(texto, erro) {
   if (ind && limpo) {
     if (erro) {
       ind.innerHTML = `<span style="color:#fc8181;display:inline-flex;align-items:center;gap:6px">${escalaIconeSolto('alert', 12)}${limpo}</span>`;
+    } else if (aviso) {
+      // Aviso ainda significa SALVO — o indicador do cabeçalho registra a
+      // hora normalmente, só com a cor de atenção.
+      const hora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      ind.innerHTML = `<span style="color:#f6ad55;display:inline-flex;align-items:center;gap:6px">${escalaIconeSolto('check', 12)}Salvo às ${hora} — com aviso</span>`;
     } else {
       const hora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       ind.innerHTML = `<span style="color:#5fa87a;display:inline-flex;align-items:center;gap:6px">${escalaIconeSolto('check', 12)}Salvo às ${hora}</span>`;
