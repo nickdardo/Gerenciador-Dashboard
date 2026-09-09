@@ -107,6 +107,10 @@ async function pageEscala(el) {
   if (window._escalaOrdemDirecao === undefined) {
     try { window._escalaOrdemDirecao = localStorage.getItem('gde_escala_ordem_direcao') || 'asc'; } catch (_) { window._escalaOrdemDirecao = 'asc'; }
   }
+  if (window._escalaAmortecimentoDemanda === undefined) {
+    try { window._escalaAmortecimentoDemanda = parseFloat(localStorage.getItem('gde_escala_amortecimento')); }
+    catch (_) { window._escalaAmortecimentoDemanda = NaN; }
+  }
   if (window._escalaFatorPiso === undefined) {
     try { window._escalaFatorPiso = parseFloat(localStorage.getItem('gde_escala_fator_piso')) || 0.85; }
     catch (_) { window._escalaFatorPiso = 0.85; }
@@ -864,6 +868,15 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
             <option value="0.95" ${escalaFatorPiso()===0.95?'selected':''}>Rígido (95%)</option>
             <option value="0.85" ${escalaFatorPiso()===0.85?'selected':''}>Equilibrado (85%)</option>
             <option value="0.75" ${escalaFatorPiso()===0.75?'selected':''}>Flexível (75%)</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:10.5px;color:var(--text-muted);display:block;margin-bottom:3px">Sensibilidade à malha</label>
+          <select class="adh-month-select" onchange="escalaSetAmortecimentoDemanda(this.value)"
+            title="Quanto da variação de voos é repassada pro efetivo. A malha oscila mais que a necessidade de gente, porque parte do trabalho é fixa. Alto = a escala segue a curva de voos de perto; baixo = efetivo mais estável.">
+            <option value="0.6" ${escalaAmortecimentoDemanda()===0.6?'selected':''}>Alta (segue a malha)</option>
+            <option value="0.35" ${escalaAmortecimentoDemanda()===0.35?'selected':''}>Média (recomendado)</option>
+            <option value="0.15" ${escalaAmortecimentoDemanda()===0.15?'selected':''}>Baixa (efetivo estável)</option>
           </select>
         </div>
         <div>
@@ -1667,10 +1680,45 @@ function escalaBlocoSubtotalHTML(label, colabsDoBloco, ano, mesNum, diasNoMes, N
   const bg = forte ? 'rgba(0,160,210,.10)' : 'rgba(255,255,255,.045)';
   const peso = forte ? '700' : '600';
   const borda = forte ? 'border-top:1px solid rgba(0,160,210,.25);border-bottom:1px solid rgba(0,160,210,.25)' : 'border-top:1px solid var(--border)';
+  const corBase = forte ? 'var(--blue)' : 'var(--text-secondary)';
+
+  // Mediana do próprio bloco como referência — mais estável que a média,
+  // que um único dia atípico já puxa. O desvio é medido contra ela.
+  const ordenado = [...porDia].sort((a, b) => a - b);
+  const mediana = ordenado.length
+    ? (ordenado.length % 2 ? ordenado[(ordenado.length-1)/2]
+                           : (ordenado[ordenado.length/2 - 1] + ordenado[ordenado.length/2]) / 2)
+    : 0;
+
   return `<tr style="background:${bg};${borda}">
-    <td colspan="${NCOLS_FIXAS}" style="padding:5px 10px;color:${forte?'var(--blue)':'var(--text-secondary)'};font-size:11px;text-align:right;font-weight:${peso};border:${BORDA}">${label} — trabalhando no dia ${escalaIconeSolto('arrowRight', 11)}</td>
-    ${porDia.map(n => `<td style="text-align:center;border:${BORDA};color:${forte?'var(--blue)':'var(--text-secondary)'};font-weight:${peso};font-size:11px">${n}</td>`).join('')}
+    <td colspan="${NCOLS_FIXAS}" style="padding:5px 10px;color:${corBase};font-size:11px;text-align:right;font-weight:${peso};border:${BORDA}" title="Mediana do bloco: ${mediana} pessoa(s)/dia. Números coloridos indicam quanto o dia foge dela.">${label} — trabalhando no dia ${escalaIconeSolto('arrowRight', 11)}</td>
+    ${porDia.map((n, i) => {
+      const { cor, dica } = escalaCorDesvioCobertura(n, mediana, i + 1);
+      return `<td style="text-align:center;border:${BORDA};color:${cor || corBase};font-weight:${peso};font-size:11px" title="${dica}">${n}</td>`;
+    }).join('')}
   </tr>`;
+}
+
+// Cor do número pela distância à mediana do bloco. O objetivo é achar o
+// dia fora da curva sem precisar comparar coluna por coluna com o olho:
+//   até 1 pessoa de diferença  → cor normal (variação esperada)
+//   2 pessoas                  → laranja (atenção)
+//   3 ou mais                  → vermelho (fora da curva)
+// Falta de gente pesa mais que sobra: um dia com 3 a menos compromete a
+// operação, um dia com 3 a mais só é ineficiente.
+function escalaCorDesvioCobertura(valor, mediana, dia) {
+  const desvio = valor - mediana;
+  const abs = Math.abs(desvio);
+  const sentido = desvio < 0 ? 'abaixo' : 'acima';
+  const dica = abs === 0
+    ? `${valor} pessoa(s) — igual à mediana do bloco`
+    : `${valor} pessoa(s) · ${abs} ${sentido} da mediana (${mediana})`;
+
+  if (abs < 2) return { cor: null, dica };
+  if (desvio <= -3) return { cor: '#fc8181', dica: `${dica} — falta gente nesse dia` };
+  if (desvio <= -2) return { cor: '#f6ad55', dica };
+  if (desvio >= 3)  return { cor: '#63b3ed', dica: `${dica} — sobra gente nesse dia` };
+  return { cor: '#8fb8d8', dica };
 }
 
 function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
@@ -3067,6 +3115,29 @@ function escalaFatorPiso() {
   return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0.85;
 }
 
+// Quanto da variação da malha é repassado pro efetivo. A malha oscila mais
+// que a necessidade de gente: um dia com 10% menos voos não significa 10%
+// menos gente, porque boa parte do trabalho é fixa (abertura de turno,
+// equipamento, revezamento). Repassando 100% da variação, o alvo do Turno
+// Alpha ia de 14 a 20 pessoas num efetivo de 22 — a otimização obedecia a
+// curva e o resultado ficava desconfortável na operação.
+// 0.35 mantém o formato da curva (dia forte segue exigindo mais) com
+// amplitude operacionalmente razoável.
+function escalaAmortecimentoDemanda() {
+  const v = parseFloat(window._escalaAmortecimentoDemanda);
+  return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0.35;
+}
+
+// Converte o pico do dia em multiplicador do efetivo, já amortecido e
+// limitado a uma faixa. O teto/piso evita que um dia atípico da malha
+// (feriado, voo extra) sozinho distorça a escala do mês inteiro.
+function escalaRelativoDemanda(pico, picoMedio) {
+  if (!(picoMedio > 0)) return 1;
+  const bruto = pico / picoMedio;
+  const amortecido = 1 + escalaAmortecimentoDemanda() * (bruto - 1);
+  return Math.min(1.12, Math.max(0.88, amortecido));
+}
+
 function escalaChaveCobertura(c, ano, mesNum, diasNoMes) {
   const grupo = escalaFuncaoGrupoDoColab(c).label;
   const turno = escalaSetorDoTurno(escalaEntradaEfetivaDoColab(c, ano, mesNum, diasNoMes)) || '—';
@@ -3105,7 +3176,7 @@ function escalaModeloCobertura(colabs, ano, mesNum, diasNoMes) {
     for (let d = 1; d <= diasNoMes; d++) {
       // Sem malha carregada, picoMedio é 0 — nesse caso o piso é liso,
       // sem modulação, em vez de dividir por zero.
-      const relativo = picoMedio > 0 ? picos[d-1] / picoMedio : 1;
+      const relativo = escalaRelativoDemanda(picos[d-1], picoMedio);
       porDia.push(Math.max(1, Math.round(base * fator * relativo)));
     }
     piso.set(chave, porDia);
@@ -4263,8 +4334,7 @@ function escalaMelhorarDistribuicao(inserts, colabs, ano, mesNum, diasNoMes, esc
     const picoMedio = modelo.picos.reduce((a, b) => a + b, 0) / diasNoMes;
     const arr = new Array(diasNoMes);
     for (let d = 1; d <= diasNoMes; d++) {
-      const relativo = picoMedio > 0 ? modelo.picos[d-1] / picoMedio : 1;
-      arr[d-1] = base * relativo;
+      arr[d-1] = base * escalaRelativoDemanda(modelo.picos[d-1], picoMedio);
     }
     alvo.set(chave, arr);
   }
@@ -4655,4 +4725,10 @@ function escalaMostrarDetalheAvisos(problemas) {
   ].join('\n');
   console.log(texto);
   alert(texto + `\n\n(o mesmo texto está no console, F12)`);
+}
+
+function escalaSetAmortecimentoDemanda(valor) {
+  window._escalaAmortecimentoDemanda = parseFloat(valor);
+  try { localStorage.setItem('gde_escala_amortecimento', String(window._escalaAmortecimentoDemanda)); } catch (_) {}
+  escalaMsg(`Sensibilidade à malha em ${Math.round(escalaAmortecimentoDemanda()*100)}% — vale a partir da próxima geração de folgas.`);
 }

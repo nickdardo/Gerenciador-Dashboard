@@ -40,6 +40,12 @@ Object.assign(sandbox.window, {
   _escalaFatorPiso: 0.85, _escalaDemandaPorDia: null,
 });
 
+// Curva de pico real, lida da linha "Pico da malha no dia" do painel.
+// É ela que faz o alvo variar — e era ela, repassada em força total, que
+// produzia dias com 14 pessoas ao lado de dias com 20.
+const PICO_REAL = [67,66,59,66,67,66,66,67,66,66,72,66,66,66,67,66,66,66,67,66,73,67,66,59,58,59,58,66,58,58,51];
+sandbox.escalaPicoDoDia = (dia) => PICO_REAL[dia-1] || 0;
+
 // ── Distribuição "ingênua" ────────────────────────────────────────
 // Reproduz o que o print mostrava: todo mundo com as 6 folgas corretas e
 // sem violar nenhuma regra dura — só MAL DISTRIBUÍDAS entre os dias.
@@ -151,5 +157,33 @@ console.log(`  violações de regra dura: ${violacoesAntes} antes → ${vDepois}
 check('a otimização não cria violação nova de regra dura', vDepois <= violacoesAntes,
   `${violacoesAntes} → ${vDepois}`);
 check('roda em tempo aceitável pra uma base inteira', ms < 3000, `${ms}ms para 1 turno`);
+
+// ── Amplitude do alvo conforme a sensibilidade à malha ─────────────
+const amplitudeAlvo = (amortecimento) => {
+  sandbox.window._escalaAmortecimentoDemanda = amortecimento;
+  const m = sandbox.escalaModeloCobertura(colabs, ANO, MES, DIAS);
+  const chave = [...m.grupos.keys()][0];
+  const p = m.piso.get(chave);
+  return Math.max(...p) - Math.min(...p);
+};
+const ampAlta = amplitudeAlvo(1.0);
+const ampMedia = amplitudeAlvo(0.35);
+const ampBaixa = amplitudeAlvo(0.15);
+console.log(`\n  amplitude do piso conforme a sensibilidade: alta ${ampAlta} · média ${ampMedia} · baixa ${ampBaixa}`);
+check('sensibilidade menor achata a variação do alvo',
+  ampBaixa <= ampMedia && ampMedia < ampAlta, `${ampBaixa} <= ${ampMedia} < ${ampAlta}`);
+check('no padrão, o alvo não varia mais que 3 pessoas num turno de 22',
+  ampMedia <= 3, `amplitude ${ampMedia}`);
+sandbox.window._escalaAmortecimentoDemanda = 0.35;
+
+// ── Cores do desvio ────────────────────────────────────────────────
+const cor = (v, med) => sandbox.escalaCorDesvioCobertura(v, med, 1).cor;
+check('desvio de 1 pessoa não colore', cor(18, 18) === null && cor(17, 18) === null);
+check('2 abaixo da mediana fica laranja', cor(16, 18) === '#f6ad55');
+check('3 abaixo fica vermelho', cor(15, 18) === '#fc8181');
+check('sobra de gente usa cor fria, não de alerta',
+  cor(21, 18) === '#63b3ed' && cor(20, 18) === '#8fb8d8');
+check('falta e sobra do mesmo tamanho não usam a mesma cor',
+  cor(15, 18) !== cor(21, 18));
 
 process.exit(ok ? 0 : 1);
