@@ -2913,3 +2913,18 @@ html, body:has(#app-shell) { overflow-x: auto; overflow-y: hidden; }
   text-transform: uppercase;
   vertical-align: 1px;
 }
+
+/* Tamanho do código de status (F, FA, L, J, K, CH) dentro da célula.
+   Acompanha a densidade: no modo compacto cabe menos, mas continua bem
+   maior que os 10px fixos de antes. */
+#escala-grade-wrap { --escala-fs-status: 12.5px; }
+#escala-grade-wrap.escala-compacto { --escala-fs-status: 11px; }
+
+/* A legenda no topo usa os mesmos códigos — mantém o mesmo peso visual
+   pra que a associação entre legenda e célula seja imediata. */
+#escala-legenda-status b {
+  font-size: 12px;
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 4px;
+}

@@ -805,6 +805,7 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
           <div id="escala-menu-acoes" style="display:none;position:absolute;top:calc(100% + 6px);right:0;background:var(--bg-surface);border:1px solid var(--border-strong);border-radius:9px;padding:5px;min-width:238px;z-index:60;box-shadow:var(--adh-shadow-card)">
             ${escalaMenuSecao('Exportar')}
             ${escalaMenuItem('sheet', 'Baixar Excel da escala', 'escalaExportarExcel()')}
+            ${escalaMenuItem('upload', 'Importar escala do Excel', `document.getElementById('escala-import-input').click()`, travada)}
             ${escalaMenuItem('printer', 'Imprimir / PDF', 'escalaImprimir()')}
             ${escalaMenuDivisor()}
             ${escalaMenuSecao('Horários e férias')}
@@ -824,6 +825,7 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
           </div>
         </div>
         <input type="file" id="escala-cursos-input" ${dis} accept=".xlsx,.xls" style="display:none" onchange="escalaImportarCursos(this)">
+        <input type="file" id="escala-import-input" ${dis} accept=".xlsx,.xls" style="display:none" onchange="escalaImportarEscalaExcel(this)">
       </div>
       <div id="escala-grupo-organizacao" style="display:flex;gap:16px;align-items:flex-end;flex-wrap:nowrap;overflow-x:auto;margin-top:10px;padding-bottom:2px">
         <div style="position:relative">
@@ -1219,7 +1221,13 @@ function escalaCelHTML(item) {
     F: 'Folga',
   };
   const titulo = titulos[item.status] || '';
-  return `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:${cor}22;color:${cor};border-radius:4px;font-weight:700;font-size:10px" title="${titulo}">${item.exibido}</div>`;
+  // Fonte e contraste maiores: em 10px com fundo a 13% de opacidade, o
+  // código do status quase sumia numa grade de 31 colunas. Agora usa o
+  // tamanho da densidade escolhida, peso 800 e uma borda fina da própria
+  // cor, que dá recorte contra o fundo da linha.
+  return `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;`
+    + `background:${cor}2e;color:${cor};border:1px solid ${cor}66;border-radius:4px;`
+    + `font-weight:800;font-size:var(--escala-fs-status,12.5px);letter-spacing:.02em" title="${titulo}">${item.exibido}</div>`;
 }
 
 // Setor = turno do dia, calculado a partir do horário de entrada (nomes
@@ -3855,6 +3863,21 @@ if (!window._escalaMenuFechaRegistrado) {
 // dia trabalhado). A grade não tinha exportação nenhuma: o único
 // XLSX.writeFile do módulo era o do Gerador, que exporta o
 // dimensionamento, não a escala.
+// ══════════════════════════════════════════════════════
+// EXCEL — IDA E VOLTA
+//
+// A grade fica pesada em máquina fraca com 300 pessoas × 31 dias. O
+// caminho é levar a escala pro Excel, ajustar lá, e trazer de volta.
+// Pra isso o arquivo precisa ser RECONHECÍVEL na volta: linha de
+// identificação com base e mês, matrícula como chave e uma coluna por dia
+// com o código puro. A importação confere tudo antes de gravar.
+// ══════════════════════════════════════════════════════
+
+const ESCALA_MARCADOR_ARQUIVO = '#ESCALA-ONLINE-V1';
+// Códigos que a pessoa pode digitar no Excel. 'L' fica de fora de
+// propósito: férias é derivado do cadastro do RH, não se edita aqui.
+const ESCALA_CODIGOS_IMPORTAVEIS = ['F', 'FA', 'K', 'J', 'CH'];
+
 function escalaExportarExcel() {
   if (typeof XLSX === 'undefined') { escalaMsg('Biblioteca de Excel não carregou — recarregue a página.', true); return; }
   const base = window._escalaBase, mes = window._escalaMes;
@@ -3863,46 +3886,283 @@ function escalaExportarExcel() {
   const colabs = window._escalaColabs || [];
   if (!colabs.length) { escalaMsg('Nada pra exportar — nenhum colaborador nessa escala ainda.', true); return; }
 
+  const COLS_FIXAS = ['MATRÍCULA', 'NOME', 'FUNÇÃO', 'TURNO', 'ENTRADA', 'SAÍDA', 'CH', 'META'];
   const cabecalhoDias = [];
   for (let d = 1; d <= diasNoMes; d++) {
-    cabecalhoDias.push(`${ESCALA_DIAS_SEMANA[new Date(ano, mesNum-1, d).getDay()]} ${String(d).padStart(2,'0')}`);
+    cabecalhoDias.push(`${ESCALA_DIAS_SEMANA[new Date(ano, mesNum-1, d).getDay()].toUpperCase()} ${d}`);
   }
-  const linhas = [['MATRÍCULA','NOME','FUNÇÃO','TURNO','SETOR','BLOCO','ENTRADA','SAÍDA','CH','FOLGAS','META', ...cabecalhoDias]];
+
+  const linhas = [
+    [ESCALA_MARCADOR_ARQUIVO, base, mes, `gerado em ${new Date().toLocaleString('pt-BR')}`, 'NÃO ALTERE ESTA LINHA'],
+    [],
+    [...COLS_FIXAS, ...cabecalhoDias],
+  ];
 
   colabs.forEach(c => {
     const info = window.eoColabs?.get(c.matricula);
-    const horarioFixo = escalaHorarioFixoDoColab(c.matricula, ano, mesNum, diasNoMes);
-    const [entradaCalc, saidaCalc] = horarioFixo ? horarioFixo.split('-') : [null, null];
-    const entrada = c.entrada_manual || entradaCalc || '';
-    const saida   = c.saida_manual || saidaCalc || '';
+    const ch = info?.ch || c.ch_manual || '';
+    const entrada = escalaEntradaEfetivaDoColab(c, ano, mesNum, diasNoMes) || '';
     const conteudo = escalaConteudoDoMes(c, ano, mesNum, diasNoMes);
-    const folgas = conteudo.filter(i => i.status === 'F' || i.status === 'FA').length;
-    const meta   = escalaMetaFolgasDoColab(info?.ch, diasNoMes);
-    // Dia sem status = dia trabalhado → sai o horário, que é o que a
-    // operação precisa ver no papel.
-    const celulas = conteudo.map(i => i.exibido || (entrada && saida ? `${entrada}-${saida}` : 'TRAB'));
+    // Célula vazia = dia trabalhado. 'L' vai preenchido só pra leitura —
+    // a importação ignora, porque férias não se edita por aqui.
+    const celulas = conteudo.map(i => i.status || '');
     linhas.push([
-      c.matricula, c.nome || '', info?.funcao || '', escalaSetorDoTurno(entrada),
-      c.turno || '', c.bloco_horario || '', entrada, saida, info?.ch || '',
-      folgas, meta, ...celulas,
+      c.matricula, c.nome || '', info?.funcao || c.funcao_manual || '',
+      escalaSetorDoTurno(entrada), entrada, escalaSaidaCalculada(entrada, ch) || '',
+      ch, escalaMetaFolgasDoColab(ch, diasNoMes), ...celulas,
     ]);
   });
 
-  // Linha de resumo no fim, igual a da tela.
-  const contagem = new Array(diasNoMes).fill(0);
-  colabs.forEach(c => escalaConteudoDoMes(c, ano, mesNum, diasNoMes)
-    .forEach((i, idx) => { if (!i.status) contagem[idx]++; }));
-  linhas.push([]);
-  linhas.push(['TRABALHANDO NO DIA','','','','','','','','','','', ...contagem]);
-
   const ws = XLSX.utils.aoa_to_sheet(linhas);
-  ws['!cols'] = [{wch:11},{wch:30},{wch:26},{wch:14},{wch:14},{wch:14},{wch:9},{wch:9},{wch:6},{wch:8},{wch:6},
-                 ...cabecalhoDias.map(() => ({ wch: 11 }))];
-  ws['!freeze'] = { xSplit: 2, ySplit: 1 };
+  ws['!cols'] = [{wch:11},{wch:32},{wch:26},{wch:14},{wch:9},{wch:9},{wch:6},{wch:6},
+                 ...cabecalhoDias.map(() => ({ wch: 7 }))];
+  // Congela cabeçalho e as duas primeiras colunas — sem isso, rolar até o
+  // dia 25 faz perder de vista de quem é a linha.
+  ws['!freeze'] = { xSplit: 2, ySplit: 3 };
+
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'ESCALA');
-  XLSX.writeFile(wb, `Escala_${base}_${String(mesNum).padStart(2,'0')}_${ano}.xlsx`);
-  escalaMsg('Excel gerado.');
+
+  // Conferência com FÓRMULA, não valor fixo: atualiza sozinha enquanto a
+  // pessoa edita no Excel, que é justamente o ponto de conferir por lá.
+  const primeira = 4, ultima = 3 + colabs.length;
+  const confer = [
+    ['CONFERÊNCIA — atualiza sozinha conforme você edita a aba ESCALA'],
+    [],
+    ['DIA', 'TRABALHANDO', 'FOLGAS/AUSÊNCIAS'],
+  ];
+  for (let d = 1; d <= diasNoMes; d++) {
+    const col = XLSX.utils.encode_col(COLS_FIXAS.length + d - 1);
+    confer.push([
+      cabecalhoDias[d-1],
+      { f: `COUNTBLANK(ESCALA!${col}${primeira}:${col}${ultima})` },
+      { f: `COUNTA(ESCALA!${col}${primeira}:${col}${ultima})` },
+    ]);
+  }
+  const wsConf = XLSX.utils.aoa_to_sheet(confer);
+  wsConf['!cols'] = [{wch:12},{wch:14},{wch:18}];
+  XLSX.utils.book_append_sheet(wb, wsConf, 'CONFERÊNCIA');
+
+  const regras = [
+    ['COMO PREENCHER'],
+    [],
+    ['Deixe a célula VAZIA para dia trabalhado. Para folga ou ausência, use um destes códigos:'],
+    [],
+    ['F',  'Folga'],
+    ['FA', 'Folga agrupada — só em SÁBADO ou SEGUNDA, com F no domingo do lado'],
+    ['K',  'Curso'],
+    ['J',  'Afastado'],
+    ['CH', 'Folga compensa (banco de horas)'],
+    ['L',  'Férias — SOMENTE LEITURA. Vem do cadastro do RH e é ignorado na importação.'],
+    [],
+    ['REGRAS QUE O PAINEL CONFERE NA IMPORTAÇÃO'],
+    [],
+    ['1', 'No máximo 6 dias seguidos trabalhando (regra 6x1).'],
+    ['2', 'Pelo menos 1 domingo de folga no mês.'],
+    ['3', 'Nunca duas folgas coladas — exceto o par formado por FA + domingo.'],
+    ['4', 'A quantidade de folgas deve bater com a coluna META (calculada pela CH).'],
+    [],
+    ['O painel NÃO bloqueia a importação por causa dessas regras — ele mostra'],
+    ['tudo que está fora e deixa você decidir. Ajuste manual às vezes é'],
+    ['necessário e o sistema não deve impedir.'],
+    [],
+    ['NÃO FAÇA'],
+    [],
+    ['·', 'Não altere a primeira linha da aba ESCALA (é ela que identifica base e mês).'],
+    ['·', 'Não mude a coluna MATRÍCULA — é a chave usada pra casar as linhas.'],
+    ['·', 'Não apague nem reordene as colunas de dia.'],
+    ['·', 'Não renomeie a aba ESCALA.'],
+    [],
+    ['Pode adicionar filtros, cores e colunas à direita do último dia — nada disso atrapalha.'],
+  ];
+  const wsReg = XLSX.utils.aoa_to_sheet(regras);
+  wsReg['!cols'] = [{wch:6},{wch:96}];
+  XLSX.utils.book_append_sheet(wb, wsReg, 'INSTRUÇÕES');
+
+  XLSX.writeFile(wb, `Escala_${base}_${mes}.xlsx`);
+  escalaMsg(`Excel gerado com ${colabs.length} colaborador(es). Edite e traga de volta em "Importar escala do Excel".`);
+}
+
+// ── Importação ────────────────────────────────────────────────────
+function escalaImportarEscalaExcel(input) {
+  const file = input?.files?.[0];
+  if (!file) return;
+  input.value = ''; // permite reimportar o mesmo arquivo depois de corrigir
+  if (escalaVerificarTravada()) return;
+
+  const leitor = new FileReader();
+  leitor.onload = async (e) => {
+    try {
+      const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+      await escalaAplicarImportacao(wb);
+    } catch (err) {
+      escalaMsg(escalaTraduzirErroBanco(err.message, 'Erro ao importar'), true);
+    }
+  };
+  leitor.readAsArrayBuffer(file);
+}
+
+// Lê a planilha, monta o diff e só grava depois de mostrar o que muda.
+async function escalaAplicarImportacao(wb) {
+  const ws = wb.Sheets['ESCALA'];
+  if (!ws) { escalaMsg('A aba "ESCALA" não existe nesse arquivo. Use o Excel exportado pelo próprio painel.', true); return; }
+
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: false });
+  const marcador = String(rows[0]?.[0] || '');
+  if (!marcador.startsWith('#ESCALA-ONLINE')) {
+    escalaMsg('Esse arquivo não parece ter saído do painel — falta a linha de identificação. Exporte de novo em "Baixar Excel da escala".', true);
+    return;
+  }
+
+  const baseArq = String(rows[0]?.[1] || '').trim().toUpperCase();
+  const mesArq  = String(rows[0]?.[2] || '').trim();
+  if (baseArq !== String(window._escalaBase).toUpperCase() || mesArq !== window._escalaMes) {
+    escalaMsg(`Arquivo é da base ${baseArq} / ${mesArq}, mas a tela está em ${window._escalaBase} / ${window._escalaMes}. Troque a base e o mês no topo antes de importar.`, true);
+    return;
+  }
+
+  const iCab = rows.findIndex(r => Array.isArray(r) && String(r[0] || '').toUpperCase().startsWith('MATR'));
+  if (iCab === -1) { escalaMsg('Não encontrei a linha de cabeçalho (MATRÍCULA) na aba ESCALA.', true); return; }
+
+  const [ano, mesNum] = window._escalaMes.split('-').map(Number);
+  const diasNoMes = new Date(ano, mesNum, 0).getDate();
+  const cab = rows[iCab].map(v => String(v || '').toUpperCase());
+  // Mapeia cada dia pela posição da coluna cujo cabeçalho termina no número.
+  const colunaDoDia = {};
+  for (let d = 1; d <= diasNoMes; d++) {
+    const idx = cab.findIndex(h => new RegExp(`\\b${d}$`).test(h.trim()));
+    if (idx !== -1) colunaDoDia[d] = idx;
+  }
+  const faltando = [];
+  for (let d = 1; d <= diasNoMes; d++) if (colunaDoDia[d] === undefined) faltando.push(d);
+  if (faltando.length) {
+    escalaMsg(`Faltam colunas de dia na planilha: ${faltando.join(', ')}. Não apague nem reordene as colunas de dia.`, true);
+    return;
+  }
+
+  const naEscala = new Map((window._escalaColabs || []).map(c => [escalaNormMatricula(c.matricula), c]));
+  const desejado = new Map();   // "mat|dia" -> status
+  const desconhecidas = [];
+  const codigosInvalidos = [];
+  let linhasLidas = 0;
+
+  for (let r = iCab + 1; r < rows.length; r++) {
+    const linha = rows[r];
+    if (!Array.isArray(linha) || !linha[0]) continue;
+    const mat = escalaNormMatricula(linha[0]);
+    const c = naEscala.get(mat);
+    if (!c) { desconhecidas.push(String(linha[0])); continue; }
+    linhasLidas++;
+
+    for (let d = 1; d <= diasNoMes; d++) {
+      const bruto = String(linha[colunaDoDia[d]] ?? '').trim().toUpperCase();
+      if (!bruto || bruto === 'L') continue; // vazio = trabalha · L é derivado
+      if (!ESCALA_CODIGOS_IMPORTAVEIS.includes(bruto)) {
+        if (codigosInvalidos.length < 10) codigosInvalidos.push(`${c.matricula} dia ${d}: "${bruto}"`);
+        continue;
+      }
+      desejado.set(`${c.matricula}|${d}`, bruto);
+    }
+  }
+
+  if (!linhasLidas) { escalaMsg('Nenhuma linha da planilha casou com os colaboradores desta escala.', true); return; }
+
+  // ── Diff contra o que está gravado ──────────────────────────────
+  const aGravar = [], aApagar = [];
+  for (const [chave, status] of desejado) {
+    const atual = window._escalaDias.get(chave);
+    if (!atual || atual.status !== status) aGravar.push({ chave, status });
+  }
+  for (const [chave, reg] of window._escalaDias) {
+    // 'T' (exceção de férias) não vai no Excel, então não pode ser apagado
+    // por ausência — seria desfazer uma decisão que a planilha nem vê.
+    if (reg.status === 'T') continue;
+    const [mat] = chave.split('|');
+    if (!naEscala.has(escalaNormMatricula(mat))) continue;
+    if (!desejado.has(chave)) aApagar.push(chave);
+  }
+
+  if (!aGravar.length && !aApagar.length) {
+    escalaMsg(`Planilha lida (${linhasLidas} colaboradores) — nada mudou em relação ao que já está no painel.`);
+    return;
+  }
+
+  // ── Regras: relata, não bloqueia ────────────────────────────────
+  const simulado = new Map(window._escalaDias);
+  aApagar.forEach(k => simulado.delete(k));
+  aGravar.forEach(({ chave, status }) => simulado.set(chave, { status }));
+
+  const problemas = [];
+  for (const c of (window._escalaColabs || [])) {
+    const folgas = escalaFolgasDoColab(c, ano, mesNum, diasNoMes, simulado);
+    const fa = new Set();
+    for (let d = 1; d <= diasNoMes; d++) if (simulado.get(`${c.matricula}|${d}`)?.status === 'FA') fa.add(d);
+    const v = escalaValidarRegrasFolga(folgas, ano, mesNum, diasNoMes, fa);
+    const itens = [];
+    if (v.maxSequencia > 6) itens.push(`${v.maxSequencia} dias seguidos`);
+    if (v.domingos === 0) itens.push('sem domingo');
+    if (v.coladas > 0) itens.push(`${v.coladas} folga(s) colada(s)`);
+    v.faInvalidas.forEach(f => itens.push(`FA inválida no dia ${f.dia}`));
+    if (itens.length) problemas.push(`${c.matricula} ${String(c.nome||'').slice(0,24)}: ${itens.join(', ')}`);
+  }
+
+  const resumo = [
+    `IMPORTAR ESCALA — ${window._escalaBase} · ${window._escalaMes}`,
+    ``,
+    `${linhasLidas} colaborador(es) lidos da planilha`,
+    `${aGravar.length} marcação(ões) a gravar`,
+    `${aApagar.length} marcação(ões) a apagar`,
+  ];
+  if (desconhecidas.length) resumo.push(``, `${desconhecidas.length} matrícula(s) da planilha não estão nesta escala e serão IGNORADAS:`, `   ${desconhecidas.slice(0,8).join(', ')}${desconhecidas.length>8?'...':''}`);
+  if (codigosInvalidos.length) resumo.push(``, `Códigos não reconhecidos (serão ignorados):`, ...codigosInvalidos.map(x => `   ${x}`));
+  if (problemas.length) {
+    resumo.push(``, `${problemas.length} colaborador(es) ficarão fora das regras:`,
+      ...problemas.slice(0, 12).map(x => `   ${x}`));
+    if (problemas.length > 12) resumo.push(`   ...e mais ${problemas.length - 12}`);
+    resumo.push(``, `Isso NÃO impede a importação — ajuste manual às vezes é necessário.`);
+  }
+  resumo.push(``, `Confirma?`);
+
+  if (!confirm(resumo.join('\n'))) { escalaMsg('Importação cancelada — nada foi alterado.'); return; }
+
+  // ── Gravação ────────────────────────────────────────────────────
+  escalaMostrarLoading('Importando escala do Excel...');
+  const agora = new Date();
+  const autor = currentUserProfile?.id || currentUser?.id || null;
+  const base = window._escalaBase, mes = window._escalaMes;
+
+  try {
+    const LOTE = 200;
+    const payloads = aGravar.map(({ chave, status }) => {
+      const [matricula, dia] = chave.split('|');
+      return { base, mes, matricula, dia: Number(dia), status, origem: 'excel', updated_at: agora, updated_by: autor };
+    });
+    for (let i = 0; i < payloads.length; i += LOTE) {
+      const { error } = await db.from('escala_dia').upsert(payloads.slice(i, i + LOTE), { onConflict: 'base,mes,matricula,dia' });
+      if (error) throw new Error(error.message);
+      escalaLoadingAtualiza(Math.min(i + LOTE, payloads.length), payloads.length + aApagar.length);
+    }
+    payloads.forEach(p => window._escalaDias.set(`${p.matricula}|${p.dia}`, p));
+
+    for (let i = 0; i < aApagar.length; i += LOTE) {
+      const bloco = aApagar.slice(i, i + LOTE);
+      for (const chave of bloco) {
+        const [matricula, dia] = chave.split('|');
+        const { error } = await db.from('escala_dia').delete()
+          .eq('base', base).eq('mes', mes).eq('matricula', matricula).eq('dia', Number(dia));
+        if (error) throw new Error(error.message);
+        window._escalaDias.delete(chave);
+      }
+      escalaLoadingAtualiza(payloads.length + Math.min(i + LOTE, aApagar.length), payloads.length + aApagar.length);
+    }
+
+    escalaGradeAtualiza();
+    escalaMsg(`Importado: ${aGravar.length} marcação(ões) gravadas, ${aApagar.length} apagadas.`,
+      problemas.length ? 'aviso' : 'ok');
+  } catch (err) {
+    escalaGradeAtualiza();
+    escalaMsg(escalaTraduzirErroBanco(err.message, 'Erro ao importar'), true);
+  }
 }
 
 // Impressão: marca o body pra o @media print saber que é a Escala, deixa
