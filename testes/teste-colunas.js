@@ -1050,4 +1050,52 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaColunasSecundarias: fal
   sandbox.window.eoFeriasAll = guardadoFer;
 })();
 
+// ── Cenários paralelos ─────────────────────────────────────────────
+(function () {
+  const ok = (nome, cond, detalhe) => {
+    console.log(`${cond ? 'PASSOU' : 'FALHOU'}  ${nome}${detalhe ? ` · ${detalhe}` : ''}`);
+    tudoOk &= cond;
+  };
+  const guardado = sandbox.window._escalaCenario;
+
+  sandbox.window._escalaCenario = undefined;
+  ok('sem escolha, o padrão é a planejada', sandbox.escalaCenario() === 'planejada');
+  sandbox.window._escalaCenario = 'dimensionada';
+  ok('cenário escolhido é respeitado', sandbox.escalaCenario() === 'dimensionada');
+  sandbox.window._escalaCenario = 'inventado';
+  ok('valor desconhecido cai no padrão em vez de quebrar a consulta',
+    sandbox.escalaCenario() === 'planejada');
+  sandbox.window._escalaCenario = 'planejada';
+  ok('cada cenário tem cor própria pra não editar o errado',
+    sandbox.ESCALA_CENARIOS[0].cor !== sandbox.ESCALA_CENARIOS[1].cor);
+
+  // O ponto crítico da migração: nenhuma consulta pode escapar do filtro,
+  // senão um cenário lê ou apaga o dado do outro.
+  const fonte = fs.readFileSync(__dirname + '/../js/escala.js', 'utf8');
+  const semEscopo = [];
+  const re = /from\('(escala_colaborador|escala_dia|escala_trava)'\)((?:(?!from\()[\s\S]){0,400}?)(;|\.select\(\)\.single\(\)|\n\n)/g;
+  let m;
+  while ((m = re.exec(fonte)) !== null) {
+    if (!m[0].includes('cenario')) semEscopo.push(m[1] + ': ' + m[0].split('\n')[0].trim().slice(0, 70));
+  }
+  ok('toda consulta às tabelas de escala filtra por cenário',
+    semEscopo.length === 0, semEscopo.slice(0, 3).join(' | '));
+
+  // E toda gravação carrega o campo, senão cai no default e vira planejada.
+  const semCampo = [];
+  const reObj = /\{[^{}]*\bbase\b\s*[:,][^{}]*\bmes\b[^{}]*\}/g;
+  while ((m = reObj.exec(fonte)) !== null) {
+    const t = m[0];
+    if (t.includes('cenario') || t.includes('escala_ultima_base') || t.includes('escalaPopularAutomaticamente')) continue;
+    semCampo.push(t.split('\n')[0].trim().slice(0, 70));
+  }
+  ok('toda gravação carrega o cenário', semCampo.length === 0, semCampo.slice(0, 3).join(' | '));
+
+  // onConflict tem que bater com o índice único novo.
+  ok('onConflict inclui cenário nas três tabelas',
+    !/onConflict: 'base,mes,matricula/.test(fonte) && !/onConflict: 'base,mes'/.test(fonte));
+
+  sandbox.window._escalaCenario = guardado;
+})();
+
 process.exit(tudoOk ? 0 : 1);

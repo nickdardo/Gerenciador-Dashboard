@@ -196,12 +196,12 @@ async function escalaFetchMalha(base, mesInicioStr, mesFimStr, campos) {
 // confirmadas salvas direto na tabela.
 async function escalaFetchDias(base, mes) {
   const { count } = await db.from('escala_dia').select('*', { count: 'exact', head: true })
-    .eq('base', base).eq('mes', mes);
+    .eq('base', base).eq('mes', mes).eq('cenario', escalaCenario());
   const todas = [];
   const PAGE = 1000;
   for (let from = 0; from < (count || 0); from += PAGE) {
     const { data, error } = await db.from('escala_dia').select('*')
-      .eq('base', base).eq('mes', mes)
+      .eq('base', base).eq('mes', mes).eq('cenario', escalaCenario())
       .range(from, from + PAGE - 1);
     if (error) { console.warn('[escala] escala_dia:', error.message); break; }
     if (data) todas.push(...data);
@@ -267,7 +267,8 @@ async function escalaRenderDash(el) {
     <div class="page-header">
       <div>
         <h1 class="page-title">Escala Online</h1>
-        <p class="page-sub">Calendário mensal · ${base} · ${typeof adhMonthLabel==='function'?adhMonthLabel(mes):mes}${demandaPorDia?' · demanda real (malha de voos)':''}</p>
+        <p class="page-sub">Calendário mensal · ${base} · ${typeof adhMonthLabel==='function'?adhMonthLabel(mes):mes}${demandaPorDia?' · demanda real (malha de voos)':''}
+          · <b style="color:${escalaCenarioInfo().cor}">Escala ${escalaCenarioInfo().label}</b></p>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
         ${bases.length>1
@@ -588,17 +589,17 @@ async function escalaPopularAutomaticamente(base, mes) {
   if (!matriculas.size) return [];
 
   const linhas = [...matriculas.entries()].map(([matricula, nome]) => ({
-    base, mes, matricula, nome,
+    base, mes, cenario: escalaCenario(), matricula, nome,
     created_by: currentUserProfile?.id || currentUser?.id || null,
   }));
 
   const BATCH = 200;
   for (let i = 0; i < linhas.length; i += BATCH) {
-    const { error } = await db.from('escala_colaborador').upsert(linhas.slice(i, i+BATCH), { onConflict: 'base,mes,matricula' });
+    const { error } = await db.from('escala_colaborador').upsert(linhas.slice(i, i+BATCH), { onConflict: 'base,mes,cenario,matricula' });
     if (error) { console.warn('[escala] erro ao pré-popular:', error.message); break; }
   }
 
-  const { data } = await db.from('escala_colaborador').select('*').eq('base', base).eq('mes', mes).order('nome');
+  const { data } = await db.from('escala_colaborador').select('*').eq('base', base).eq('mes', mes).eq('cenario', escalaCenario()).order('nome');
   return data || [];
 }
 
@@ -628,9 +629,9 @@ async function escalaRenderGrade(el) {
   await escalaCarregarHistoricoFA();
 
   const [{ data: colabsIniciais }, dias, { data: travaRow }] = await Promise.all([
-    db.from('escala_colaborador').select('*').eq('base', base).eq('mes', mes).order('created_at'),
+    db.from('escala_colaborador').select('*').eq('base', base).eq('mes', mes).eq('cenario', escalaCenario()).order('created_at'),
     escalaFetchDias(base, mes),
-    db.from('escala_trava').select('*').eq('base', base).eq('mes', mes).maybeSingle(),
+    db.from('escala_trava').select('*').eq('base', base).eq('mes', mes).eq('cenario', escalaCenario()).maybeSingle(),
   ]);
 
   window._escalaTravada = !!travaRow?.travada;
@@ -718,12 +719,12 @@ async function escalaAlternarTrava() {
   if (!confirm(confirmMsg)) return;
 
   const payload = {
-    base, mes, travada: travarAgora,
+    base, mes, cenario: escalaCenario(), travada: travarAgora,
     travada_por: travarAgora ? (currentUserProfile?.id || currentUser?.id || null) : null,
     travada_por_nome: travarAgora ? (currentUserProfile?.nome || currentUser?.email || null) : null,
     travada_em: travarAgora ? new Date() : null,
   };
-  const { error } = await db.from('escala_trava').upsert(payload, { onConflict: 'base,mes' });
+  const { error } = await db.from('escala_trava').upsert(payload, { onConflict: 'base,mes,cenario' });
   if (error) { escalaMsg(`Erro ao ${travarAgora ? 'travar' : 'destravar'}: ` + error.message, true); return; }
 
   escalaMsg(travarAgora ? 'Escala travada.' : 'Escala destravada — já pode editar.');
@@ -762,6 +763,11 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
           ? `<select class="adh-month-select" onchange="escalaSetBase(this.value)">${bases.map(b=>`<option value="${b}" ${b===base?'selected':''}>${b}</option>`).join('')}</select>`
           : `<span class="adh-base-badge">${base||'—'}</span>`}
         <select class="adh-month-select" onchange="escalaSetMes(this.value)">${escalaMesOptionsHTML(mes)}</select>
+        <select class="adh-month-select" onchange="escalaSetCenario(this.value)"
+          title="Duas escalas paralelas pro mesmo mês. A Planejada é a de sempre; a Dimensionada recebe os horários do Gerador."
+          style="border-color:${escalaCenarioInfo().cor}66;color:${escalaCenarioInfo().cor};font-weight:600">
+          ${ESCALA_CENARIOS.map(c => `<option value="${c.valor}" ${escalaCenario()===c.valor?'selected':''}>Escala ${c.label}</option>`).join('')}
+        </select>
         <button class="adh-refresh-btn" style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600" onclick="escalaToggleVoosPanel()">${escalaIcone('plane')}Voos &amp; demanda</button>
         ${travaBtnHTML}
       </div>
@@ -1419,7 +1425,7 @@ async function escalaEditarTurno(matricula, valorSelecionado) {
   turno = turno || null;
 
   const { error } = await db.from('escala_colaborador').update({ turno })
-    .eq('base', window._escalaBase).eq('mes', window._escalaMes).eq('matricula', matricula);
+    .eq('base', window._escalaBase).eq('mes', window._escalaMes).eq('cenario', escalaCenario()).eq('matricula', matricula);
   if (error) { escalaMsg('Erro ao salvar turno: ' + error.message, true); return; }
 
   const c = (window._escalaColabs||[]).find(x => x.matricula === matricula);
@@ -1443,7 +1449,7 @@ async function escalaEditarBloco(matricula, valorSelecionado) {
   bloco = bloco || null;
 
   const { error } = await db.from('escala_colaborador').update({ bloco_horario: bloco })
-    .eq('base', window._escalaBase).eq('mes', window._escalaMes).eq('matricula', matricula);
+    .eq('base', window._escalaBase).eq('mes', window._escalaMes).eq('cenario', escalaCenario()).eq('matricula', matricula);
   if (error) { escalaMsg('Erro ao salvar bloco de horário: ' + error.message, true); return; }
 
   const c = (window._escalaColabs||[]).find(x => x.matricula === matricula);
@@ -2182,10 +2188,10 @@ async function escalaAdicionarColab(matricula) {
   }
 
   const payload = {
-    base: window._escalaBase, mes: window._escalaMes, matricula, nome,
+    base: window._escalaBase, mes: window._escalaMes, cenario: escalaCenario(), matricula, nome,
     created_by: currentUserProfile?.id || currentUser?.id || null,
   };
-  const { data, error } = await db.from('escala_colaborador').upsert(payload, { onConflict: 'base,mes,matricula' }).select().single();
+  const { data, error } = await db.from('escala_colaborador').upsert(payload, { onConflict: 'base,mes,cenario,matricula' }).select().single();
   if (error) { alert('Erro ao adicionar: ' + error.message); return false; }
   window._escalaColabs = [...(window._escalaColabs||[]), data];
   escalaGradeAtualiza();
@@ -2235,14 +2241,14 @@ async function escalaEditarMatricula(matriculaAntiga, novaMatriculaRaw) {
   }
 
   const payload = {
-    base: window._escalaBase, mes: window._escalaMes, matricula: novaMatricula, nome: info.nome,
+    base: window._escalaBase, mes: window._escalaMes, cenario: escalaCenario(), matricula: novaMatricula, nome: info.nome,
     created_by: currentUserProfile?.id || currentUser?.id || null,
   };
-  const { data, error } = await db.from('escala_colaborador').upsert(payload, { onConflict: 'base,mes,matricula' }).select().single();
+  const { data, error } = await db.from('escala_colaborador').upsert(payload, { onConflict: 'base,mes,cenario,matricula' }).select().single();
   if (error) { escalaMsg('Erro ao trocar matrícula: ' + error.message, true); escalaGradeAtualiza(); return; }
 
-  await db.from('escala_colaborador').delete().eq('base', window._escalaBase).eq('mes', window._escalaMes).eq('matricula', matriculaAntiga);
-  await db.from('escala_dia').delete().eq('base', window._escalaBase).eq('mes', window._escalaMes).eq('matricula', matriculaAntiga);
+  await db.from('escala_colaborador').delete().eq('base', window._escalaBase).eq('mes', window._escalaMes).eq('cenario', escalaCenario()).eq('matricula', matriculaAntiga);
+  await db.from('escala_dia').delete().eq('base', window._escalaBase).eq('mes', window._escalaMes).eq('cenario', escalaCenario()).eq('matricula', matriculaAntiga);
 
   window._escalaColabs = (window._escalaColabs||[]).filter(c => c.matricula !== matriculaAntiga);
   window._escalaColabs.push(data);
@@ -2293,7 +2299,7 @@ async function escalaEditarHorario(matricula, campo, valor) {
   }
 
   const { error } = await db.from('escala_colaborador').update(updates)
-    .eq('base', window._escalaBase).eq('mes', window._escalaMes).eq('matricula', matricula);
+    .eq('base', window._escalaBase).eq('mes', window._escalaMes).eq('cenario', escalaCenario()).eq('matricula', matricula);
   if (error) { escalaMsg('Erro ao salvar horário: ' + error.message, true); return; }
 
   if (c) Object.assign(c, updates);
@@ -2378,7 +2384,7 @@ async function escalaImportarCursos(input) {
         if (!colabsNaEscala.has(matricula)) { naoEncontrados++; return; }
 
         inserts.push({
-          base: window._escalaBase, mes: window._escalaMes, matricula, dia: diaC, status: 'K',
+          base: window._escalaBase, mes: window._escalaMes, cenario: escalaCenario(), matricula, dia: diaC, status: 'K',
           detalhe: curso, origem: 'import_curso',
           updated_at: new Date(), updated_by: currentUserProfile?.id || currentUser?.id || null,
         });
@@ -2390,7 +2396,7 @@ async function escalaImportarCursos(input) {
         return;
       }
 
-      const { error } = await db.from('escala_dia').upsert(inserts, { onConflict: 'base,mes,matricula,dia' });
+      const { error } = await db.from('escala_dia').upsert(inserts, { onConflict: 'base,mes,cenario,matricula,dia' });
       if (error) { escalaMsg('Erro ao importar cursos: ' + error.message, true); input.value = ''; return; }
 
       for (const ins of inserts) window._escalaDias.set(`${ins.matricula}|${ins.dia}`, ins);
@@ -2467,17 +2473,17 @@ async function escalaPreencherTodoStaff() {
   escalaMostrarLoading(`Preenchendo ${novos.length} colaborador${novos.length===1?'':'es'}...`);
 
   const linhas = novos.map(c => ({
-    base, mes: window._escalaMes, matricula: c.matricula, nome: c.nome,
+    base, mes: window._escalaMes, cenario: escalaCenario(), matricula: c.matricula, nome: c.nome,
     created_by: currentUserProfile?.id || currentUser?.id || null,
   }));
   const BATCH = 200;
   for (let i = 0; i < linhas.length; i += BATCH) {
-    const { error } = await db.from('escala_colaborador').upsert(linhas.slice(i, i+BATCH), { onConflict: 'base,mes,matricula' });
+    const { error } = await db.from('escala_colaborador').upsert(linhas.slice(i, i+BATCH), { onConflict: 'base,mes,cenario,matricula' });
     if (error) { escalaGradeAtualiza(); escalaMsg('Erro ao preencher: ' + error.message, true); return; }
     escalaLoadingAtualiza(Math.min(i + BATCH, linhas.length), linhas.length);
   }
 
-  const { data } = await db.from('escala_colaborador').select('*').eq('base', base).eq('mes', window._escalaMes);
+  const { data } = await db.from('escala_colaborador').select('*').eq('base', base).eq('mes', window._escalaMes).eq('cenario', escalaCenario());
   window._escalaColabs = data || [];
   escalaGradeAtualiza();
   escalaMsg(`${novos.length} colaborador${novos.length===1?'':'es'} adicionado${novos.length===1?'':'s'} — organizados por função e horário de entrada.`);
@@ -2487,8 +2493,8 @@ async function escalaLimparColaboradores() {
   if (escalaVerificarTravada()) return;
   if (!confirm('Remover TODOS os colaboradores dessa escala (base+mês)? Isso também apaga todas as marcações de F/K/CH/J deles. Não dá pra desfazer.')) return;
   const base = window._escalaBase, mes = window._escalaMes;
-  await db.from('escala_dia').delete().eq('base', base).eq('mes', mes);
-  const { error } = await db.from('escala_colaborador').delete().eq('base', base).eq('mes', mes);
+  await db.from('escala_dia').delete().eq('base', base).eq('mes', mes).eq('cenario', escalaCenario());
+  const { error } = await db.from('escala_colaborador').delete().eq('base', base).eq('mes', mes).eq('cenario', escalaCenario());
   if (error) { escalaMsg('Erro ao limpar: ' + error.message, true); return; }
   window._escalaColabs = [];
   window._escalaDias = new Map();
@@ -2500,7 +2506,7 @@ async function escalaLimparStatus() {
   if (escalaVerificarTravada()) return;
   if (!confirm('Limpar todas as marcações de Folga/FA/Cursos/Afastado/Compensa dessa escala (base+mês)? Os colaboradores continuam na escala, só o preenchimento some. Não dá pra desfazer.')) return;
   const base = window._escalaBase, mes = window._escalaMes;
-  const { error } = await db.from('escala_dia').delete().eq('base', base).eq('mes', mes);
+  const { error } = await db.from('escala_dia').delete().eq('base', base).eq('mes', mes).eq('cenario', escalaCenario());
   if (error) { escalaMsg('Erro ao limpar: ' + error.message, true); return; }
   window._escalaDias = new Map();
   escalaGradeAtualiza();
@@ -2511,8 +2517,8 @@ async function escalaRemoverColab(matricula) {
   if (escalaVerificarTravada()) return;
   if (!confirm('Remover esse colaborador dessa escala? Os F/K marcados pra ele nesse mês também somem.')) return;
   const base = window._escalaBase, mes = window._escalaMes;
-  await db.from('escala_dia').delete().eq('base', base).eq('mes', mes).eq('matricula', matricula);
-  const { error } = await db.from('escala_colaborador').delete().eq('base', base).eq('mes', mes).eq('matricula', matricula);
+  await db.from('escala_dia').delete().eq('base', base).eq('mes', mes).eq('cenario', escalaCenario()).eq('matricula', matricula);
+  const { error } = await db.from('escala_colaborador').delete().eq('base', base).eq('mes', mes).eq('cenario', escalaCenario()).eq('matricula', matricula);
   if (error) { alert('Erro ao remover: ' + error.message); return; }
   window._escalaColabs = (window._escalaColabs||[]).filter(c => c.matricula !== matricula);
   for (const k of [...window._escalaDias.keys()]) if (k.startsWith(matricula+'|')) window._escalaDias.delete(k);
@@ -2555,8 +2561,8 @@ async function escalaRemoverSelecionados() {
   if (!confirm(`Remover ${selecionados.length} colaborador${selecionados.length===1?'':'es'} dessa escala? As marcações de F/K/CH/J deles nesse mês também somem. Não dá pra desfazer.`)) return;
 
   const base = window._escalaBase, mes = window._escalaMes;
-  await db.from('escala_dia').delete().eq('base', base).eq('mes', mes).in('matricula', selecionados);
-  const { error } = await db.from('escala_colaborador').delete().eq('base', base).eq('mes', mes).in('matricula', selecionados);
+  await db.from('escala_dia').delete().eq('base', base).eq('mes', mes).eq('cenario', escalaCenario()).in('matricula', selecionados);
+  const { error } = await db.from('escala_colaborador').delete().eq('base', base).eq('mes', mes).eq('cenario', escalaCenario()).in('matricula', selecionados);
   if (error) { escalaMsg('Erro ao remover: ' + error.message, true); return; }
 
   const removidos = new Set(selecionados);
@@ -2668,11 +2674,11 @@ async function escalaDrop(e, matriculaAlvo) {
   }
 
   const updates = ordenada.map((c, i) => ({
-    base: window._escalaBase, mes: window._escalaMes, matricula: c.matricula, nome: c.nome, ordem_manual: i,
+    base: window._escalaBase, mes: window._escalaMes, cenario: escalaCenario(), matricula: c.matricula, nome: c.nome, ordem_manual: i,
   }));
   const BATCH = 200;
   for (let i = 0; i < updates.length; i += BATCH) {
-    const { error } = await db.from('escala_colaborador').upsert(updates.slice(i, i+BATCH), { onConflict: 'base,mes,matricula' });
+    const { error } = await db.from('escala_colaborador').upsert(updates.slice(i, i+BATCH), { onConflict: 'base,mes,cenario,matricula' });
     if (error) { escalaMsg('Erro ao salvar a ordem: ' + error.message, true); return; }
   }
   escalaGradeAtualiza();
@@ -2693,10 +2699,10 @@ async function escalaLimparOrdemManual() {
   if (!temOrdemManual) { escalaGradeAtualiza(); escalaMsg('Voltou pra ordenação automática (função → horário de entrada).'); return; }
 
   lista.forEach(c => { c.ordem_manual = null; });
-  const updates = lista.map(c => ({ base: window._escalaBase, mes: window._escalaMes, matricula: c.matricula, nome: c.nome, ordem_manual: null }));
+  const updates = lista.map(c => ({ base: window._escalaBase, mes: window._escalaMes, cenario: escalaCenario(), matricula: c.matricula, nome: c.nome, ordem_manual: null }));
   const BATCH = 200;
   for (let i = 0; i < updates.length; i += BATCH) {
-    const { error } = await db.from('escala_colaborador').upsert(updates.slice(i, i+BATCH), { onConflict: 'base,mes,matricula' });
+    const { error } = await db.from('escala_colaborador').upsert(updates.slice(i, i+BATCH), { onConflict: 'base,mes,cenario,matricula' });
     if (error) { escalaMsg('Erro ao voltar a ordem: ' + error.message, true); return; }
   }
   escalaGradeAtualiza();
@@ -2778,7 +2784,7 @@ async function escalaAplicarTeclaNaCelula(tecla) {
 
   if (tecla === 'BACKSPACE' || tecla === 'DELETE') {
     for (const { matricula, dia } of alvos) {
-      await db.from('escala_dia').delete().eq('base', base).eq('mes', mes).eq('matricula', matricula).eq('dia', dia);
+      await db.from('escala_dia').delete().eq('base', base).eq('mes', mes).eq('cenario', escalaCenario()).eq('matricula', matricula).eq('dia', dia);
       window._escalaDias.delete(`${matricula}|${dia}`);
     }
     escalaGradeAtualiza();
@@ -2846,11 +2852,11 @@ async function escalaAplicarTeclaNaCelula(tecla) {
   const agora = new Date();
   const autor = currentUserProfile?.id || currentUser?.id || null;
   const payloads = alvos.map(({ matricula, dia, forcarStatus }) => ({
-    base, mes, matricula, dia, status: forcarStatus || statusFinal, origem: 'manual',
+    base, mes, cenario: escalaCenario(), matricula, dia, status: forcarStatus || statusFinal, origem: 'manual',
     updated_at: agora, updated_by: autor,
   }));
 
-  const { error } = await db.from('escala_dia').upsert(payloads, { onConflict: 'base,mes,matricula,dia' });
+  const { error } = await db.from('escala_dia').upsert(payloads, { onConflict: 'base,mes,cenario,matricula,dia' });
   if (error) { escalaMsg(escalaTraduzirErroBanco(error.message, 'Erro ao salvar'), true); return; }
   payloads.forEach(p => window._escalaDias.set(`${p.matricula}|${p.dia}`, p));
   escalaGradeAtualiza();
@@ -3031,7 +3037,7 @@ async function escalaPreencherHorarioMesAnterior() {
 
   const { data, error } = await db.from('escala_colaborador')
     .select('matricula,entrada_manual,saida_manual,intervalo_inicio_manual,intervalo_fim_manual')
-    .eq('base', window._escalaBase).eq('mes', mesAnterior)
+    .eq('base', window._escalaBase).eq('mes', mesAnterior).eq('cenario', escalaCenario())
     .in('matricula', colabs.map(c => c.matricula));
   if (error) { escalaMsg('Erro ao buscar o mês anterior: ' + error.message, true); return; }
   const porMatricula = new Map((data||[]).map(r => [r.matricula, r]));
@@ -3061,7 +3067,7 @@ async function escalaPreencherHorarioMesAnterior() {
     }
 
     updates.push({
-      base: window._escalaBase, mes: window._escalaMes, matricula: c.matricula, nome: c.nome,
+      base: window._escalaBase, mes: window._escalaMes, cenario: escalaCenario(), matricula: c.matricula, nome: c.nome,
       entrada_manual: c.entrada_manual || entradaAnt || null,
       saida_manual: c.saida_manual || saidaAnt || null,
       intervalo_inicio_manual: c.intervalo_inicio_manual || intInicioAnt || null,
@@ -3072,7 +3078,7 @@ async function escalaPreencherHorarioMesAnterior() {
 
   const BATCH = 200;
   for (let i = 0; i < updates.length; i += BATCH) {
-    const { error: err2 } = await db.from('escala_colaborador').upsert(updates.slice(i, i+BATCH), { onConflict: 'base,mes,matricula' });
+    const { error: err2 } = await db.from('escala_colaborador').upsert(updates.slice(i, i+BATCH), { onConflict: 'base,mes,cenario,matricula' });
     if (err2) { escalaMsg('Erro ao salvar: ' + err2.message, true); return; }
   }
   for (const u of updates) {
@@ -3088,7 +3094,7 @@ async function escalaPreencherHorarioMesAnterior() {
 // pessoa. Confirmado com o cliente.
 async function escalaTeveFAMesPassado(base, matricula, mesAtual) {
   const mesAnterior = escalaMesAnterior(mesAtual);
-  const { data } = await db.from('escala_dia').select('dia').eq('base', base).eq('matricula', matricula).eq('mes', mesAnterior).eq('status', 'F').order('dia');
+  const { data } = await db.from('escala_dia').select('dia').eq('base', base).eq('matricula', matricula).eq('mes', mesAnterior).eq('cenario', escalaCenario()).eq('status', 'F').order('dia');
   if (!data || data.length < 2) return false;
   const dias = data.map(r => r.dia);
   for (let i = 0; i < dias.length - 1; i++) {
@@ -3108,7 +3114,7 @@ async function escalaDiasSeguidosNoFimDoMesAnterior(base, matricula, mesAtual) {
   const [anoAnt, mesNumAnt] = mesAnterior.split('-').map(Number);
   const diasNoMesAnterior = new Date(anoAnt, mesNumAnt, 0).getDate();
 
-  const { data } = await db.from('escala_dia').select('dia,status').eq('base', base).eq('matricula', matricula).eq('mes', mesAnterior);
+  const { data } = await db.from('escala_dia').select('dia,status').eq('base', base).eq('matricula', matricula).eq('mes', mesAnterior).eq('cenario', escalaCenario());
   // Sem NENHUM registro no mês anterior pra essa matrícula (mês nunca foi
   // preenchido, por exemplo), não temos como saber se ela trabalhou ou não
   // — o seguro é assumir sequência zero, não o mês inteiro trabalhado. Sem
@@ -3170,7 +3176,7 @@ async function escalaRemoverFolgas(filtro) {
   const LOTE = 100;
   for (let i = 0; i < matriculas.length; i += LOTE) {
     const { error } = await db.from('escala_dia').delete()
-      .eq('base', base).eq('mes', mes)
+      .eq('base', base).eq('mes', mes).eq('cenario', escalaCenario())
       .in('matricula', matriculas.slice(i, i + LOTE))
       .in('status', ['F', 'FA']);
     if (error) { escalaMsg('Erro ao remover folgas: ' + error.message, true); return; }
@@ -3402,7 +3408,7 @@ async function escalaGerarFolgasAuto(grupoFiltro) {
       const escolhidoDom = livres.length ? melhorDia(livres, c, false) : null;
       if (escolhidoDom !== null) {
         const registro = {
-          base: window._escalaBase, mes: window._escalaMes, matricula: c.matricula,
+          base: window._escalaBase, mes: window._escalaMes, cenario: escalaCenario(), matricula: c.matricula,
           dia: escolhidoDom, status: 'F', origem: 'auto',
           updated_at: new Date(), updated_by: currentUserProfile?.id || currentUser?.id || null,
         };
@@ -3463,7 +3469,7 @@ async function escalaGerarFolgasAuto(grupoFiltro) {
       const key = `${c.matricula}|${dia}`;
       if (escalaDiasCalc.has(key)) continue;
       const registro = {
-        base: window._escalaBase, mes: window._escalaMes, matricula: c.matricula, dia, status: 'F', origem: 'auto',
+        base: window._escalaBase, mes: window._escalaMes, cenario: escalaCenario(), matricula: c.matricula, dia, status: 'F', origem: 'auto',
         updated_at: new Date(), updated_by: currentUserProfile?.id || currentUser?.id || null,
       };
       inserts.push(registro);
@@ -3539,7 +3545,7 @@ async function escalaGerarFolgasAuto(grupoFiltro) {
         break;
       }
       const registro = {
-        base: window._escalaBase, mes: window._escalaMes, matricula: c.matricula, dia: escolhido, status: 'F', origem: 'auto',
+        base: window._escalaBase, mes: window._escalaMes, cenario: escalaCenario(), matricula: c.matricula, dia: escolhido, status: 'F', origem: 'auto',
         updated_at: new Date(), updated_by: currentUserProfile?.id || currentUser?.id || null,
       };
       inserts.push(registro);
@@ -3565,7 +3571,7 @@ async function escalaGerarFolgasAuto(grupoFiltro) {
   const domingo = escalaGarantirDomingoDeFolga(
     colabs, ano, mesNum, diasNoMes, escalaDiasCalc,
     (matricula, dia) => ({
-      base: window._escalaBase, mes: window._escalaMes, matricula, dia,
+      base: window._escalaBase, mes: window._escalaMes, cenario: escalaCenario(), matricula, dia,
       status: 'F', origem: 'auto',
       updated_at: new Date(), updated_by: currentUserProfile?.id || currentUser?.id || null,
     }));
@@ -3588,7 +3594,7 @@ async function escalaGerarFolgasAuto(grupoFiltro) {
   let salvos = 0;
   for (let i = 0; i < inserts.length; i += BATCH) {
     const lote = inserts.slice(i, i + BATCH);
-    const { error } = await db.from('escala_dia').upsert(lote, { onConflict: 'base,mes,matricula,dia' });
+    const { error } = await db.from('escala_dia').upsert(lote, { onConflict: 'base,mes,cenario,matricula,dia' });
     if (error) {
       escalaGradeAtualiza();
       escalaMsg(`Salvou ${salvos} de ${inserts.length} folga(s) — parou num lote com erro: ${error.message}. Rode "Gerar folgas automáticas" de novo pra completar o restante.`, true);
@@ -3873,6 +3879,44 @@ if (!window._escalaMenuFechaRegistrado) {
 // com o código puro. A importação confere tudo antes de gravar.
 // ══════════════════════════════════════════════════════
 
+// ══════════════════════════════════════════════════════
+// CENÁRIOS DE ESCALA
+//
+// Duas escalas paralelas pro mesmo base+mês:
+//   planejada    — a de sempre, montada a partir do mês anterior
+//   dimensionada — horários vindos do Gerador (dimensionamento da malha)
+//
+// A separação é um CAMPO nas tabelas, não tabelas novas. Assim gerador de
+// folgas, validação de regras, auditoria, Excel e tudo mais continuam
+// valendo pros dois — só precisam saber em qual cenário estão. Com tabelas
+// separadas, cada correção futura teria que ser feita duas vezes.
+// ══════════════════════════════════════════════════════
+
+const ESCALA_CENARIOS = [
+  { valor: 'planejada',    label: 'Planejada',    cor: '#00a0d2',
+    descricao: 'Escala montada a partir do histórico e do mês anterior' },
+  { valor: 'dimensionada', label: 'Dimensionada', cor: '#9f7aea',
+    descricao: 'Horários vindos do dimensionamento da malha (Gerador)' },
+];
+
+function escalaCenario() {
+  const v = window._escalaCenario;
+  return ESCALA_CENARIOS.some(c => c.valor === v) ? v : 'planejada';
+}
+
+function escalaCenarioInfo() {
+  return ESCALA_CENARIOS.find(c => c.valor === escalaCenario()) || ESCALA_CENARIOS[0];
+}
+
+async function escalaSetCenario(valor) {
+  if (valor === escalaCenario()) return;
+  window._escalaCenario = valor;
+  try { localStorage.setItem('gde_escala_cenario', valor); } catch (_) {}
+  // Cada cenário tem os próprios dados: recarrega do zero em vez de
+  // redesenhar por cima do que estava em memória.
+  await escalaRenderGrade(document.getElementById('page-content'));
+}
+
 const ESCALA_MARCADOR_ARQUIVO = '#ESCALA-ONLINE-V1';
 // Códigos que a pessoa pode digitar no Excel. 'L' fica de fora de
 // propósito: férias é derivado do cadastro do RH, não se edita aqui.
@@ -4135,10 +4179,10 @@ async function escalaAplicarImportacao(wb) {
     const LOTE = 200;
     const payloads = aGravar.map(({ chave, status }) => {
       const [matricula, dia] = chave.split('|');
-      return { base, mes, matricula, dia: Number(dia), status, origem: 'excel', updated_at: agora, updated_by: autor };
+      return { base, mes, cenario: escalaCenario(), matricula, dia: Number(dia), status, origem: 'excel', updated_at: agora, updated_by: autor };
     });
     for (let i = 0; i < payloads.length; i += LOTE) {
-      const { error } = await db.from('escala_dia').upsert(payloads.slice(i, i + LOTE), { onConflict: 'base,mes,matricula,dia' });
+      const { error } = await db.from('escala_dia').upsert(payloads.slice(i, i + LOTE), { onConflict: 'base,mes,cenario,matricula,dia' });
       if (error) throw new Error(error.message);
       escalaLoadingAtualiza(Math.min(i + LOTE, payloads.length), payloads.length + aApagar.length);
     }
@@ -4149,7 +4193,7 @@ async function escalaAplicarImportacao(wb) {
       for (const chave of bloco) {
         const [matricula, dia] = chave.split('|');
         const { error } = await db.from('escala_dia').delete()
-          .eq('base', base).eq('mes', mes).eq('matricula', matricula).eq('dia', Number(dia));
+          .eq('base', base).eq('mes', mes).eq('cenario', escalaCenario()).eq('matricula', matricula).eq('dia', Number(dia));
         if (error) throw new Error(error.message);
         window._escalaDias.delete(chave);
       }
@@ -4235,10 +4279,10 @@ async function escalaRecalcularSaidas() {
   const LOTE = 200;
   for (let i = 0; i < mudancas.length; i += LOTE) {
     const linhas = mudancas.slice(i, i + LOTE).map(m => ({
-      base: window._escalaBase, mes: window._escalaMes,
+      base: window._escalaBase, mes: window._escalaMes, cenario: escalaCenario(),
       matricula: m.c.matricula, nome: m.c.nome, saida_manual: m.para,
     }));
-    const { error } = await db.from('escala_colaborador').upsert(linhas, { onConflict: 'base,mes,matricula' });
+    const { error } = await db.from('escala_colaborador').upsert(linhas, { onConflict: 'base,mes,cenario,matricula' });
     if (error) { escalaMsg(escalaTraduzirErroBanco(error.message, 'Erro ao recalcular saídas'), true); return; }
   }
   mudancas.forEach(m => { m.c.saida_manual = m.para; });
@@ -4289,10 +4333,10 @@ async function escalaRemoverFeriasDoMes(matricula) {
   const agora = new Date();
   const autor = currentUserProfile?.id || currentUser?.id || null;
   const payloads = dias.map(dia => ({
-    base: window._escalaBase, mes: window._escalaMes, matricula, dia,
+    base: window._escalaBase, mes: window._escalaMes, cenario: escalaCenario(), matricula, dia,
     status: 'T', origem: 'excecao_ferias', updated_at: agora, updated_by: autor,
   }));
-  const { error } = await db.from('escala_dia').upsert(payloads, { onConflict: 'base,mes,matricula,dia' });
+  const { error } = await db.from('escala_dia').upsert(payloads, { onConflict: 'base,mes,cenario,matricula,dia' });
   if (error) { escalaMsg(escalaTraduzirErroBanco(error.message, 'Erro ao salvar a exceção de férias'), true); return; }
   payloads.forEach(p => window._escalaDias.set(`${p.matricula}|${p.dia}`, p));
   escalaGradeAtualiza();
@@ -4308,7 +4352,7 @@ async function escalaRestaurarFeriasDoMes(matricula) {
   if (!chaves.length) { escalaMsg('Não há exceção de férias pra esse colaborador nesse mês.', true); return; }
 
   const { error } = await db.from('escala_dia').delete()
-    .eq('base', window._escalaBase).eq('mes', window._escalaMes)
+    .eq('base', window._escalaBase).eq('mes', window._escalaMes).eq('cenario', escalaCenario())
     .eq('matricula', matricula).eq('status', 'T');
   if (error) { escalaMsg('Erro ao desfazer: ' + error.message, true); return; }
   chaves.forEach(k => window._escalaDias.delete(k));
@@ -4363,12 +4407,12 @@ async function escalaSalvarColabManual() {
   if (entrada && !/^\d{2}:\d{2}$/.test(entrada)) { escalaMsg('Entrada precisa estar no formato HH:MM.', true); return; }
 
   const linha = {
-    base: window._escalaBase, mes: window._escalaMes, matricula, nome,
+    base: window._escalaBase, mes: window._escalaMes, cenario: escalaCenario(), matricula, nome,
     funcao_manual: funcao, ch_manual: ch, fora_cadastro: true,
     entrada_manual: entrada || null,
     saida_manual: entrada ? escalaSaidaCalculada(entrada, ch) : null,
   };
-  const { error } = await db.from('escala_colaborador').upsert(linha, { onConflict: 'base,mes,matricula' });
+  const { error } = await db.from('escala_colaborador').upsert(linha, { onConflict: 'base,mes,cenario,matricula' });
   if (error) { escalaMsg(escalaTraduzirErroBanco(error.message, 'Erro ao cadastrar'), true); return; }
 
   // Espelha no cache de cadastro pra Função e CH aparecerem na grade sem
@@ -5260,7 +5304,7 @@ async function escalaCarregarHistoricoFA() {
   try {
     const { data, error } = await db.from('escala_dia')
       .select('matricula,dia')
-      .eq('base', base).eq('mes', mesAnterior).eq('status', 'FA');
+      .eq('base', base).eq('mes', mesAnterior).eq('cenario', escalaCenario()).eq('status', 'FA');
     if (error) throw new Error(error.message);
     const mapa = new Map();
     for (const r of (data || [])) {

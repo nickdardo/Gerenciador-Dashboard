@@ -4,7 +4,16 @@
 // reconhecível na volta — o risco real dessa funcionalidade.
 const fs = require('fs');
 const vm = require('vm');
-const XLSX = require('xlsx');
+// A ida e volta pro Excel precisa da mesma biblioteca que o painel usa no
+// navegador. Ela não vem no repositório — instale antes de rodar:
+//   npm install xlsx
+let XLSX;
+try {
+  XLSX = require('xlsx');
+} catch (_) {
+  console.log('PULADO  teste de Excel — rode "npm install xlsx" nesta pasta para executá-lo.');
+  process.exit(0);
+}
 
 const noop = () => {};
 let ultimaMensagem = null;
