@@ -1065,9 +1065,16 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaColunasSecundarias: fal
   sandbox.window._escalaCenario = 'inventado';
   ok('valor desconhecido cai no padrão em vez de quebrar a consulta',
     sandbox.escalaCenario() === 'planejada');
+  // Testa pelo acessor, não pela constante: `const` no topo do arquivo é
+  // binding léxico e não vira propriedade do global dentro do vm.
   sandbox.window._escalaCenario = 'planejada';
-  ok('cada cenário tem cor própria pra não editar o errado',
-    sandbox.ESCALA_CENARIOS[0].cor !== sandbox.ESCALA_CENARIOS[1].cor);
+  const infoPlanejada = sandbox.escalaCenarioInfo();
+  sandbox.window._escalaCenario = 'dimensionada';
+  const infoDim = sandbox.escalaCenarioInfo();
+  sandbox.window._escalaCenario = 'planejada';
+  ok('cada cenário tem rótulo e cor próprios pra não editar o errado',
+    infoPlanejada.cor !== infoDim.cor && infoPlanejada.label !== infoDim.label,
+    `${infoPlanejada.label}/${infoPlanejada.cor} vs ${infoDim.label}/${infoDim.cor}`);
 
   // O ponto crítico da migração: nenhuma consulta pode escapar do filtro,
   // senão um cenário lê ou apaga o dado do outro.
@@ -1096,6 +1103,125 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaColunasSecundarias: fal
     !/onConflict: 'base,mes,matricula/.test(fonte) && !/onConflict: 'base,mes'/.test(fonte));
 
   sandbox.window._escalaCenario = guardado;
+})();
+
+// ── Casamento pessoa ↔ posição do dimensionamento ──────────────────
+(function () {
+  const ok = (nome, cond, detalhe) => {
+    console.log(`${cond ? 'PASSOU' : 'FALHOU'}  ${nome}${detalhe ? ` · ${detalhe}` : ''}`);
+    tudoOk &= cond;
+  };
+  const guardadoColabs = sandbox.window._escalaColabs;
+  const guardadoEo = sandbox.window.eoColabs;
+  const guardadoFer = sandbox.window.eoFeriasAll;
+  sandbox.window.eoFeriasAll = [];
+
+  // 3 auxiliares de rampa CH 180 (6h/dia), entrando 05:00, 13:00 e 21:00.
+  const pessoas = [
+    { matricula: 'P1', nome: 'CEDO',  entrada_manual: '05:00' },
+    { matricula: 'P2', nome: 'TARDE', entrada_manual: '13:00' },
+    { matricula: 'P3', nome: 'NOITE', entrada_manual: '21:00' },
+  ];
+  sandbox.window._escalaColabs = pessoas;
+  sandbox.window.eoColabs = new Map(pessoas.map(p =>
+    [p.matricula, { nome: p.nome, funcao: 'AUXILIAR DE RAMPA I', ch: '180' }]));
+
+  // Dimensionamento com as MESMAS 3 faixas, em ordem embaralhada.
+  const vagas = [
+    { grupo: 'Auxiliar de Rampa', jornada: 6, entrada: '22:00', saida: '04:00' },
+    { grupo: 'Auxiliar de Rampa', jornada: 6, entrada: '06:00', saida: '12:00' },
+    { grupo: 'Auxiliar de Rampa', jornada: 6, entrada: '14:00', saida: '20:00' },
+  ];
+  const r = sandbox.escalaCasarVagasComPessoas(vagas, pessoas, 2026, 10, 31);
+  const de = (m) => r.atribuicoes.find(a => a.matricula === m);
+
+  ok('todo mundo recebeu posição', r.atribuicoes.length === 3);
+  ok('quem entra cedo continua cedo', de('P1').entrada === '06:00', de('P1').entrada);
+  ok('quem entra à tarde continua à tarde', de('P2').entrada === '14:00', de('P2').entrada);
+  ok('quem entra à noite continua à noite', de('P3').entrada === '22:00', de('P3').entrada);
+  ok('a ordem das vagas no arquivo não afeta o resultado',
+    de('P1').entrada < de('P2').entrada && de('P2').entrada < de('P3').entrada);
+  ok('sem descompasso quando os números batem',
+    r.vagasSobrando.size === 0 && r.pessoasSobrando.size === 0);
+
+  // Mais vagas que gente: sobra posição descoberta.
+  const r2 = sandbox.escalaCasarVagasComPessoas(
+    [...vagas, { grupo: 'Auxiliar de Rampa', jornada: 6, entrada: '10:00', saida: '16:00' }],
+    pessoas, 2026, 10, 31);
+  ok('posição sem ninguém é reportada', [...r2.vagasSobrando.values()][0] === 1);
+  ok('e ninguém fica sem horário por causa disso', r2.atribuicoes.length === 3);
+
+  // Mais gente que vaga: sobra pessoa sem posição.
+  const r3 = sandbox.escalaCasarVagasComPessoas(vagas.slice(0, 2), pessoas, 2026, 10, 31);
+  ok('pessoa sem posição é reportada', [...r3.pessoasSobrando.values()][0] === 1);
+  ok('quem sobra não recebe horário inventado', r3.atribuicoes.length === 2);
+
+  // Jornada diferente não se mistura: CH 210 (7h) não pega vaga de 6h.
+  sandbox.window.eoColabs.set('P1', { nome: 'CEDO', funcao: 'AUXILIAR DE RAMPA I', ch: '210' });
+  const r4 = sandbox.escalaCasarVagasComPessoas(vagas, pessoas, 2026, 10, 31);
+  ok('jornada de 7h não ocupa vaga de 6h',
+    !r4.atribuicoes.some(a => a.matricula === 'P1'), `${r4.atribuicoes.length} atribuições`);
+  sandbox.window.eoColabs.set('P1', { nome: 'CEDO', funcao: 'AUXILIAR DE RAMPA I', ch: '180' });
+
+  // Grupo diferente também não se mistura.
+  const r5 = sandbox.escalaCasarVagasComPessoas(
+    [{ grupo: 'Limpeza', jornada: 6, entrada: '06:00', saida: '12:00' }], pessoas, 2026, 10, 31);
+  ok('vaga de outro grupo não é preenchida por rampa',
+    r5.atribuicoes.length === 0 && r5.vagasSobrando.size === 1);
+
+  // Carga do dimensionamento vem como "6H"/"3H".
+  ok('carga "6H" vira jornada 6', sandbox.escalaChDiariaDaPosicao('6H') === 6);
+  ok('carga "3h" vira jornada 3', sandbox.escalaChDiariaDaPosicao('3h') === 3);
+  ok('carga vazia não vira zero silencioso', sandbox.escalaChDiariaDaPosicao('') === null);
+
+  sandbox.window._escalaColabs = guardadoColabs;
+  sandbox.window.eoColabs = guardadoEo;
+  sandbox.window.eoFeriasAll = guardadoFer;
+})();
+
+// ── Vocabulário do dimensionamento → grupos da escala ──────────────
+// As onze funções que aparecem no arquivo de BEL, confirmadas com o
+// cliente. Se alguma parar de mapear, o painel grava horário no grupo
+// errado — daí o teste caso a caso.
+(function () {
+  const ok = (nome, cond, detalhe) => {
+    console.log(`${cond ? 'PASSOU' : 'FALHOU'}  ${nome}${detalhe ? ` · ${detalhe}` : ''}`);
+    tudoOk &= cond;
+  };
+  const g = (f) => sandbox.escalaGrupoDaFuncaoDim(f);
+
+  const esperado = {
+    'ASA':            'Auxiliar de Rampa',
+    'AGENTE PAX':     'PAX',
+    'LIDER PAX':      'PAX',
+    'AUX. LIDER':     'Auxiliar Líder',
+    'LIDER OP.':      'Líder de Operações',
+    'SUPERVISOR OP.': 'Supervisores',
+    'ASG LIMPEZA':    'Limpeza',
+    'ASG LIMPEZAII':  'Limpeza',
+    'ENC. LIMPEZA':   'Limpeza',
+    'OPERADOR':       'Operadores',
+  };
+  Object.entries(esperado).forEach(([f, grupo]) =>
+    ok(`"${f}" vai para ${grupo}`, g(f) === grupo, g(f) || 'nulo'));
+
+  // A ordem das regras é o que sustenta os dois casos abaixo.
+  ok('LIDER PAX é PAX, não Líder de Operações', g('LIDER PAX') !== 'Líder de Operações');
+  ok('AUX. LIDER é Auxiliar Líder, não Líder de Operações',
+    g('AUX. LIDER') !== 'Líder de Operações');
+
+  // Não reconhecido tem que PERGUNTAR, não chutar Administração e gravar
+  // horário de gente em cima de um palpite.
+  ok('função desconhecida devolve nulo pra tela perguntar',
+    g('APRENDIZ LOG') === null && g('XPTO') === null);
+  ok('vazio não vira grupo', g('') === null && g(null) === null);
+
+  // "ASA" tem que ser palavra inteira.
+  ok('ASA só casa como palavra inteira', g('CASA DE APOIO') !== 'Auxiliar de Rampa');
+
+  // Acento e caixa não podem atrapalhar.
+  ok('funciona com acento e minúscula',
+    g('supervisor op.') === 'Supervisores' && g('ENC. LIMPÉZA') === 'Limpeza');
 })();
 
 process.exit(tudoOk ? 0 : 1);

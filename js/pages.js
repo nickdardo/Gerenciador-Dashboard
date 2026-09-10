@@ -425,6 +425,12 @@ async function genGoEscala() {
   window._genRows = gRows;
   window._genBase = gBase;
   window._genMes  = mes;
+  // O dimensionamento alimenta a escala DIMENSIONADA, não a planejada —
+  // vir do Gerador e cair na planejada era o caminho errado por padrão.
+  window._escalaCenario = 'dimensionada';
+  try { localStorage.setItem('gde_escala_cenario', 'dimensionada'); } catch (_) {}
+  // Sinaliza pra Escala aplicar os horários assim que abrir.
+  window._escalaAplicarDimAoAbrir = true;
   navigateTo('escala');
 }
 

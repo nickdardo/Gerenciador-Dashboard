@@ -628,6 +628,13 @@ async function escalaRenderGrade(el) {
   // anterior a consultar.
   await escalaCarregarHistoricoFA();
 
+  // Veio do Gerador clicando em "Escala Online": aplica os horários assim
+  // que a grade abrir, sem exigir um segundo clique num menu.
+  if (window._escalaAplicarDimAoAbrir && escalaCenario() === 'dimensionada') {
+    window._escalaAplicarDimAoAbrir = false;
+    setTimeout(() => escalaAplicarDimensionamento(true), 400);
+  }
+
   const [{ data: colabsIniciais }, dias, { data: travaRow }] = await Promise.all([
     db.from('escala_colaborador').select('*').eq('base', base).eq('mes', mes).eq('cenario', escalaCenario()).order('created_at'),
     escalaFetchDias(base, mes),
@@ -815,6 +822,9 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
             ${escalaMenuItem('printer', 'Imprimir / PDF', 'escalaImprimir()')}
             ${escalaMenuDivisor()}
             ${escalaMenuSecao('Horários e férias')}
+            ${escalaCenario() === 'dimensionada'
+              ? escalaMenuItem('zap', 'Aplicar dimensionamento (horários)', 'escalaAplicarDimensionamento()', travada)
+              : ''}
             ${escalaMenuItem('clock', 'Recalcular saídas pela CH', 'escalaRecalcularSaidas()', travada)}
             ${escalaMenuItem('history', 'Recarregar férias do sistema', 'escalaRecarregarFerias()')}
             ${escalaMenuItem('alert', 'Diagnosticar férias do mês', 'escalaDiagnosticoFerias()')}
@@ -5352,4 +5362,314 @@ function escalaTraduzirErroBanco(mensagem, contexto) {
     return 'Sem conexão com o banco. Verifique a internet e tente de novo — nada foi gravado.';
   }
   return `${contexto || 'Erro ao salvar'}: ${m}`;
+}
+
+// ══════════════════════════════════════════════════════
+// APLICAR DIMENSIONAMENTO À ESCALA DIMENSIONADA
+//
+// O Gerador grava as POSIÇÕES em escala_dimensionamento (função, CH,
+// entrada, saída, quantidade). Virar escala é casar cada posição com uma
+// pessoa de verdade.
+//
+// O obstáculo é que os nomes de função do dimensionamento não são os do
+// cadastro: o arquivo diz "ASA", "AGENTE PAX", "AUX. LIDER"; o RH diz
+// "AUXILIAR DE RAMPA I", "AGENTE SERV A PASSAGEIRO I", "AUX.LIDER DE
+// RAMPA I". Quatro das onze funções caem no grupo errado se deixar o
+// agrupador automático decidir — e "ASA" não dá pra deduzir de jeito
+// nenhum. Por isso existe o mapeamento confirmado pelo usuário, guardado
+// por base e reaproveitado nas próximas vezes.
+// ══════════════════════════════════════════════════════
+
+// Vocabulário do arquivo de dimensionamento → grupos da escala.
+// É um dicionário separado do escalaGrupoDaFuncao porque as duas fontes
+// falam línguas diferentes: o RH escreve "AUXILIAR DE RAMPA I", o
+// dimensionamento escreve "ASA". Confirmado com o cliente.
+//
+// A ORDEM das regras importa. "LIDER PAX" tem que cair em PAX antes de
+// bater na regra de líder, e "AUX. LIDER" tem que cair em Auxiliar Líder
+// antes de bater na regra de líder genérico.
+function escalaGrupoDaFuncaoDim(funcaoRaw) {
+  const f = String(funcaoRaw || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  if (!f) return null;
+
+  // ASA = Auxiliar de Rampa. Palavra inteira, pra não pegar "ASA" dentro
+  // de outra coisa.
+  if (/\bASA\b/.test(f)) return 'Auxiliar de Rampa';
+
+  // Tudo de passageiro é PAX — inclusive o líder de PAX.
+  if (f.includes('PAX') || f.includes('PASSAGEIRO')) return 'PAX';
+
+  // ASG e qualquer coisa de limpeza (inclusive encarregado).
+  if (/\bASG\b/.test(f) || f.includes('LIMPEZA')) return 'Limpeza';
+
+  if (f.includes('SUPERVISOR')) return 'Supervisores';
+
+  // Auxiliar líder (de rampa) antes do líder genérico.
+  if (f.includes('LIDER') && (/\bAUX\b/.test(f) || f.includes('AUXILIAR') || f.includes('RAMPA'))) return 'Auxiliar Líder';
+  if (f.includes('LIDER')) return 'Líder de Operações';
+
+  if (f.includes('OPERADOR')) return 'Operadores';
+
+  // Não reconhecido: devolve null pra tela de mapeamento perguntar em vez
+  // de chutar "Administração" e gravar horário errado em cima disso.
+  return null;
+}
+
+function escalaChaveMapaDim(base) { return `gde_dim_mapa_${base}`; }
+
+function escalaCarregarMapaDim(base) {
+  try { return JSON.parse(localStorage.getItem(escalaChaveMapaDim(base)) || '{}'); }
+  catch (_) { return {}; }
+}
+function escalaSalvarMapaDim(base, mapa) {
+  try { localStorage.setItem(escalaChaveMapaDim(base), JSON.stringify(mapa)); } catch (_) {}
+}
+
+// Normaliza CH pra comparar ("6H", "6h", 6, "180" mensal).
+function escalaChDiariaDaPosicao(carga) {
+  const n = parseInt(String(carga || '').replace(/\D/g, ''), 10);
+  if (!n) return null;
+  return n <= 12 ? n : null; // no dimensionamento a carga é diária (3H, 4H, 6H, 7H)
+}
+
+// CH mensal do colaborador → jornada diária, pela mesma tabela de regras
+// que governa folgas e saída.
+function escalaJornadaDoColab(matricula, c) {
+  const ch = window.eoColabs?.get(matricula)?.ch || c?.ch_manual;
+  const regra = ESCALA_CH_REGRAS[parseInt(String(ch || '').replace(/\D/g, ''), 10)];
+  return regra ? regra.jornadaDiaria : null;
+}
+
+async function escalaAplicarDimensionamento(silencioso) {
+  if (escalaCenario() !== 'dimensionada') {
+    escalaMsg('O dimensionamento só se aplica à Escala Dimensionada. Troque o cenário no topo.', true);
+    return;
+  }
+  if (escalaVerificarTravada()) return;
+
+  const base = window._escalaBase, mes = window._escalaMes;
+  const { data: posicoes, error } = await db.from('escala_dimensionamento')
+    .select('funcao,entrada,saida,carga,qtd,setor').eq('base', base).eq('mes', mes);
+  if (error) { escalaMsg(escalaTraduzirErroBanco(error.message, 'Erro ao ler o dimensionamento'), true); return; }
+  if (!posicoes || !posicoes.length) {
+    if (!silencioso) escalaMsg(`Não há dimensionamento salvo para ${base} em ${mes}. Suba o arquivo no Gerador e clique em "Escala Online".`, true);
+    return;
+  }
+
+  // ── Mapeamento função do dimensionamento → grupo da escala ──────
+  const funcoesDim = [...new Set(posicoes.map(p => p.funcao))].sort();
+  const mapa = escalaCarregarMapaDim(base);
+  const pendentes = funcoesDim.filter(f => !mapa[f]);
+  if (pendentes.length) {
+    escalaAbrirMapeamentoDim(base, funcoesDim, mapa, posicoes);
+    return;
+  }
+
+  await escalaExecutarAplicacaoDim(posicoes, mapa);
+}
+
+// Tela de mapeamento. Aparece só quando há função sem correspondência
+// definida — depois disso a escolha fica salva e não incomoda mais.
+function escalaAbrirMapeamentoDim(base, funcoesDim, mapa, posicoes) {
+  const gruposDisponiveis = [...new Set((window._escalaColabs || []).map(c => escalaFuncaoGrupoDoColab(c).label))];
+  const todosGrupos = gruposDisponiveis.length ? gruposDisponiveis : ESCALA_GRUPOS;
+
+  const contagem = new Map();
+  posicoes.forEach(p => contagem.set(p.funcao, (contagem.get(p.funcao) || 0) + (p.qtd || 1)));
+
+  const linhas = funcoesDim.map(f => {
+    const sugerido = mapa[f] || escalaGrupoDaFuncaoDim(f);
+    const confiavel = !!sugerido && todosGrupos.includes(sugerido);
+    return `<tr>
+      <td style="padding:7px 10px;color:var(--text-primary);font-weight:600">${escalaEscapeAttr(f)}</td>
+      <td style="padding:7px 10px;color:var(--text-muted);text-align:center">${contagem.get(f) || 0}</td>
+      <td style="padding:7px 10px">
+        <select data-dim-func="${escalaEscapeAttr(f)}" class="adh-month-select" style="width:100%">
+          <option value="">— escolha o grupo —</option>
+          ${todosGrupos.map(g => `<option value="${escalaEscapeAttr(g)}" ${g === sugerido && confiavel ? 'selected' : ''}>${g}</option>`).join('')}
+          <option value="__ignorar__">Ignorar esta função</option>
+        </select>
+      </td>
+      <td style="padding:7px 10px;font-size:10.5px;color:${confiavel ? '#5fa87a' : 'var(--amber)'}">
+        ${confiavel ? 'sugerido automaticamente' : 'não consegui deduzir — confirme'}
+      </td>
+    </tr>`;
+  }).join('');
+
+  const html = `
+    <div id="escala-modal-dim" style="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;display:flex;align-items:center;justify-content:center;padding:32px">
+      <div style="background:var(--bg-surface);border:1px solid var(--border-strong);border-radius:12px;max-width:820px;width:100%;max-height:86vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.55)">
+        <div style="padding:18px 22px;border-bottom:1px solid var(--border)">
+          <h2 style="margin:0;font-size:17px;font-weight:700">De qual grupo é cada função do dimensionamento?</h2>
+          <p style="margin:6px 0 0;font-size:12px;color:var(--text-secondary);line-height:1.5">
+            O arquivo de dimensionamento usa nomes próprios (ASA, AGENTE PAX, AUX. LIDER) que não são os do
+            cadastro do RH. Diga uma vez a que grupo cada um corresponde — fica salvo para ${escalaEscapeAttr(base)}
+            e não será perguntado de novo.
+          </p>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:12.5px">
+          <thead><tr style="background:var(--bg-hover)">
+            <th style="padding:8px 10px;text-align:left;font-size:10.5px;color:var(--text-muted);text-transform:uppercase">Função no dimensionamento</th>
+            <th style="padding:8px 10px;text-align:center;font-size:10.5px;color:var(--text-muted);text-transform:uppercase">Posições</th>
+            <th style="padding:8px 10px;text-align:left;font-size:10.5px;color:var(--text-muted);text-transform:uppercase">Grupo na escala</th>
+            <th style="padding:8px 10px;text-align:left;font-size:10.5px;color:var(--text-muted);text-transform:uppercase"></th>
+          </tr></thead>
+          <tbody>${linhas}</tbody>
+        </table>
+        <div style="padding:16px 22px;border-top:1px solid var(--border);display:flex;gap:10px;justify-content:flex-end">
+          <button class="adh-refresh-btn" onclick="document.getElementById('escala-modal-dim').remove()">Cancelar</button>
+          <button class="adh-refresh-btn" style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600"
+            onclick="escalaConfirmarMapeamentoDim('${escalaEscapeAttr(base)}')">Salvar e aplicar</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+  window._escalaPosicoesDim = posicoes;
+}
+
+async function escalaConfirmarMapeamentoDim(base) {
+  const mapa = {};
+  let faltando = 0;
+  document.querySelectorAll('[data-dim-func]').forEach(sel => {
+    if (!sel.value) { faltando++; return; }
+    mapa[sel.dataset.dimFunc] = sel.value;
+  });
+  if (faltando) { alert(`Faltam ${faltando} função(ões) sem grupo definido. Escolha um grupo ou marque "Ignorar esta função".`); return; }
+
+  escalaSalvarMapaDim(base, mapa);
+  document.getElementById('escala-modal-dim')?.remove();
+  await escalaExecutarAplicacaoDim(window._escalaPosicoesDim || [], mapa);
+}
+
+// Casa posições com pessoas e grava os horários. Sem folgas: o cenário
+// dimensionado nasce só com os horários, e as folgas são geradas depois
+// pelo mesmo botão da escala planejada.
+async function escalaExecutarAplicacaoDim(posicoes, mapa) {
+  const base = window._escalaBase, mes = window._escalaMes;
+  const [ano, mesNum] = mes.split('-').map(Number);
+  const diasNoMes = new Date(ano, mesNum, 0).getDate();
+
+  let colabs = window._escalaColabs || [];
+  if (!colabs.length) {
+    escalaMsg('A Escala Dimensionada está vazia. Use "Preencher com Staff" primeiro — o dimensionamento define horários, não quem entra na escala.', true);
+    return;
+  }
+
+  // ── Expande as posições: qtd 8 vira 8 vagas ─────────────────────
+  const vagas = [];
+  posicoes.forEach(p => {
+    const grupo = mapa[p.funcao];
+    if (!grupo || grupo === '__ignorar__') return;
+    const jornada = escalaChDiariaDaPosicao(p.carga);
+    for (let i = 0; i < (p.qtd || 1); i++) {
+      vagas.push({ grupo, jornada, entrada: p.entrada, saida: p.saida, funcaoDim: p.funcao });
+    }
+  });
+
+  const resultado = escalaCasarVagasComPessoas(vagas, colabs, ano, mesNum, diasNoMes);
+
+  // ── Confirmação com o retrato do descompasso ────────────────────
+  const linhasGap = [];
+  for (const [chave, n] of resultado.vagasSobrando) {
+    linhasGap.push(`   ${chave}: ${n} posição(ões) sem ninguém`);
+  }
+  for (const [chave, n] of resultado.pessoasSobrando) {
+    linhasGap.push(`   ${chave}: ${n} pessoa(s) sem posição`);
+  }
+
+  const resumo = [
+    `APLICAR DIMENSIONAMENTO — ${base} · ${mes}`,
+    ``,
+    `${vagas.length} posição(ões) no dimensionamento`,
+    `${colabs.length} colaborador(es) na escala`,
+    `${resultado.atribuicoes.length} horário(s) serão gravados`,
+  ];
+  if (linhasGap.length) {
+    resumo.push(``, `DESCOMPASSO entre a malha e o efetivo:`, ...linhasGap.slice(0, 15));
+    if (linhasGap.length > 15) resumo.push(`   ...e mais ${linhasGap.length - 15}`);
+  } else {
+    resumo.push(``, `Efetivo e dimensionamento batem exatamente.`);
+  }
+  resumo.push(``, `Quem ficar sem posição mantém o horário atual.`, ``, `Confirma?`);
+
+  if (!confirm(resumo.join('\n'))) { escalaMsg('Aplicação cancelada — nada foi alterado.'); return; }
+
+  // ── Gravação ────────────────────────────────────────────────────
+  escalaMostrarLoading('Aplicando horários do dimensionamento...');
+  try {
+    const linhas = resultado.atribuicoes.map(a => ({
+      base, mes, cenario: escalaCenario(), matricula: a.matricula, nome: a.nome,
+      entrada_manual: a.entrada, saida_manual: a.saida,
+    }));
+    const LOTE = 200;
+    for (let i = 0; i < linhas.length; i += LOTE) {
+      const { error } = await db.from('escala_colaborador')
+        .upsert(linhas.slice(i, i + LOTE), { onConflict: 'base,mes,cenario,matricula' });
+      if (error) throw new Error(error.message);
+      escalaLoadingAtualiza(Math.min(i + LOTE, linhas.length), linhas.length);
+    }
+    resultado.atribuicoes.forEach(a => {
+      const c = colabs.find(x => x.matricula === a.matricula);
+      if (c) { c.entrada_manual = a.entrada; c.saida_manual = a.saida; }
+    });
+
+    escalaGradeAtualiza();
+    escalaMsg(`${resultado.atribuicoes.length} horário(s) aplicados do dimensionamento.`
+      + (linhasGap.length ? ` ${linhasGap.length} descompasso(s) entre malha e efetivo — veja no console.` : ''),
+      linhasGap.length ? 'aviso' : 'ok');
+    if (linhasGap.length) console.log(['[escala/dimensionamento] descompasso:', ...linhasGap].join('\n'));
+  } catch (err) {
+    escalaGradeAtualiza();
+    escalaMsg(escalaTraduzirErroBanco(err.message, 'Erro ao aplicar dimensionamento'), true);
+  }
+}
+
+// O casamento em si. Dentro de cada grupo + jornada diária, ordena vagas e
+// pessoas pelo horário de entrada e emparelha em ordem.
+//
+// Ordenar os dois lados e parear em sequência é o que MINIMIZA o
+// deslocamento total (resultado clássico de emparelhamento em uma
+// dimensão com custo monótono). Na prática: quem já entra cedo continua
+// cedo, quem entra tarde continua tarde, e o que aparecer diferente é
+// diferença real de dimensionamento — não embaralhamento.
+function escalaCasarVagasComPessoas(vagas, colabs, ano, mesNum, diasNoMes) {
+  const chaveDe = (grupo, jornada) => `${grupo} · ${jornada || '?'}h/dia`;
+
+  const vagasPorChave = new Map();
+  vagas.forEach(v => {
+    const k = chaveDe(v.grupo, v.jornada);
+    if (!vagasPorChave.has(k)) vagasPorChave.set(k, []);
+    vagasPorChave.get(k).push(v);
+  });
+
+  const pessoasPorChave = new Map();
+  colabs.forEach(c => {
+    const grupo = escalaFuncaoGrupoDoColab(c).label;
+    const jornada = escalaJornadaDoColab(c.matricula, c);
+    const k = chaveDe(grupo, jornada);
+    if (!pessoasPorChave.has(k)) pessoasPorChave.set(k, []);
+    pessoasPorChave.get(k).push({
+      matricula: c.matricula, nome: c.nome,
+      entradaAtual: escalaEntradaEfetivaDoColab(c, ano, mesNum, diasNoMes) || '',
+    });
+  });
+
+  const minutos = (h) => escalaMinutosDeHora(h) ?? 9999;
+  const atribuicoes = [];
+  const vagasSobrando = new Map();
+  const pessoasSobrando = new Map();
+
+  const chaves = new Set([...vagasPorChave.keys(), ...pessoasPorChave.keys()]);
+  for (const k of chaves) {
+    const v = (vagasPorChave.get(k) || []).slice().sort((a, b) => minutos(a.entrada) - minutos(b.entrada));
+    const p = (pessoasPorChave.get(k) || []).slice().sort((a, b) => minutos(a.entradaAtual) - minutos(b.entradaAtual));
+
+    const n = Math.min(v.length, p.length);
+    for (let i = 0; i < n; i++) {
+      atribuicoes.push({ matricula: p[i].matricula, nome: p[i].nome, entrada: v[i].entrada, saida: v[i].saida });
+    }
+    if (v.length > n) vagasSobrando.set(k, v.length - n);
+    if (p.length > n) pessoasSobrando.set(k, p.length - n);
+  }
+  return { atribuicoes, vagasSobrando, pessoasSobrando };
 }
