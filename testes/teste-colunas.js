@@ -1210,10 +1210,30 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaColunasSecundarias: fal
   ok('AUX. LIDER é Auxiliar Líder, não Líder de Operações',
     g('AUX. LIDER') !== 'Líder de Operações');
 
+  ok('"APRENDIZ LOG" vai para Auxiliar de Rampa', g('APRENDIZ LOG') === 'Auxiliar de Rampa', g('APRENDIZ LOG'));
+
   // Não reconhecido tem que PERGUNTAR, não chutar Administração e gravar
   // horário de gente em cima de um palpite.
-  ok('função desconhecida devolve nulo pra tela perguntar',
-    g('APRENDIZ LOG') === null && g('XPTO') === null);
+  ok('função desconhecida devolve nulo pra tela perguntar', g('XPTO') === null);
+
+  // ── Os dois lados TÊM que concordar ───────────────────────────────
+  // Se o dimensionamento manda a posição pra um grupo e o cadastro manda a
+  // pessoa pra outro, o casamento acusa vaga descoberta com gente sobrando
+  // do lado — e ninguém entende por quê.
+  const gc = (f) => sandbox.escalaGrupoDaFuncao(f);
+  ok('aprendiz de logística é rampa também no cadastro',
+    gc('APRENDIZ LOGISTICA I') === 'Auxiliar de Rampa' &&
+    gc('APRENDIZ LEGAL LOGI') === 'Auxiliar de Rampa');
+  ok('aprendiz administrativo NÃO vira rampa',
+    gc('APRENDIZ LEGAL ADM I') === 'Administração', gc('APRENDIZ LEGAL ADM I'));
+  ok('dimensionamento e cadastro concordam sobre o aprendiz de logística',
+    g('APRENDIZ LOG') === gc('APRENDIZ LOGISTICA I'));
+  ok('e concordam sobre rampa em geral',
+    g('ASA') === gc('AUXILIAR DE RAMPA I'));
+  ok('e sobre PAX', g('AGENTE PAX') === gc('AGENTE SERV A PASSAGEIRO I'));
+  ok('e sobre auxiliar líder', g('AUX. LIDER') === gc('AUX.LIDER DE RAMPA I'));
+  ok('e sobre limpeza', g('ASG LIMPEZA') === gc('ASG LIMPEZA I'));
+  ok('e sobre supervisão', g('SUPERVISOR OP.') === gc('SUPERVISOR DE OPERACOES I'));
   ok('vazio não vira grupo', g('') === null && g(null) === null);
 
   // "ASA" tem que ser palavra inteira.
@@ -1222,6 +1242,57 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaColunasSecundarias: fal
   // Acento e caixa não podem atrapalhar.
   ok('funciona com acento e minúscula',
     g('supervisor op.') === 'Supervisores' && g('ENC. LIMPÉZA') === 'Limpeza');
+})();
+
+// ── Comparação Planejada × Dimensionada ────────────────────────────
+(function () {
+  const ok = (nome, cond, detalhe) => {
+    console.log(`${cond ? 'PASSOU' : 'FALHOU'}  ${nome}${detalhe ? ` · ${detalhe}` : ''}`);
+    tudoOk &= cond;
+  };
+  const guardadoFer = sandbox.window.eoFeriasAll;
+  sandbox.window.eoFeriasAll = [];
+
+  const colabs = [
+    { matricula: 'C1', nome: 'UM' }, { matricula: 'C2', nome: 'DOIS' }, { matricula: 'C3', nome: 'TRES' },
+  ];
+
+  // Sem folga nenhuma: todo dia tem os três de pé.
+  const vazio = new Map();
+  const cov0 = sandbox.escalaCoberturaDoCenario(colabs, vazio, 2026, 10, 31);
+  ok('sem folgas, todos contam todo dia',
+    cov0.length === 31 && cov0.every(v => v === 3), `${cov0[0]}`);
+
+  // Cada status de ausência tira a pessoa do dia.
+  ['F', 'FA', 'J', 'CH'].forEach(st => {
+    const m = new Map([[`C1|5`, { status: st }]]);
+    ok(`${st} reduz a cobertura do dia`,
+      sandbox.escalaCoberturaDoCenario(colabs, m, 2026, 10, 31)[4] === 2);
+  });
+
+  // Curso continua sendo dia de trabalho.
+  ok('curso (K) não reduz a cobertura',
+    sandbox.escalaCoberturaDoCenario(colabs, new Map([[`C1|5`, { status: 'K' }]]), 2026, 10, 31)[4] === 3);
+
+  // Férias tiram, mas a exceção T devolve.
+  sandbox.window.eoFeriasAll = [{ matricula: 'C1', data_inicio: '2026-10-01', data_fim: '2026-10-31' }];
+  ok('férias reduzem a cobertura',
+    sandbox.escalaCoberturaDoCenario(colabs, vazio, 2026, 10, 31)[4] === 2);
+  ok('exceção T devolve a pessoa mesmo constando férias',
+    sandbox.escalaCoberturaDoCenario(colabs, new Map([[`C1|5`, { status: 'T' }]]), 2026, 10, 31)[4] === 3);
+  sandbox.window.eoFeriasAll = [];
+
+  // A comparação precisa medir os dois cenários com a MESMA régua —
+  // se a contagem divergisse entre eles, a diferença exibida seria falsa.
+  const planDias = new Map([[`C1|5`, { status: 'F' }]]);
+  const dimDias  = new Map([[`C2|5`, { status: 'F' }], [`C3|5`, { status: 'F' }]]);
+  const cp = sandbox.escalaCoberturaDoCenario(colabs, planDias, 2026, 10, 31);
+  const cd = sandbox.escalaCoberturaDoCenario(colabs, dimDias, 2026, 10, 31);
+  ok('cenários com folgas diferentes dão coberturas diferentes',
+    cp[4] === 2 && cd[4] === 1, `plan=${cp[4]} dim=${cd[4]}`);
+  ok('e iguais fora do dia alterado', cp[0] === cd[0] && cp[0] === 3);
+
+  sandbox.window.eoFeriasAll = guardadoFer;
 })();
 
 process.exit(tudoOk ? 0 : 1);

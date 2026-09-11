@@ -630,6 +630,8 @@ async function escalaRenderGrade(el) {
 
   // Veio do Gerador clicando em "Escala Online": aplica os horários assim
   // que a grade abrir, sem exigir um segundo clique num menu.
+  escalaAtualizarBotaoComparar();
+
   if (window._escalaAplicarDimAoAbrir && escalaCenario() === 'dimensionada') {
     window._escalaAplicarDimAoAbrir = false;
     setTimeout(() => escalaAplicarDimensionamento(true), 400);
@@ -775,6 +777,15 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
           style="border-color:${escalaCenarioInfo().cor}66;color:${escalaCenarioInfo().cor};font-weight:600">
           ${ESCALA_CENARIOS.map(c => `<option value="${c.valor}" ${escalaCenario()===c.valor?'selected':''}>Escala ${c.label}</option>`).join('')}
         </select>
+        <button class="adh-refresh-btn" id="escala-btn-comparar" style="display:none;border-color:#9f7aea66;color:#b794f4"
+          onclick="escalaIrParaComparador()"
+          title="Compara a escala Planejada com a Dimensionada — cobertura por dia, distribuição por turno e quem muda de horário">
+          ${escalaIcone('barChart')}Comparar escalas
+        </button>
+        <button class="adh-refresh-btn" onclick="escalaCompararCenarios()"
+          title="Compara a escala Planejada com a Dimensionada — cobertura por dia, efetivo por turno e quem mudou de horário">
+          ${escalaIcone('barChart')}Comparar
+        </button>
         <button class="adh-refresh-btn" style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600" onclick="escalaToggleVoosPanel()">${escalaIcone('plane')}Voos &amp; demanda</button>
         ${travaBtnHTML}
       </div>
@@ -803,6 +814,18 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
         <button class="adh-refresh-btn" ${dis} style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600" onclick="escalaGerarFolgasAuto()">${escalaIcone('zap')}Gerar folgas automáticas</button>
         <button class="adh-refresh-btn" ${dis} onclick="escalaPreencherTodoStaff()">${escalaIcone('users')}Preencher com Staff</button>
         <button class="adh-refresh-btn" ${dis} onclick="escalaPreencherHorarioMesAnterior()">${escalaIcone('calclock')}Horário do mês anterior</button>
+        ${escalaCenario() === 'dimensionada' ? `
+        <button class="adh-refresh-btn" ${dis} style="background:rgba(159,122,234,.14);border-color:rgba(159,122,234,.45);color:#b794f4;font-weight:600"
+          onclick="escalaAplicarDimensionamento()"
+          title="Puxa os horários e as cargas do dimensionamento salvo no Gerador para esta escala">
+          ${escalaIcone('zap')}Aplicar horário Dimensionamento
+        </button>` : ''}
+        ${escalaCenario() === 'dimensionada' ? `
+        <button class="adh-refresh-btn" ${dis} style="border-color:#9f7aea66;color:#b794f4"
+          onclick="escalaAplicarDimensionamento()"
+          title="Traz os horários e as CH do último dimensionamento salvo para esta base e mês">
+          ${escalaIcone('zap')}Aplicar horário Dimensionamento
+        </button>` : ''}
         <button id="escala-btn-remover-sel" class="adh-refresh-btn" ${dis} style="color:#fc8181;display:none" onclick="escalaRemoverSelecionados()">${escalaIcone('trash')}Remover selecionados (0)</button>
 
         <div style="flex:1 1 auto"></div>
@@ -822,9 +845,6 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
             ${escalaMenuItem('printer', 'Imprimir / PDF', 'escalaImprimir()')}
             ${escalaMenuDivisor()}
             ${escalaMenuSecao('Horários e férias')}
-            ${escalaCenario() === 'dimensionada'
-              ? escalaMenuItem('zap', 'Aplicar dimensionamento (horários)', 'escalaAplicarDimensionamento()', travada)
-              : ''}
             ${escalaMenuItem('clock', 'Recalcular saídas pela CH', 'escalaRecalcularSaidas()', travada)}
             ${escalaMenuItem('history', 'Recarregar férias do sistema', 'escalaRecarregarFerias()')}
             ${escalaMenuItem('alert', 'Diagnosticar férias do mês', 'escalaDiagnosticoFerias()')}
@@ -1322,6 +1342,13 @@ function escalaGrupoDaFuncao(funcaoRaw) {
   if (f.includes('SUPERVISOR')) return 'Supervisores';
   if (f.includes('LIDER') && f.includes('RAMPA')) return 'Auxiliar Líder'; // AUX.LIDER DE RAMPA
   if (f.includes('AUXILIAR') && f.includes('RAMPA')) return 'Auxiliar de Rampa';
+  // Aprendiz de LOGÍSTICA é rampa (confirmado com o cliente). O de
+  // administrativo não: "APRENDIZ LEGAL ADM" segue em Administração. Por
+  // isso a regra exige LOG, não só APRENDIZ.
+  // Esta regra tem que existir dos DOIS lados — cadastro e dimensionamento
+  // — senão as posições vão pra um grupo e as pessoas pra outro, e o
+  // casamento acusa vaga descoberta com gente sobrando ao lado.
+  if (f.includes('APRENDIZ') && f.includes('LOG')) return 'Auxiliar de Rampa';
   if (f.includes('LIDER')) return 'Líder de Operações';
   if (f.includes('OPERADOR')) return 'Operadores';
   if (f.includes('MECANIC') || f.includes('MANUTEN') || f.includes('SERRALHEIRO') || f.includes('PINTOR') || f.includes('ELETRIC')) return 'GSE';
@@ -5410,6 +5437,9 @@ function escalaGrupoDaFuncaoDim(funcaoRaw) {
 
   if (f.includes('OPERADOR')) return 'Operadores';
 
+  // APRENDIZ LOG = aprendiz de logística = rampa. Mesma regra do cadastro.
+  if (f.includes('APRENDIZ') && f.includes('LOG')) return 'Auxiliar de Rampa';
+
   // Não reconhecido: devolve null pra tela de mapeamento perguntar em vez
   // de chutar "Administração" e gravar horário errado em cima disso.
   return null;
@@ -5672,4 +5702,236 @@ function escalaCasarVagasComPessoas(vagas, colabs, ano, mesNum, diasNoMes) {
     if (p.length > n) pessoasSobrando.set(k, p.length - n);
   }
   return { atribuicoes, vagasSobrando, pessoasSobrando };
+}
+
+// O botão "Comparar" só faz sentido quando existem os DOIS cenários com
+// gente dentro — comparar contra vazio não diz nada. Por isso ele nasce
+// escondido e aparece depois da checagem.
+async function escalaAtualizarBotaoComparar() {
+  const btn = document.getElementById('escala-btn-comparar');
+  if (!btn) return;
+  try {
+    const { count } = await db.from('escala_colaborador')
+      .select('matricula', { count: 'exact', head: true })
+      .eq('base', window._escalaBase).eq('mes', window._escalaMes)
+      .eq('cenario', escalaCenario() === 'planejada' ? 'dimensionada' : 'planejada');
+    const temOutro = (count || 0) > 0;
+    const temEste = (window._escalaColabs || []).length > 0;
+    btn.style.display = (temOutro && temEste) ? '' : 'none';
+  } catch (_) { btn.style.display = 'none'; }
+}
+
+function escalaIrParaComparador() {
+  window._cmpBase = window._escalaBase;
+  window._cmpMes = window._escalaMes;
+  navigateTo('comparador');
+}
+
+// ══════════════════════════════════════════════════════
+// COMPARADOR — Planejada × Dimensionada
+//
+// A Planejada é o que a base realmente vai rodar, com as particularidades
+// que só quem está lá conhece. A Dimensionada é o que a malha pede. A
+// comparação não existe pra dizer qual está certa — existe pra tornar a
+// diferença explícita e discutível.
+// ══════════════════════════════════════════════════════
+
+// Lê um cenário SEM trocar o que está na tela.
+async function escalaLerCenario(cenario) {
+  const base = window._escalaBase, mes = window._escalaMes;
+  const [{ data: colabs }, { data: dias }] = await Promise.all([
+    db.from('escala_colaborador').select('*').eq('base', base).eq('mes', mes).eq('cenario', cenario),
+    db.from('escala_dia').select('*').eq('base', base).eq('mes', mes).eq('cenario', cenario),
+  ]);
+  return {
+    colabs: colabs || [],
+    dias: new Map((dias || []).map(d => [`${d.matricula}|${d.dia}`, d])),
+  };
+}
+
+// Quantas pessoas trabalham em cada dia, num cenário.
+function escalaCoberturaDoCenario(colabs, dias, ano, mesNum, diasNoMes) {
+  const porDia = new Array(diasNoMes).fill(0);
+  for (const c of colabs) {
+    for (let d = 1; d <= diasNoMes; d++) {
+      const st = dias.get(`${c.matricula}|${d}`)?.status;
+      if (st === 'F' || st === 'FA' || st === 'J' || st === 'CH') continue;
+      if (st !== 'T' && escalaEstaDeFerias(c.matricula, ano, mesNum, d)) continue;
+      porDia[d-1]++;
+    }
+  }
+  return porDia;
+}
+
+async function escalaCompararCenarios() {
+  escalaMsg('Lendo os dois cenários...');
+  const [ano, mesNum] = window._escalaMes.split('-').map(Number);
+  const diasNoMes = new Date(ano, mesNum, 0).getDate();
+
+  let plan, dim;
+  try {
+    [plan, dim] = await Promise.all([escalaLerCenario('planejada'), escalaLerCenario('dimensionada')]);
+  } catch (e) {
+    escalaMsg(escalaTraduzirErroBanco(e.message, 'Erro ao ler os cenários'), true);
+    return;
+  }
+
+  if (!plan.colabs.length && !dim.colabs.length) {
+    escalaMsg('Os dois cenários estão vazios — não há o que comparar.', true);
+    return;
+  }
+  if (!dim.colabs.length) {
+    escalaMsg('A Escala Dimensionada está vazia. Preencha com Staff e aplique o dimensionamento antes de comparar.', true);
+    return;
+  }
+
+  const covPlan = escalaCoberturaDoCenario(plan.colabs, plan.dias, ano, mesNum, diasNoMes);
+  const covDim  = escalaCoberturaDoCenario(dim.colabs, dim.dias, ano, mesNum, diasNoMes);
+  const picos = [];
+  for (let d = 1; d <= diasNoMes; d++) picos.push(escalaPicoDoDia(d) || 0);
+
+  // ── Quem mudou de horário ───────────────────────────────────────
+  const horarioPlan = new Map(plan.colabs.map(c => [c.matricula, c.entrada_manual || '']));
+  const mudancas = [];
+  for (const c of dim.colabs) {
+    const antes = horarioPlan.get(c.matricula);
+    const depois = c.entrada_manual || '';
+    if (antes && depois && antes !== depois) {
+      const delta = (escalaMinutosDeHora(depois) ?? 0) - (escalaMinutosDeHora(antes) ?? 0);
+      mudancas.push({ matricula: c.matricula, nome: c.nome, antes, depois, delta });
+    }
+  }
+  mudancas.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+
+  // ── Efetivo por grupo e turno ───────────────────────────────────
+  const porGrupo = new Map();
+  const acumula = (colabs, campo) => {
+    for (const c of colabs) {
+      const grupo = escalaGrupoDaFuncao(window.eoColabs?.get(c.matricula)?.funcao || c.funcao_manual || '');
+      const turno = escalaSetorDoTurno(c.entrada_manual || '') || '—';
+      const k = `${grupo} · ${turno}`;
+      if (!porGrupo.has(k)) porGrupo.set(k, { plan: 0, dim: 0 });
+      porGrupo.get(k)[campo]++;
+    }
+  };
+  acumula(plan.colabs, 'plan');
+  acumula(dim.colabs, 'dim');
+
+  escalaMsg('');
+  escalaAbrirPainelComparacao({ covPlan, covDim, picos, mudancas, porGrupo, plan, dim, ano, mesNum, diasNoMes });
+}
+
+function escalaAbrirPainelComparacao(d) {
+  const { covPlan, covDim, picos, mudancas, porGrupo, plan, dim, diasNoMes, ano, mesNum } = d;
+  const media = (a) => a.reduce((x, y) => x + y, 0) / (a.length || 1);
+  const amplitude = (a) => a.length ? Math.max(...a) - Math.min(...a) : 0;
+
+  const linhaDias = (titulo, valores, cor, referencia) => `
+    <tr>
+      <td style="padding:6px 10px;font-size:11px;color:${cor};font-weight:700;white-space:nowrap;position:sticky;left:0;background:var(--bg-surface)">${titulo}</td>
+      ${valores.map((v, i) => {
+        const dif = referencia ? v - referencia[i] : 0;
+        const destaque = referencia && Math.abs(dif) >= 3 ? (dif < 0 ? '#fc8181' : '#63b3ed') : cor;
+        return `<td style="text-align:center;padding:6px 3px;font-size:11px;color:${destaque};font-variant-numeric:tabular-nums"
+          title="dia ${i+1}${referencia ? ` · ${dif > 0 ? '+' : ''}${dif} em relação à planejada` : ''}">${v}</td>`;
+      }).join('')}
+    </tr>`;
+
+  const cabDias = [];
+  for (let i = 1; i <= diasNoMes; i++) {
+    const dow = new Date(ano, mesNum-1, i).getDay();
+    const cor = dow === 0 ? '#f6ad55' : dow === 6 ? '#63b3ed' : 'var(--text-muted)';
+    cabDias.push(`<th style="padding:5px 3px;font-size:10px;color:${cor};font-weight:700">${i}</th>`);
+  }
+
+  const linhasGrupo = [...porGrupo.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([k, v]) => {
+      const dif = v.dim - v.plan;
+      const cor = dif === 0 ? 'var(--text-muted)' : dif < 0 ? '#fc8181' : '#63b3ed';
+      return `<tr>
+        <td style="padding:6px 10px;font-size:12px">${k}</td>
+        <td style="padding:6px 10px;text-align:center;font-size:12px;color:#00a0d2;font-weight:600">${v.plan}</td>
+        <td style="padding:6px 10px;text-align:center;font-size:12px;color:#9f7aea;font-weight:600">${v.dim}</td>
+        <td style="padding:6px 10px;text-align:center;font-size:12px;color:${cor};font-weight:700">${dif > 0 ? '+' : ''}${dif || '—'}</td>
+      </tr>`;
+    }).join('');
+
+  const linhasMudanca = mudancas.slice(0, 30).map(m => {
+    const h = Math.round(m.delta / 60 * 10) / 10;
+    return `<tr>
+      <td style="padding:5px 10px;font-size:11.5px;font-family:monospace">${m.matricula}</td>
+      <td style="padding:5px 10px;font-size:11.5px">${escalaEscapeAttr(String(m.nome || '').slice(0, 28))}</td>
+      <td style="padding:5px 10px;text-align:center;font-size:11.5px;color:#00a0d2">${m.antes}</td>
+      <td style="padding:5px 10px;text-align:center;font-size:11.5px;color:#9f7aea">${m.depois}</td>
+      <td style="padding:5px 10px;text-align:center;font-size:11.5px;color:${Math.abs(h) >= 4 ? '#f6ad55' : 'var(--text-muted)'}">${h > 0 ? '+' : ''}${h}h</td>
+    </tr>`;
+  }).join('');
+
+  const bloco = (titulo, conteudo) => `
+    <div style="padding:16px 22px;border-top:1px solid var(--border)">
+      <h3 style="margin:0 0 10px;font-size:13px;font-weight:700;color:var(--text-primary)">${titulo}</h3>
+      ${conteudo}
+    </div>`;
+
+  const html = `
+    <div id="escala-modal-comp" style="position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:200;display:flex;align-items:center;justify-content:center;padding:24px">
+      <div style="background:var(--bg-surface);border:1px solid var(--border-strong);border-radius:12px;max-width:1400px;width:100%;max-height:90vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.55)">
+        <div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start">
+          <div>
+            <h2 style="margin:0;font-size:17px;font-weight:700">Planejada × Dimensionada — ${window._escalaBase} · ${window._escalaMes}</h2>
+            <p style="margin:6px 0 0;font-size:12px;color:var(--text-secondary)">
+              <b style="color:#00a0d2">Planejada</b>: ${plan.colabs.length} pessoas · média ${media(covPlan).toFixed(1)}/dia · amplitude ${amplitude(covPlan)}
+              &nbsp;·&nbsp;
+              <b style="color:#9f7aea">Dimensionada</b>: ${dim.colabs.length} pessoas · média ${media(covDim).toFixed(1)}/dia · amplitude ${amplitude(covDim)}
+            </p>
+          </div>
+          <button class="adh-refresh-btn" onclick="document.getElementById('escala-modal-comp').remove()">Fechar</button>
+        </div>
+
+        ${bloco('Cobertura por dia', `
+          <div style="overflow-x:auto">
+            <table style="border-collapse:collapse;min-width:100%">
+              <thead><tr><th style="position:sticky;left:0;background:var(--bg-surface)"></th>${cabDias.join('')}</tr></thead>
+              <tbody>
+                ${linhaDias('Planejada', covPlan, '#00a0d2', null)}
+                ${linhaDias('Dimensionada', covDim, '#9f7aea', covPlan)}
+                ${linhaDias('Pico da malha', picos, 'var(--text-muted)', null)}
+              </tbody>
+            </table>
+          </div>
+          <p style="margin:8px 0 0;font-size:11px;color:var(--text-muted)">
+            Na linha Dimensionada, vermelho marca dia com 3 ou mais pessoas a menos que a planejada; azul, 3 ou mais a mais.
+          </p>`)}
+
+        ${bloco(`Efetivo por grupo e turno`, `
+          <table style="width:100%;border-collapse:collapse">
+            <thead><tr style="background:var(--bg-hover)">
+              <th style="padding:7px 10px;text-align:left;font-size:10.5px;color:var(--text-muted);text-transform:uppercase">Grupo · turno</th>
+              <th style="padding:7px 10px;text-align:center;font-size:10.5px;color:#00a0d2;text-transform:uppercase">Planejada</th>
+              <th style="padding:7px 10px;text-align:center;font-size:10.5px;color:#9f7aea;text-transform:uppercase">Dimensionada</th>
+              <th style="padding:7px 10px;text-align:center;font-size:10.5px;color:var(--text-muted);text-transform:uppercase">Diferença</th>
+            </tr></thead>
+            <tbody>${linhasGrupo}</tbody>
+          </table>`)}
+
+        ${bloco(`Quem muda de horário — ${mudancas.length} pessoa(s)`, mudancas.length ? `
+          <table style="width:100%;border-collapse:collapse">
+            <thead><tr style="background:var(--bg-hover)">
+              <th style="padding:7px 10px;text-align:left;font-size:10.5px;color:var(--text-muted);text-transform:uppercase">Matrícula</th>
+              <th style="padding:7px 10px;text-align:left;font-size:10.5px;color:var(--text-muted);text-transform:uppercase">Nome</th>
+              <th style="padding:7px 10px;text-align:center;font-size:10.5px;color:#00a0d2;text-transform:uppercase">Planejada</th>
+              <th style="padding:7px 10px;text-align:center;font-size:10.5px;color:#9f7aea;text-transform:uppercase">Dimensionada</th>
+              <th style="padding:7px 10px;text-align:center;font-size:10.5px;color:var(--text-muted);text-transform:uppercase">Desloca</th>
+            </tr></thead>
+            <tbody>${linhasMudanca}</tbody>
+          </table>
+          ${mudancas.length > 30 ? `<p style="margin:8px 0 0;font-size:11px;color:var(--text-muted)">Mostrando as 30 maiores mudanças de ${mudancas.length}.</p>` : ''}
+          <p style="margin:8px 0 0;font-size:11px;color:var(--text-muted)">
+            Ordenado pelo tamanho do deslocamento. Acima de 4h em laranja — é a mudança que mais pesa pra quem trabalha.
+          </p>`
+          : `<p style="font-size:12px;color:var(--text-secondary)">Ninguém muda de horário entre os dois cenários.</p>`)}
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
 }
