@@ -566,9 +566,20 @@ sec('28. Integração com a aba do Admin');
   ok(/URL\.createObjectURL/.test(ui), 'download usa Blob nativo');
 
   const css = fs.readFileSync(path.join(base, 'css', 'style.css'), 'utf8');
-  ok(/#adm-folgas/.test(css), 'style.css tem as regras da aba');
+  ok(/\.fg-scope/.test(css), 'style.css tem as regras da ferramenta');
+  ok(/\.fg-ov\b/.test(css), 'style.css tem as regras da camada sobreposta');
   const abre = (css.match(/\{/g) || []).length, fecha = (css.match(/\}/g) || []).length;
   eq(abre, fecha, 'chaves do CSS balanceadas');
+
+  // Regressão: linha de comentário que herdou o prefixo do escopo. Em CSS o
+  // comentário vira espaço, então ".fg-scope /* x */" gruda no seletor
+  // seguinte e exige dois .fg-scope aninhados — a regra morre calada.
+  const comentarioPrefixado = css.split('\n').filter((l) => /^\s*\.fg-scope\s*\/\*[^*]*\*\/\s*$/.test(l));
+  eq(comentarioPrefixado.length, 0, 'nenhum comentário prefixado com o escopo engolindo a regra seguinte');
+
+  // O mesmo erro em outra forma: seletor com o escopo repetido.
+  const escopoDuplicado = (css.match(/\.fg-scope\s+\.fg-scope/g) || []).length;
+  eq(escopoDuplicado, 0, 'nenhum seletor com .fg-scope repetido');
 }
 
 /* ================================================= resumo */

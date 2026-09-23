@@ -16,26 +16,132 @@
 // busca local com múltiplas tentativas. Ver MIGRACAO-GERADOR-FOLGAS.md.
 // ══════════════════════════════════════════════════════
 
+// A aba do Admin carrega só um cartão. A ferramenta em si abre sobreposta ao
+// painel, numa camada com rolagem própria — a grade de 31 dias renderizada
+// dentro da página fazia o navegador refluir o Admin inteiro a cada rolagem.
 function adminFolgasTab(el) {
-  el.innerHTML = folgasTabHTML();
-  folgasMontar();
+  el.innerHTML = folgasLauncherHTML();
+  folgasLauncherMontar();
 }
 
-function folgasTabHTML() {
+/* ---------------------------------------------------------- cartão da aba */
+function folgasLauncherHTML() {
   return `
-  <div id="adm-folgas" class="fg-wrap">
+  <div class="fg-scope fg-wrap fg-launcher">
     <div class="fg-top">
       <div>
         <div class="fg-eyebrow">Escala 6x1 · distribuição automática</div>
         <h2 class="fg-title">Gerador de Folgas</h2>
-        <p class="fg-sub">Lê a planilha da escala, preenche as folgas respeitando as regras e devolve o mesmo arquivo com a formatação original.</p>
+        <p class="fg-sub">Lê a planilha da escala, preenche as folgas respeitando as regras e devolve o mesmo arquivo com a formatação original. A conferência abre em tela cheia, por cima do painel.</p>
       </div>
+      <div class="fg-actions">
+        <button class="fg-btn fg-primary" id="fgl-open" type="button">Abrir gerador</button>
+      </div>
+    </div>
+
+    <label class="fg-drop" id="fgl-drop" for="fgl-file">
+      <input type="file" id="fgl-file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+      <span class="fg-ico">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="26" height="26"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6M12 11v8"/></svg>
+      </span>
+      <span><strong>Solte aqui a escala do mês (.xlsx)</strong>
+        <span class="fg-dsub">ou clique para escolher. O arquivo é lido só neste navegador — nada sobe pro banco. Ao terminar de ler, a tela cheia abre sozinha.</span></span>
+      <span class="fg-fname" id="fgl-file-name"></span>
+    </label>
+
+    <div id="fgl-status" class="fg-lstatus"></div>
+  </div>`;
+}
+
+// Estado do cartão: reflete o que já está carregado, sem montar a grade.
+function folgasLauncherSync() {
+  const box = document.getElementById('fgl-status');
+  if (!box) return;
+  const S = window._fgState;
+  if (!S || !S.model || S.sample) { box.innerHTML = ''; return; }
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  let gen = 0, err = 0;
+  for (const s of S.model.sheets) for (const b of s.blocks) for (const g of b.groups) for (const e of g.emps) {
+    gen += e.gen.filter(Boolean).length + e.manual.filter(Boolean).length;
+    err += (e.issues || []).filter((i) => i.lv === 'erro').length;
+  }
+  box.innerHTML = `
+    <div class="stat"><span class="k">Arquivo</span><span class="v" style="font-size:14px">${esc(S.file || '—')}</span></div>
+    <div class="stat"><span class="k">Mês</span><span class="v">${esc(S.model.month.label)}</span></div>
+    <div class="stat"><span class="k">Colaboradores</span><span class="v">${S.model.empCount}<small>em ${S.model.sheets.length} aba${S.model.sheets.length > 1 ? 's' : ''}</small></span></div>
+    <div class="stat"><span class="k">Folgas lançadas</span><span class="v">${gen}</span></div>
+    <div class="stat ${err ? 'bad' : ''}"><span class="k">Regras quebradas</span><span class="v">${err}</span></div>`;
+}
+
+function folgasLauncherMontar() {
+  const drop = document.getElementById('fgl-drop');
+  const inp = document.getElementById('fgl-file');
+  document.getElementById('fgl-open').addEventListener('click', () => folgasAbrir());
+  inp.addEventListener('change', (ev) => { const f = ev.target.files[0]; if (f) folgasAbrir(f); });
+  ['dragenter', 'dragover'].forEach((t) => drop.addEventListener(t, (ev) => { ev.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach((t) => drop.addEventListener(t, (ev) => { ev.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', (ev) => { const f = ev.dataTransfer.files[0]; if (f) folgasAbrir(f); });
+  folgasLauncherSync();
+}
+
+/* ------------------------------------------------- abrir / fechar a camada */
+// A camada é construída uma única vez e fica em document.body. Trocar de aba
+// no Admin não a desmonta, então a planilha lida e as edições manuais
+// sobrevivem — e não se paga o custo de remontar a grade.
+function folgasEnsureOverlay() {
+  let ov = document.getElementById('fg-overlay');
+  if (ov) return ov;
+  ov = document.createElement('div');
+  ov.id = 'fg-overlay';
+  ov.className = 'fg-ov';
+  ov.hidden = true;
+  ov.setAttribute('role', 'dialog');
+  ov.setAttribute('aria-modal', 'true');
+  ov.setAttribute('aria-label', 'Gerador de Folgas');
+  ov.innerHTML = folgasOverlayHTML();
+  document.body.appendChild(ov);
+  folgasMontar();
+  return ov;
+}
+
+function folgasAbrir(file) {
+  const ov = folgasEnsureOverlay();
+  ov.hidden = false;
+  document.body.classList.add('fg-locked');
+  if (window._fgRender) window._fgRender();
+  if (file && window._fgLoadFile) window._fgLoadFile(file);
+  const f = ov.querySelector('.fg-close'); if (f) f.focus();
+}
+
+function folgasFechar() {
+  const ov = document.getElementById('fg-overlay');
+  if (!ov || ov.hidden) return;
+  ov.hidden = true;
+  document.body.classList.remove('fg-locked');
+  folgasLauncherSync();
+  const b = document.getElementById('fgl-open'); if (b) b.focus();
+}
+
+/* --------------------------------------------------------- conteúdo da camada */
+function folgasOverlayHTML() {
+  return `
+  <div class="fg-scope">
+    <header class="fg-bar">
+      <div>
+        <div class="fg-eyebrow">Escala 6x1 · distribuição automática</div>
+        <h2>Gerador de Folgas</h2>
+      </div>
+      <span class="fg-barmeta" id="fg-file-name"></span>
       <div class="fg-actions">
         <button class="fg-btn" id="fg-btn-regen" type="button" disabled>Gerar de novo</button>
         <button class="fg-btn" id="fg-btn-clear" type="button" disabled>Desfazer minhas edições</button>
         <button class="fg-btn fg-primary" id="fg-btn-dl" type="button" hidden>Baixar Excel preenchido</button>
+        <button class="fg-close" id="fg-btn-close" type="button" title="Fechar (Esc)" aria-label="Fechar">&times;</button>
       </div>
-    </div>
+    </header>
+
+    <div class="fg-body">
+      <div class="fg-main" id="fg-scroll">
 
     <label class="fg-drop" id="fg-drop" for="fg-file">
       <input type="file" id="fg-file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
@@ -44,7 +150,6 @@ function folgasTabHTML() {
       </span>
       <span><strong>Solte aqui a escala do mês (.xlsx)</strong>
         <span class="fg-dsub">ou clique para escolher. O arquivo é lido só neste navegador — nada sobe pro banco.</span></span>
-      <span class="fg-fname" id="fg-file-name"></span>
     </label>
     <div id="fg-note"></div>
 
@@ -83,10 +188,9 @@ function folgasTabHTML() {
       </div>
     </details>
 
-    <div class="fg-cols">
-      <div class="fg-main">
         <nav class="fg-tabs" id="fg-tabs" role="tablist" aria-label="Abas da escala"></nav>
         <div class="fg-blocks" id="fg-sheet"></div>
+
       </div>
       <aside class="fg-side">
         <div class="fg-panel">
@@ -116,8 +220,8 @@ function folgasTabHTML() {
         </div>
       </aside>
     </div>
-    <div id="fg-toast" class="fg-toast" role="status" hidden></div>
-  </div>`;
+  </div>
+  <div id="fg-toast" class="fg-toast" role="status" hidden></div>`;
 }
 
 // Monta os eventos e redesenha. Chamado toda vez que a aba abre — e o Admin
@@ -208,6 +312,41 @@ function folgasMontar() {
     return `<button type="button" class="pill ${er ? 'err' : 'warn'}" data-toggle="${esc(key)}" aria-expanded="${S.open.has(key)}">${er ? er + ' erro' + (er > 1 ? 's' : '') : w + ' aviso' + (w > 1 ? 's' : '')}</button>`;
   }
 
+  // Uma célula de dia. O <td> é o próprio alvo de clique — a versão anterior
+  // punha um <button> dentro de cada um, dobrando os nós justamente na parte
+  // mais pesada da tela (31 dias × todo mundo), e o `all:unset` desse botão
+  // obrigava o navegador a recalcular estilo de cada célula.
+  function cellHTML(e, d, key, dow) {
+    const fx = e.fixed[d], man = e.manual[d], gn = e.gen[d];
+    const code = fx || (man === '·' ? '' : man) || gn;
+    let cls = codeClass(code);
+    if (!fx && (man || gn) && code === 'F') cls = 'c-gen';
+    if (man) cls += ' c-man';
+    const cc = dow[d] === 0 ? 'sun' : dow[d] === 6 ? 'sat' : '';
+    const tip = fx ? `${code} já estava na escala` : man === '·' ? 'Travado como trabalho (clique para liberar)'
+      : man ? `Sua edição: ${code} (clique para trocar)` : gn ? `${code} gerada — clique para trocar` : 'Clique para lançar F';
+    return `<td class="dc ${cc} ${cls} ${fx ? 'locked' : ''}" data-cell="${key}|${d}" title="Dia ${d + 1}: ${tip}"${fx ? ' aria-disabled="true"' : ''}>${esc(code)}</td>`;
+  }
+
+  // Rodapé do grupo: quantas pessoas trabalham em cada dia, + a média.
+  function workCells(g, D) {
+    const lo = Math.min(...g.work), hi = Math.max(...g.work);
+    const avg = g.work.reduce((a, b) => a + b, 0) / D;
+    let h = '';
+    for (let d = 0; d < D; d++) h += `<td class="dc ${hi - lo >= 2 && g.work[d] === lo ? 'lo' : ''}">${g.work[d]}</td>`;
+    return h + `<td class="st" colspan="5" style="text-align:left;font-family:var(--f-body);font-weight:500">média ${avg.toFixed(1).replace('.', ',')}</td>`;
+  }
+
+  // As 5 colunas de conferência da direita, na ordem em que aparecem.
+  function statCells(e, key) {
+    const s = e.stat;
+    const need = s.allL ? '<span class="dash">—</span>' : `${s.counted}/${s.required}`;
+    const sun = s.allL ? '<span class="dash">—</span>' : s.sunOff ? '<span class="tick">✓</span>' : '<span class="cross">✗</span>';
+    const fa = !e.gold ? '<span class="dash">·</span>' : s.fa ? '<span class="tick">✓</span>' : '<span class="cross">✗</span>';
+    const seqCls = s.maxRun > S.st.maxRun ? 'cross' : '';
+    return [need, sun, fa, `<span class="${seqCls}">${s.maxRun}</span>`, statusPill(e, key)];
+  }
+
   function renderSheet() {
     const m = S.model, sheet = m.sheets[S.tab]; if (!sheet) return;
     const D = m.month.days, dow = m.month.dow;
@@ -242,33 +381,14 @@ function folgasMontar() {
             ${e.entrada ? `<span class="hr">${e.entrada}–${e.saida}${e.ch ? ' · ' + e.ch + 'h' : ''}</span>` : ''}</td>`;
           e.prev.forEach((c, i) => { html += `<td class="pv ${i === 0 ? 'first' : ''}"><span class="${codeClass(c)}">${esc(c)}</span></td>`; });
           html += `<td class="gap"></td>`;
-          for (let d = 0; d < D; d++) {
-            const fx = e.fixed[d], man = e.manual[d], gn = e.gen[d];
-            const code = fx || (man === '·' ? '' : man) || gn;
-            let cls = codeClass(code);
-            if (!fx && (man || gn) && code === 'F') cls = 'c-gen';
-            if (man) cls += ' c-man';
-            const cc = dow[d] === 0 ? 'sun' : dow[d] === 6 ? 'sat' : '';
-            const tip = fx ? `${code} já estava na escala` : man === '·' ? 'Travado como trabalho (clique para liberar)' : man ? `Sua edição: ${code} (clique para trocar)` : gn ? `${code} gerada — clique para trocar` : 'Clique para lançar F';
-            html += `<td class="dc ${cc}"><button type="button" class="cellbtn ${cls} ${fx ? 'locked' : ''}" data-cell="${key}|${d}" title="Dia ${d + 1}: ${tip}" ${fx ? 'aria-disabled="true"' : ''}>${esc(code)}</button></td>`;
-          }
-          const s = e.stat;
-          const need = s.allL ? '<span class="dash">—</span>' : `${s.counted}/${s.required}`;
-          const sun = s.allL ? '<span class="dash">—</span>' : s.sunOff ? '<span class="tick">✓</span>' : '<span class="cross">✗</span>';
-          const fa = !e.gold ? '<span class="dash">·</span>' : s.fa ? '<span class="tick">✓</span>' : '<span class="cross">✗</span>';
-          const seqCls = s.maxRun > S.st.maxRun ? 'cross' : '';
-          html += `<td class="st">${need}</td><td class="st sm">${sun}</td><td class="st sm">${fa}</td><td class="st sm"><span class="${seqCls}">${s.maxRun}</span></td><td class="st status">${statusPill(e, key)}</td></tr>`;
+          for (let d = 0; d < D; d++) html += cellHTML(e, d, key, dow);
+          const sc = statCells(e, key);
+          html += `<td class="st">${sc[0]}</td><td class="st sm">${sc[1]}</td><td class="st sm">${sc[2]}</td><td class="st sm">${sc[3]}</td><td class="st status">${sc[4]}</td></tr>`;
           if (S.open.has(key) && e.issues.length) {
             html += `<tr class="issue-row"><td colspan="${2 + b.prevDates.length + 1 + D + 5}"><ul style="margin:0;padding-left:16px">${e.issues.map((i) => `<li><span class="lv-${i.lv}">${i.lv}</span> · ${esc(i.t)}</li>`).join('')}</ul></td></tr>`;
           }
         });
-        const avg = g.work.reduce((a, b) => a + b, 0) / D;
-        html += `<tr class="work"><td class="mat"></td><td class="nm">Trabalhando no dia</td>${b.prevDates.map((_, i) => `<td class="pv ${i === 0 ? 'first' : ''}"></td>`).join('')}<td class="gap"></td>`;
-        for (let d = 0; d < D; d++) {
-          const w = g.work[d]; const c = hi - lo >= 2 && w === lo ? 'lo' : '';
-          html += `<td class="dc ${c}">${w}</td>`;
-        }
-        html += `<td class="st" colspan="5" style="text-align:left;font-family:var(--f-body);font-weight:500">média ${avg.toFixed(1).replace('.', ',')}</td></tr>`;
+        html += `<tr class="work" id="w-${bi}-${gi}"><td class="mat"></td><td class="nm">Trabalhando no dia</td>${b.prevDates.map((_, i) => `<td class="pv ${i === 0 ? 'first' : ''}"></td>`).join('')}<td class="gap"></td>${workCells(g, D)}</tr>`;
         html += `</tbody></table></div></div>`;
       });
       html += `</section>`;
@@ -304,6 +424,41 @@ function folgasMontar() {
     renderTabs(); renderSheet(); renderIssues(); renderUnknown();
   }
 
+  // Editar um dia mexe em: a célula, as 5 colunas de conferência da linha e o
+  // rodapé do grupo. Nada mais. Antes, cada clique reconstruía o innerHTML da
+  // planilha inteira — com muitos grupos, meio segundo de tela travada por
+  // clique. A validação continua rodando no modelo todo (é barata); só o
+  // desenho é que ficou restrito ao que mudou.
+  function atualizarCelula(key, d) {
+    const [si, bi, gi, ei] = key.split('|').map(Number);
+    if (si !== S.tab) { renderAll(); return; }
+    const { b, g, e } = findEmp(key);
+    const dow = S.model.month.dow, D = S.model.month.days;
+
+    const td = document.querySelector(`[data-cell="${key}|${d}"]`);
+    if (!td) { renderAll(); return; }
+    td.outerHTML = cellHTML(e, d, key, dow);
+
+    const row = document.getElementById('r-' + key.replace(/\|/g, '-'));
+    if (row) {
+      const sts = row.querySelectorAll('td.st');
+      const sc = statCells(e, key);
+      for (let i = 0; i < sts.length && i < sc.length; i++) sts[i].innerHTML = sc[i];
+    }
+
+    const wrow = document.getElementById(`w-${bi}-${gi}`);
+    if (wrow) {
+      const fixas = 2 + b.prevDates.length + 1; // matrícula, nome, mês anterior, respiro
+      const antes = Array.from(wrow.children).slice(0, fixas).map((n) => n.outerHTML).join('');
+      wrow.innerHTML = antes + workCells(g, D);
+    }
+    const sp = document.querySelector(`#g-${bi}-${gi} .spread b`);
+    if (sp) { const lo = Math.min(...g.work), hi = Math.max(...g.work); sp.textContent = lo + (hi !== lo ? '–' + hi : ''); }
+
+    renderSummary(); renderIssues(); renderTabs();
+    $('#fg-btn-clear').disabled = !allEmps(S.model).some(({ e: x }) => x.manual.some(Boolean));
+  }
+
   /* ---------- ações ---------- */
   function run(fn) {
     if (S.busy) return; S.busy = true;
@@ -330,6 +485,8 @@ function folgasMontar() {
       $('#fg-file-name').textContent = file.name;
       E.generate(model, S.st, { passes: 4 });
       renderAll();
+      const fn = document.getElementById('fgl-file-name'); if (fn) fn.textContent = file.name;
+      folgasLauncherSync();
       toast(`Escala de ${model.month.label} lida: ${model.sheets.length} abas, ${model.empCount} colaboradores. Folgas geradas.`);
     } catch (err) { $('#fg-file-name').textContent = ''; showError(err); }
   }
@@ -402,7 +559,8 @@ function folgasMontar() {
       else if (shown === 'F') next = e.gold ? 'FA' : '·';
       else next = '·';
       e.manual[d] = next; e.gen[d] = '';
-      E.validate(S.model, S.st); renderAll();
+      E.validate(S.model, S.st);
+      atualizarCelula(parts.join('|'), d);
       toast(next === '' ? `Dia ${d + 1} liberado para o gerador.` : next === '·' ? `Dia ${d + 1} travado como trabalho — "Gerar de novo" não põe folga aqui.` : `Dia ${d + 1}: ${next} travado. Use "Gerar de novo" para reequilibrar o resto.`, 3000);
       return;
     }
@@ -436,12 +594,26 @@ function folgasMontar() {
     regenerate();
   });
 
-  /* ---------- início ---------- */
-  S.model = sampleModel(); S.sample = true;
-  E.generate(S.model, S.st, { passes: 4 });
-  $('#fg-note').innerHTML = `<div class="sample-note"><b>Exemplo com nomes fictícios.</b> Solte a sua escala acima para gerar as folgas de todas as abas.</div>`;
-  renderAll();
+  $('#fg-btn-close').addEventListener('click', folgasFechar);
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Escape') return;
+    const ov = document.getElementById('fg-overlay');
+    if (ov && !ov.hidden) { ev.preventDefault(); folgasFechar(); }
+  });
 
-  // Se já havia planilha lida antes de trocar de aba, redesenha tudo.
-  if (S.model) renderAll();
+  /* ---------- ganchos usados pelo cartão da aba ---------- */
+  // renderAll é caro; o cartão chama isto só quando a camada abre, e o
+  // carregamento de arquivo entra por aqui quando o arquivo foi solto lá fora.
+  window._fgRender = renderAll;
+  window._fgLoadFile = loadFile;
+
+  /* ---------- início ---------- */
+  // Só monta o exemplo se ainda não há planilha lida. Antes isso rodava
+  // sempre, e voltar na aba do Admin apagava o arquivo do usuário.
+  if (!S.model) {
+    S.model = sampleModel(); S.sample = true;
+    E.generate(S.model, S.st, { passes: 4 });
+    $('#fg-note').innerHTML = `<div class="sample-note"><b>Exemplo com nomes fictícios.</b> Solte a sua escala acima para gerar as folgas de todas as abas.</div>`;
+  }
+  renderAll();
 }
