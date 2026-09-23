@@ -142,6 +142,9 @@ async function adminRender() {
       <button class="adm-tab-btn" onclick="adminTabSwitch('parametros',this)">
         <i class="ti ti-adjustments" aria-hidden="true"></i> Parâmetros de Solo
       </button>
+      <button class="adm-tab-btn" onclick="adminTabSwitch('folgas',this)">
+        <i class="ti ti-calendar-stats" aria-hidden="true"></i> Gerador de Folgas
+      </button>
       <button class="adm-tab-btn" onclick="adminTabSwitch('logs',this)">
         <i class="ti ti-list" aria-hidden="true"></i> Log de acessos
       </button>
@@ -167,6 +170,7 @@ function adminTabSwitch(tab, btn) {
     case 'aderencia':adminAderenciaTab(el);                    break;
     case 'malha':    adminMalhaTab(el);                        break;
     case 'parametros':adminParametrosTab(el);                  break;
+    case 'folgas':   adminFolgasTab(el);                       break;
     case 'logs':     el.innerHTML = adminLogsTab(logs||[]);     break;
   }
 }
