@@ -575,6 +575,172 @@
   }
 
   /* ---------- Saída ---------- */
+  /* ══════════════════════════════════════════════════════
+     CURSOS
+     Arquivo mensal recebido pronto, num formato que não é uma tabela
+     corrida: são blocos por curso (PCA, SGSO, AVSEC OPS…), cada um com o
+     seu próprio cabeçalho MATRÍCULA/NOME/FUNÇÃO/HORA/DATA repetido. Daqui
+     só interessam matrícula e data — a coluna HORA veio vazia em todas as
+     linhas do arquivo real, e nome e função servem só para o relatório.
+     ══════════════════════════════════════════════════════ */
+
+  /* Data da coluna DATA dos cursos. Mais tolerante que isSerial(), que exige
+     inteiro porque é usada para descobrir a linha de datas da escala e não
+     pode confundir um número qualquer com data.
+     Aqui aceita:
+       · serial com hora junto (46303,87 → 09/10/2026) — se rejeitasse, um
+         arquivo exportado com data+hora perderia os cursos em silêncio;
+       · data escrita como texto, dd/mm/aaaa, com ano de 4 dígitos.
+     Rejeita o resto, inclusive ano truncado ("29/10/202") e dia impossível
+     ("31/02/2026") — esses viram relatório, não chute. */
+  function dataCurso(v) {
+    if (v instanceof Date && !isNaN(v)) return new Date(Date.UTC(v.getUTCFullYear(), v.getUTCMonth(), v.getUTCDate()));
+    if (typeof v === 'number') {
+      if (!(v > 40000 && v < 60000)) return null;
+      const d = serialToDate(Math.floor(v));
+      return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+    }
+    const s = String(v ?? '').trim();
+    const m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/.exec(s);
+    if (!m) return null;
+    const dia = +m[1], mes = +m[2], ano = +m[3];
+    const d = new Date(Date.UTC(ano, mes - 1, dia));
+    // round-trip: descarta 31/02 e afins em vez de deixar o Date "corrigir"
+    if (d.getUTCDate() !== dia || d.getUTCMonth() !== mes - 1 || d.getUTCFullYear() !== ano) return null;
+    return d;
+  }
+
+  // Matrículas chegam ora como número, ora como texto ("160622"). Comparar
+  // sem normalizar perderia um terço dos registros.
+  function matNum(v) {
+    if (typeof v === 'number') return Number.isFinite(v) ? Math.round(v) : 0;
+    const s = String(v ?? '').trim();
+    if (!/^\d{3,}$/.test(s)) return 0;
+    return parseInt(s, 10);
+  }
+
+  async function loadCursos(buf) {
+    const wb = await loadWorkbook(buf);
+    const regs = [], semData = [];
+    for (const sh of wb.sheets) {
+      if (sh.state !== 'visible' || !sh.cells.size) continue;
+      const get = (r, c) => sh.cells.get(colName(c) + r);
+      let maxRow = 0, maxCol = 0;
+      for (const k of sh.cells.keys()) { const p = splitRef(k); if (p.r > maxRow) maxRow = p.r; if (p.c > maxCol) maxCol = p.c; }
+
+      // Posição das colunas vem do primeiro cabeçalho encontrado; os demais
+      // se repetem iguais a cada bloco de curso.
+      let cMat = 0, cNome = 0, cData = 0, cFunc = 0;
+      for (let r = 1; r <= maxRow && !cMat; r++) {
+        for (let c = 1; c <= maxCol; c++) {
+          if (norm(get(r, c)) !== 'MATRICULA') continue;
+          cMat = c;
+          for (let c2 = c; c2 <= Math.min(maxCol, c + 10); c2++) {
+            const h = norm(get(r, c2));
+            if (h === 'NOME') cNome = c2;
+            else if (h === 'DATA') cData = c2;
+            else if (h === 'FUNCAO') cFunc = c2;
+          }
+          break;
+        }
+      }
+      if (!cMat || !cData) continue;
+
+      let curso = '';
+      for (let r = 1; r <= maxRow; r++) {
+        const bruto = get(r, cMat);
+        const h = norm(bruto);
+        if (h === 'MATRICULA') continue;
+        // Linha de título do bloco: texto na coluna da matrícula.
+        if (typeof bruto === 'string' && bruto.trim() && !/^\d+$/.test(bruto.trim())) { curso = bruto.trim(); continue; }
+        const mat = matNum(bruto);
+        if (!mat) continue;
+        const nome = String(get(r, cNome) ?? '').trim();
+        const func = cFunc ? String(get(r, cFunc) ?? '').trim() : '';
+        const dv = get(r, cData);
+        const base = { mat, nome, func, curso, aba: sh.name, linha: r };
+        const data = dataCurso(dv);
+        if (data) regs.push(Object.assign({ data }, base));
+        else semData.push(Object.assign({ texto: dv === null || dv === undefined ? '' : String(dv).trim() }, base));
+      }
+    }
+    if (!regs.length && !semData.length) throw new Error('Não encontrei as colunas MATRÍCULA e DATA nesse arquivo.');
+    return { regs, semData, arquivoVazio: !regs.length };
+  }
+
+  // Cruza os cursos com o mês da escala. Datas de outros meses e linhas sem
+  // data legível não viram K — saem no relatório para conferência.
+  function indexarCursos(cursos, month) {
+    const porMat = new Map();
+    const foraDoMes = [];
+    for (const r of cursos.regs) {
+      const d = r.data;
+      if (d.getUTCFullYear() !== month.year || d.getUTCMonth() !== month.month) { foraDoMes.push(r); continue; }
+      const dia = d.getUTCDate() - 1;
+      if (!porMat.has(r.mat)) porMat.set(r.mat, new Map());
+      // Duas inscrições no mesmo dia viram um K só.
+      porMat.get(r.mat).set(dia, r);
+    }
+    return { porMat, foraDoMes, semData: cursos.semData };
+  }
+
+  /* Aplica os cursos na escala.
+     O K vira célula fixa: o gerador não escreve por cima e a sequência do
+     6x1 atravessa ele, como qualquer curso lançado na planilha.
+     - férias (L) nunca são sobrescritas — quem está de férias não vai ao
+       curso, e isso é erro na origem;
+     - folga (F/FA) cede lugar ao K, e a folga perdida volta a ser cobrada
+       na meta do mês, então o gerador a repõe em outro dia. */
+  function aplicarCursos(model, cursos, st) {
+    const idx = indexarCursos(cursos, model.month);
+    const D = model.month.days;
+    const rel = { aplicados: 0, pessoas: 0, remanejadas: [], ferias: [], ocupados: [],
+      naoEncontrados: [], foraDoMes: idx.foraDoMes, semData: idx.semData, porMat: idx.porMat };
+    const vistos = new Set();
+
+    for (const sheet of model.sheets) for (const b of sheet.blocks) for (const g of b.groups) for (const e of g.emps) {
+      // Restaura a planilha original antes de reaplicar: assim trocar de
+      // arquivo de cursos não acumula K de uma leitura anterior.
+      if (e._fixed0) e.fixed = e._fixed0.slice(); else e._fixed0 = e.fixed.slice();
+      e.curso = new Set();
+      const dias = idx.porMat.get(e.mat);
+      if (!dias) continue;
+      vistos.add(e.mat);
+      for (const [d, reg] of dias) {
+        if (d < 0 || d >= D) continue;
+        const atual = e._fixed0[d];
+        if (atual === 'L') { rel.ferias.push({ e, d, reg }); continue; }
+        if (atual === 'K') { e.curso.add(d); rel.aplicados++; continue; }
+        if (atual && atual !== 'F' && atual !== 'FA') { rel.ocupados.push({ e, d, reg, atual }); continue; }
+        if (atual === 'F' || atual === 'FA') rel.remanejadas.push({ e, d, reg, atual });
+        e.fixed[d] = 'K';
+        e.curso.add(d);
+        rel.aplicados++;
+      }
+      if (e.curso.size) rel.pessoas++;
+    }
+
+    for (const [mat, dias] of idx.porMat) {
+      if (vistos.has(mat)) continue;
+      const qualquer = dias.values().next().value;
+      rel.naoEncontrados.push({ mat, nome: qualquer ? qualquer.nome : '', dias: dias.size });
+    }
+
+    model.cursos = rel;
+    generate(model, st, { passes: 4 });
+    return rel;
+  }
+
+  // Desfaz a aplicação, devolvendo a planilha ao estado lido do arquivo.
+  function limparCursos(model, st) {
+    for (const sheet of model.sheets) for (const b of sheet.blocks) for (const g of b.groups) for (const e of g.emps) {
+      if (e._fixed0) e.fixed = e._fixed0.slice();
+      e.curso = new Set();
+    }
+    model.cursos = null;
+    generate(model, st, { passes: 4 });
+  }
+
   function groupTSV(model, g) {
     const D = model.month.days;
     return g.emps.map((e) => Array.from({ length: D }, (_, d) => eff(e, d)).join('\t')).join('\r\n');
@@ -586,8 +752,13 @@
     for (const sheet of model.sheets) {
       const upd = new Map();
       for (const block of sheet.blocks) for (const g of block.groups) for (const e of g.emps) for (let d = 0; d < D; d++) {
-        if (e.fixed[d]) continue;
-        const v = e.manual[d] || e.gen[d];
+        // `_fixed0` é o que veio na planilha; `fixed` já pode ter o K dos
+        // cursos por cima. Dia que o curso ocupou precisa ser gravado mesmo
+        // tendo conteúdo original — é justamente a folga que saiu de lá.
+        const orig = e._fixed0 ? e._fixed0[d] : e.fixed[d];
+        const temCurso = e.curso && e.curso.has(d);
+        if (orig && !temCurso) continue;
+        const v = temCurso ? 'K' : (e.manual[d] || e.gen[d]);
         if (!v || v === '·') continue;
         if (!upd.has(e.row)) upd.set(e.row, new Map());
         upd.get(e.row).set(block.cur[d], v);
@@ -628,6 +799,7 @@
     });
   }
 
-  const api = { loadWorkbook, buildModel, generate, validate, groupTSV, buildXlsx, defaultSettings, kind, quebraSequencia, eff, colName, DOW, MESES };
+  const api = { loadWorkbook, buildModel, generate, validate, groupTSV, buildXlsx, defaultSettings, kind, quebraSequencia, eff, colName, DOW, MESES,
+    loadCursos, indexarCursos, aplicarCursos, limparCursos, matNum, dataCurso };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.FolgaEngine = api;
 })(typeof window !== 'undefined' ? window : globalThis);

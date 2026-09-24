@@ -3259,3 +3259,41 @@ body.fg-locked { overflow: hidden; }
    não só de cor, para não sumir no meio dos dias em branco. */
 [data-theme="light"] .fg-scope .c-gen { font-weight: 700; }
 [data-theme="light"] .fg-scope .c-F { font-weight: 700; }
+
+/* ══════════════════════════════════════════════════════
+   GERADOR DE FOLGAS — cursos do mês
+   ══════════════════════════════════════════════════════ */
+
+/* Segunda zona de upload, subordinada à da escala. */
+.fg-scope .fg-drop-sec { padding: 12px 16px; border-style: dashed; opacity: .92; }
+.fg-scope .fg-drop-sec .fg-ico { width: 34px; height: 34px; border-radius: 8px; }
+.fg-scope .fg-drop-sec .fg-ico svg { width: 20px; height: 20px; }
+.fg-scope .fg-drop-sec strong { font-size: 13.5px; }
+
+/* K vindo do arquivo de cursos: mesma cor do K, com um traço embaixo que
+   separa o que o painel lançou do que já veio na planilha. */
+.fg-scope .c-curso { box-shadow: inset 0 -3px 0 var(--petrol); }
+
+/* Relatório. As listas nascem fechadas porque o normal é estar tudo certo;
+   o que interessa é o número ao lado do título. */
+.fg-scope #fg-cursos .fg-cur-head { margin: 0 0 8px; font-size: 13px; color: var(--ink-2); }
+.fg-scope #fg-cursos .fg-cur-head b { color: var(--ink); font-size: 15px; }
+.fg-scope #fg-cursos .arq { display: block; font: 500 11.5px var(--f-mono); color: var(--ink-3); margin-top: 2px; overflow-wrap: anywhere; }
+.fg-scope .fg-cur-esperando { margin: 0 0 8px; font-size: 12.5px; color: var(--warn); }
+.fg-scope .fg-cur-limpar { display: inline-flex; margin-bottom: 8px; border: 1px solid var(--line);
+  background: var(--surface); border-radius: 7px; padding: 4px 10px; font-size: 12.5px; color: var(--ink-2); }
+.fg-scope .fg-cur-limpar:hover { border-color: var(--err); color: var(--err); }
+.fg-scope .fg-cur-bloco { border-top: 1px solid var(--line-soft); padding: 6px 0 2px; }
+.fg-scope .fg-cur-bloco summary { cursor: pointer; font-size: 12.5px; color: var(--ink-2); list-style: none; display: flex; gap: 6px; align-items: baseline; }
+.fg-scope .fg-cur-bloco summary::-webkit-details-marker { display: none; }
+.fg-scope .fg-cur-bloco summary::before { content: '▸'; color: var(--ink-3); font-size: 10px; }
+.fg-scope .fg-cur-bloco[open] summary::before { content: '▾'; }
+.fg-scope .fg-cur-bloco summary b { margin-left: auto; font: 600 12px var(--f-mono);
+  background: var(--line-soft); border-radius: 20px; padding: 1px 8px; color: var(--ink-2); }
+.fg-scope .fg-cur-bloco.erro summary b { background: var(--err-soft); color: var(--err); }
+.fg-scope .fg-cur-bloco.aviso summary b { background: var(--warn-soft); color: var(--warn); }
+.fg-scope .fg-cur-bloco.ok summary b { background: var(--ok-soft); color: var(--ok); }
+.fg-scope .fg-cur-bloco ul { margin: 6px 0 4px; padding-left: 14px; font-size: 12px; color: var(--ink-2);
+  display: flex; flex-direction: column; gap: 3px; }
+.fg-scope .fg-cur-bloco li b { font-family: var(--f-mono); color: var(--ink); }
+.fg-scope .fg-cur-bloco li.mais { list-style: none; color: var(--ink-3); font-style: italic; }

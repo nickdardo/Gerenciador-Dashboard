@@ -49,6 +49,16 @@ function folgasLauncherHTML() {
       <span class="fg-fname" id="fgl-file-name"></span>
     </label>
 
+    <label class="fg-drop fg-drop-sec" id="fgl-cdrop" for="fgl-cfile">
+      <input type="file" id="fgl-cfile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+      <span class="fg-ico">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="26" height="26"><path d="M4 5a2 2 0 0 1 2-2h11l3 3v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M8 7h6M8 11h8M8 15h5"/></svg>
+      </span>
+      <span><strong>Cursos do mês (.xlsx) — opcional</strong>
+        <span class="fg-dsub">O arquivo que você recebe pronto. Dele só leio <b>matrícula</b> e <b>data</b>, para lançar <b>K</b> nos dias certos. Pode carregar antes ou depois da escala.</span></span>
+      <span class="fg-fname" id="fgl-cfile-name"></span>
+    </label>
+
     <div id="fgl-status" class="fg-lstatus"></div>
   </div>`;
 }
@@ -81,7 +91,25 @@ function folgasLauncherMontar() {
   ['dragenter', 'dragover'].forEach((t) => drop.addEventListener(t, (ev) => { ev.preventDefault(); drop.classList.add('over'); }));
   ['dragleave', 'drop'].forEach((t) => drop.addEventListener(t, (ev) => { ev.preventDefault(); drop.classList.remove('over'); }));
   drop.addEventListener('drop', (ev) => { const f = ev.dataTransfer.files[0]; if (f) folgasAbrir(f); });
+
+  // Cursos: não abre a tela cheia sozinho. Guarda o arquivo e, se a escala já
+  // estiver carregada, aplica na hora; senão espera a escala chegar.
+  const cdrop = document.getElementById('fgl-cdrop');
+  const cinp = document.getElementById('fgl-cfile');
+  const pegar = (f) => { if (f) folgasCarregarCursos(f); };
+  cinp.addEventListener('change', (ev) => pegar(ev.target.files[0]));
+  ['dragenter', 'dragover'].forEach((t) => cdrop.addEventListener(t, (ev) => { ev.preventDefault(); cdrop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach((t) => cdrop.addEventListener(t, (ev) => { ev.preventDefault(); cdrop.classList.remove('over'); }));
+  cdrop.addEventListener('drop', (ev) => { ev.preventDefault(); pegar(ev.dataTransfer.files[0]); });
+
   folgasLauncherSync();
+}
+
+// Ponto de entrada do arquivo de cursos, usado pelo cartão e pela camada.
+// A camada precisa existir porque é lá que moram o parser e o estado.
+function folgasCarregarCursos(file) {
+  folgasEnsureOverlay();
+  if (window._fgLoadCursos) window._fgLoadCursos(file);
 }
 
 /* ------------------------------------------------- abrir / fechar a camada */
@@ -135,6 +163,7 @@ function folgasOverlayHTML() {
       <div class="fg-actions">
         <button class="fg-btn" id="fg-btn-regen" type="button" disabled>Gerar de novo</button>
         <button class="fg-btn" id="fg-btn-clear" type="button" disabled>Desfazer minhas edições</button>
+        <button class="fg-btn" id="fg-btn-cursos" type="button" title="Carregar o arquivo mensal de cursos">Cursos…<input type="file" id="fg-cfile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden></button>
         <button class="fg-btn fg-primary" id="fg-btn-dl" type="button" hidden>Baixar Excel preenchido</button>
         <button class="fg-close" id="fg-btn-close" type="button" title="Fechar (Esc)" aria-label="Fechar">&times;</button>
       </div>
@@ -202,6 +231,10 @@ function folgasOverlayHTML() {
             <h4>Pendências</h4>
             <div id="fg-issues"></div>
           </div>
+          <div class="fg-panel" id="fg-panel-cursos" hidden>
+            <h4>Cursos do mês</h4>
+            <div id="fg-cursos"></div>
+          </div>
           <div class="fg-panel">
             <h4>Legenda</h4>
             <div class="fg-legend">
@@ -209,6 +242,7 @@ function folgasOverlayHTML() {
               <span class="fg-sw c-F">F</span><span>Folga que já estava na escala</span>
               <span class="fg-sw c-FA">FA</span><span>Folga agrupada (sáb/seg) — não quebra o 6x1</span>
               <span class="fg-sw c-K">K</span><span>Curso — conta como trabalhado</span>
+              <span class="fg-sw c-K c-curso">K</span><span>Curso vindo do arquivo de cursos</span>
               <span class="fg-sw c-AF">AF</span><span>Folga aniversário</span>
               <span class="fg-sw c-L">L</span><span>Férias</span>
               <span class="fg-sw c-gen c-man">F</span><span>Sua edição manual (fica travada)</span>
@@ -235,7 +269,7 @@ function folgasMontar() {
   // e sem isso a planilha lida e as edições manuais se perderiam a cada ida
   // e volta. Só o DOM é recriado; o modelo continua de pé.
   if (!window._fgState) {
-    window._fgState = { wb: null, model: null, st: E.defaultSettings(), tab: 0, file: '', sample: false, open: new Set(), busy: false };
+    window._fgState = { wb: null, model: null, st: E.defaultSettings(), tab: 0, file: '', sample: false, open: new Set(), busy: false, cursos: null, cursosFile: '' };
   }
   const S = window._fgState;
 
@@ -323,8 +357,16 @@ function folgasMontar() {
     let cls = codeClass(code);
     if (!fx && (man || gn) && code === 'F') cls = 'c-gen';
     if (man) cls += ' c-man';
+    // K vindo do arquivo de cursos ganha marca própria: assim dá para
+    // distinguir o que o painel lançou do que já estava na planilha.
+    const doCurso = e.curso && e.curso.has(d);
+    if (doCurso) cls += ' c-curso';
     const cc = dow[d] === 0 ? 'sun' : dow[d] === 6 ? 'sat' : '';
-    const tip = fx ? `${code} já estava na escala` : man === '·' ? 'Travado como trabalho (clique para liberar)'
+    const orig = doCurso && e._fixed0 ? e._fixed0[d] : '';
+    const tip = doCurso ? (orig && orig !== 'K'
+        ? `curso lançado pelo arquivo — este dia tinha ${orig}, a folga foi remanejada`
+        : 'curso lançado pelo arquivo de cursos')
+      : fx ? `${code} já estava na escala` : man === '·' ? 'Travado como trabalho (clique para liberar)'
       : man ? `Sua edição: ${code} (clique para trocar)` : gn ? `${code} gerada — clique para trocar` : 'Clique para lançar F';
     return `<td class="dc ${cc} ${cls} ${fx ? 'locked' : ''}" data-cell="${key}|${d}" title="Dia ${d + 1}: ${tip}"${fx ? ' aria-disabled="true"' : ''}>${esc(code)}</td>`;
   }
@@ -413,6 +455,47 @@ function folgasMontar() {
       `<button type="button" class="${x.i.lv === 'erro' ? 'e' : 'w'}" data-jump="${x.key}"><span class="who">${esc(x.e.name)}</span><span class="what">${esc(x.sheet)} · ${esc(x.i.t)}</span></button>`).join('')}</div>`;
   }
 
+  // Relatório dos cursos. A parte que mais importa não é o que entrou, e sim
+  // o que ficou de fora: linha sem data, data de outro mês, matrícula que não
+  // existe na escala e curso marcado em dia de férias. Cada uma dessas some
+  // em silêncio se não for mostrada com nome e dia.
+  function renderCursos() {
+    const box = $('#fg-cursos'), painel = $('#fg-panel-cursos');
+    if (!S.cursos) { painel.hidden = true; box.innerHTML = ''; return; }
+    painel.hidden = false;
+    const rel = S.model && !S.sample ? S.model.cursos : null;
+    const dia = (d) => d + 1;
+
+    const lista = (titulo, itens, linha, cls) => itens.length
+      ? `<details class="fg-cur-bloco ${cls || ''}"><summary>${esc(titulo)} <b>${itens.length}</b></summary>
+         <ul>${itens.slice(0, 60).map(linha).join('')}${itens.length > 60 ? `<li class="mais">… e mais ${itens.length - 60}</li>` : ''}</ul></details>`
+      : '';
+
+    if (!rel) {
+      box.innerHTML = `<p class="fg-cur-head"><b>${S.cursos.regs.length}</b> lançamentos lidos de <span class="arq">${esc(S.cursosFile || 'arquivo')}</span>.</p>
+        <p class="fg-cur-esperando">Solte a escala do mês para eu cruzar as matrículas e lançar os K.</p>
+        ${lista('Linhas sem data utilizável', S.cursos.semData, (r) => `<li><b>${r.mat}</b> · ${esc(r.curso)} · linha ${r.linha} → ${esc(r.texto || 'vazio')}</li>`, 'aviso')}`;
+      return;
+    }
+
+    box.innerHTML = `
+      <p class="fg-cur-head"><b>${rel.aplicados}</b> K lançados para <b>${rel.pessoas}</b> pessoa(s)
+        <span class="arq">${esc(S.cursosFile || '')}</span></p>
+      <button type="button" class="fg-cur-limpar" id="fg-cur-limpar">Remover os cursos</button>
+      ${lista('Folgas remanejadas pelo curso', rel.remanejadas,
+        (x) => `<li><b>${x.e.mat}</b> ${esc(x.e.name)} · dia ${dia(x.d)} tinha ${x.atual} → virou K</li>`, 'ok')}
+      ${lista('Curso em dia de férias — não mexi', rel.ferias,
+        (x) => `<li><b>${x.e.mat}</b> ${esc(x.e.name)} · dia ${dia(x.d)} está de férias (${esc(x.reg.curso)})</li>`, 'erro')}
+      ${lista('Dia já ocupado por outro código', rel.ocupados,
+        (x) => `<li><b>${x.e.mat}</b> ${esc(x.e.name)} · dia ${dia(x.d)} tem ${esc(x.atual)}</li>`, 'aviso')}
+      ${lista('Matrícula não encontrada na escala', rel.naoEncontrados,
+        (x) => `<li><b>${x.mat}</b> ${esc(x.nome)} · ${x.dias} data(s)</li>`, 'aviso')}
+      ${lista('Data de outro mês — ignorada', rel.foraDoMes,
+        (r) => `<li><b>${r.mat}</b> ${esc(r.nome)} · ${r.data.toLocaleDateString('pt-BR', { timeZone: 'UTC' })} (${esc(r.curso)})</li>`, 'aviso')}
+      ${lista('Linha sem data utilizável — ignorada', rel.semData,
+        (r) => `<li><b>${r.mat}</b> ${esc(r.nome)} · ${esc(r.curso)} · linha ${r.linha} → ${esc(r.texto || 'vazio')}</li>`, 'aviso')}`;
+  }
+
   function renderUnknown() {
     const m = S.model; const box = $('#fg-rule-unknown');
     if (!m || !m.unknownCodes.length) { box.hidden = true; return; }
@@ -426,7 +509,7 @@ function folgasMontar() {
     $('#fg-btn-regen').disabled = !has; $('#fg-btn-clear').disabled = !has || !allEmps(S.model).some(({ e }) => e.manual.some(Boolean));
     $('#fg-btn-dl').hidden = !S.wb;
     renderSummary(); if (!has) return;
-    renderTabs(); renderSheet(); renderIssues(); renderUnknown();
+    renderTabs(); renderSheet(); renderIssues(); renderUnknown(); renderCursos();
   }
 
   // Editar um dia mexe em: a célula, as 5 colunas de conferência da linha e o
@@ -489,11 +572,52 @@ function folgasMontar() {
       $('#fg-note').innerHTML = '';
       $('#fg-file-name').textContent = file.name;
       E.generate(model, S.st, { passes: 4 });
+      // Se os cursos já tinham sido carregados, entram agora — a ordem entre
+      // os dois arquivos não importa.
+      const rel = S.cursos ? E.aplicarCursos(model, S.cursos, S.st) : null;
       renderAll();
       const fn = document.getElementById('fgl-file-name'); if (fn) fn.textContent = file.name;
       folgasLauncherSync();
-      toast(`Escala de ${model.month.label} lida: ${model.sheets.length} abas, ${model.empCount} colaboradores. Folgas geradas.`);
+      toast(`Escala de ${model.month.label} lida: ${model.sheets.length} abas, ${model.empCount} colaboradores. Folgas geradas.`
+        + (rel ? ` ${rel.aplicados} curso(s) lançados como K.` : ''));
     } catch (err) { $('#fg-file-name').textContent = ''; showError(err); }
+  }
+
+  /* ---------- cursos ---------- */
+  async function loadCursosFile(file) {
+    if (!file) return;
+    const nome = (el) => { const n = document.getElementById(el); if (n) n.textContent = file.name; };
+    try {
+      const buf = await file.arrayBuffer();
+      S.cursos = await E.loadCursos(buf);
+      S.cursosFile = file.name;
+      nome('fgl-cfile-name');
+      if (!S.model || S.sample) {
+        renderCursos();
+        toast(`Cursos lidos: ${S.cursos.regs.length} lançamentos. Agora solte a escala do mês para eu aplicar os K.`, 6000);
+        folgasLauncherSync();
+        return;
+      }
+      const rel = E.aplicarCursos(S.model, S.cursos, S.st);
+      renderAll();
+      folgasLauncherSync();
+      const extras = [];
+      if (rel.remanejadas.length) extras.push(`${rel.remanejadas.length} folga(s) remanejada(s)`);
+      if (rel.ferias.length) extras.push(`${rel.ferias.length} em férias (não mexi)`);
+      toast(`${rel.aplicados} curso(s) lançados como K para ${rel.pessoas} pessoa(s).`
+        + (extras.length ? ' ' + extras.join(' · ') + '.' : '') + ' Veja o painel "Cursos do mês".', 7000);
+    } catch (err) {
+      console.error(err);
+      $('#fg-note').innerHTML = `<div class="err-note">Não consegui ler o arquivo de cursos: ${esc(err.message || err)}. Ele precisa ter as colunas <b>MATRÍCULA</b> e <b>DATA</b>.</div>`;
+    }
+  }
+
+  function tirarCursos() {
+    S.cursos = null; S.cursosFile = '';
+    if (S.model) E.limparCursos(S.model, S.st);
+    const n = document.getElementById('fgl-cfile-name'); if (n) n.textContent = '';
+    renderAll(); folgasLauncherSync();
+    toast('Cursos removidos. A escala voltou ao que veio na planilha.');
   }
 
   function findEmp(key) {
@@ -591,6 +715,9 @@ function folgasMontar() {
     regenerate();
   });
   $('#fg-btn-dl').addEventListener('click', download);
+  $('#fg-btn-cursos').addEventListener('click', () => $('#fg-cfile').click());
+  $('#fg-cfile').addEventListener('change', (ev) => { const f = ev.target.files[0]; ev.target.value = ''; if (f) loadCursosFile(f); });
+  $('#fg-cursos').addEventListener('click', (ev) => { if (ev.target.closest('#fg-cur-limpar')) tirarCursos(); });
   $('#fg-opt-run').addEventListener('change', (ev) => { S.st.maxRun = +ev.target.value; regenerate(); });
   $('#fg-opt-af').addEventListener('change', (ev) => { S.st.afCounts = ev.target.checked; regenerate(); });
   $('#fg-unknown-list').addEventListener('change', (ev) => {
@@ -611,6 +738,7 @@ function folgasMontar() {
   // carregamento de arquivo entra por aqui quando o arquivo foi solto lá fora.
   window._fgRender = renderAll;
   window._fgLoadFile = loadFile;
+  window._fgLoadCursos = loadCursosFile;
 
   /* ---------- início ---------- */
   // Só monta o exemplo se ainda não há planilha lida. Antes isso rodava
