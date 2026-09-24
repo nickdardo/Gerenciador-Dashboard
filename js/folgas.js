@@ -175,7 +175,7 @@ function folgasOverlayHTML() {
         <div class="fg-rule">
           <label>Domingo e folga agrupada</label>
           <ul>
-            <li>Todo colaborador folga pelo menos 1 domingo.</li>
+            <li>Todo colaborador folga <b>exatamente 1 domingo</b> no mês — nem nenhum, nem dois. Um segundo domingo é erro, mesmo que já venha lançado na planilha. Domingo dentro das férias (L) não conta: quem estava de férias não gastou o domingo dele.</li>
             <li>Nome dourado: 1 FA no sábado ou na segunda, colada ao domingo de folga.</li>
             <li>O FA <b>entra na conta das folgas do mês</b>, mas <b>não quebra a sequência</b> de dias trabalhados: ele é o dia extra colado no descanso, não o descanso em si. A sequência é medida de folga a folga, e o próprio dia de FA entra nela.</li>
             <li>Clique no nome para marcar/desmarcar dourado.</li>
@@ -295,7 +295,7 @@ function folgasMontar() {
       <div class="stat"><span class="k">Folgas lançadas</span><span class="v">${gen}<small>sendo ${fa} FA</small></span></div>
       <div class="stat ${err ? 'bad' : 'good'}"><span class="k">Regras quebradas</span><span class="v">${err}<small>${warn} aviso${warn === 1 ? '' : 's'}</small></span></div>
       <div class="stat"><span class="k">Maior variação/dia</span><span class="v">${spreadMax}<small>pessoa${spreadMax === 1 ? '' : 's'} no grupo</small></span></div>`;
-    $('#fg-rules-hint').textContent = `· máx. ${S.st.maxRun} dias seguidos · 1 domingo · FA para dourados (não quebra a sequência)`;
+    $('#fg-rules-hint').textContent = `· máx. ${S.st.maxRun} dias seguidos · exatamente 1 domingo · FA para dourados (não quebra a sequência)`;
   }
 
   function renderTabs() {
@@ -342,7 +342,11 @@ function folgasMontar() {
   function statCells(e, key) {
     const s = e.stat;
     const need = s.allL ? '<span class="dash">—</span>' : `${s.counted}/${s.required}`;
-    const sun = s.allL ? '<span class="dash">—</span>' : s.sunOff ? '<span class="tick">✓</span>' : '<span class="cross">✗</span>';
+    // Dom: ✓ = exatamente 1 domingo. Mais de um é erro, então mostra quantos
+    // em vez de um visto — senão dois domingos passariam como "certo".
+    const sun = s.allL ? '<span class="dash">—</span>'
+      : s.sun > 1 ? `<span class="cross">${s.sun}</span>`
+      : s.sunOff ? '<span class="tick">✓</span>' : '<span class="cross">✗</span>';
     const fa = !e.gold ? '<span class="dash">·</span>' : s.fa ? '<span class="tick">✓</span>' : '<span class="cross">✗</span>';
     const seqCls = s.maxRun > S.st.maxRun ? 'cross' : '';
     return [need, sun, fa, `<span class="${seqCls}">${s.maxRun}</span>`, statusPill(e, key)];
@@ -373,7 +377,7 @@ function folgasMontar() {
         b.prevDates.forEach((d, i) => { html += `<th class="pv ${i === 0 ? 'first' : ''}" title="mês anterior">${d}</th>`; });
         html += `<th class="gap"></th>`;
         for (let d = 0; d < D; d++) html += `<th class="dc ${dow[d] === 0 ? 'sun' : dow[d] === 6 ? 'sat' : ''}"><span class="dn">${d + 1}</span><span class="dw">${WD[dow[d]]}</span></th>`;
-        html += `<th class="st" title="Folgas que contam / necessárias">Folgas</th><th class="st sm" title="Domingo de folga">Dom</th><th class="st sm" title="Folga agrupada">FA</th><th class="st sm" title="Maior sequência trabalhada (o FA não quebra a sequência)">Seq</th><th class="st status">Situação</th></tr></thead><tbody>`;
+        html += `<th class="st" title="Folgas que contam / necessárias">Folgas</th><th class="st sm" title="Domingos de folga — o certo é exatamente 1 por mês">Dom</th><th class="st sm" title="Folga agrupada">FA</th><th class="st sm" title="Maior sequência trabalhada (o FA não quebra a sequência)">Seq</th><th class="st status">Situação</th></tr></thead><tbody>`;
         g.emps.forEach((e, ei) => {
           const key = `${S.tab}|${bi}|${gi}|${ei}`;
           html += `<tr class="${e.gold ? 'gold' : ''}" id="r-${esc(key.replace(/\|/g, '-'))}"><td class="mat">${e.mat}</td>

@@ -277,6 +277,123 @@ sec('11. Um domingo de folga por mês');
   eq(semDomingo, 0, 'todos os ' + emps.length + ' colaboradores têm ao menos 1 domingo de folga');
 }
 
+/* ==================== 11b. exatamente 1 domingo, nunca 2 ================= */
+sec('11b. Nenhum colaborador fica com 2 domingos de folga');
+{
+  // Regra confirmada: 1 domingo por mês, nem menos nem mais. Antes o solver
+  // só sabia dizer "tem domingo"; o segundo aparecia por sobra de folga.
+  const st = E.defaultSettings();
+  const domDe = (mm, e) => Array.from({ length: mm.days }, (_, d) => d)
+    .filter((d) => mm.dow[d] === 0 && ['F', 'AF', 'CH'].includes(E.eff(e, d)));
+
+  // Histórico do mês anterior variado, como na vida real: cada um fechou o
+  // mês num ponto diferente. Com histórico idêntico para todos, a escala
+  // inteira é empurrada para as mesmas datas e o teste vira ficção.
+  const hist = [['F', '', '', ''], ['', 'F', '', ''], ['', '', 'F', ''], ['', '', '', 'F'], ['F', '', '', ''], ['', '', 'F', '']];
+
+  for (const [Y, M, n] of [[2026, 9, 24], [2026, 10, 24], [2026, 7, 40], [2027, 0, 40]]) {
+    const mm = mkMonth(Y, M);
+    const emps = Array.from({ length: n }, (_, i) => mkEmp(mm.days, { ch: 186, gold: i % 4 === 0, prev: hist[i % hist.length] }));
+    const model = mkModel(Y, M, [emps]);
+    model.sheets[0].chTable = [{ ch: 186, maxH: 150, jorn: 6 }];
+    E.generate(model, st, { passes: 5 });
+
+    const contagem = emps.map((e) => domDe(mm, e).length);
+    const comDois = contagem.filter((v) => v > 1).length;
+    const semNenhum = contagem.filter((v) => v === 0).length;
+    const rotulo = mm.label + ' (' + n + 'p)';
+    eq(comDois, 0, rotulo + ': ninguém com 2 domingos');
+    eq(semNenhum, 0, rotulo + ': ninguém sem domingo');
+    eq(model.errorCount, 0, rotulo + ': escala sem erros');
+    for (const e of emps) eq(e.stat.sun, 1, rotulo + ': stat.sun registra exatamente 1 domingo');
+  }
+}
+
+sec('11c. Os domingos ficam repartidos entre as pessoas');
+{
+  // Cada um folga 1 domingo; o solver precisa espalhar essas escolhas pelos
+  // domingos do mês, senão o primeiro fica lotado e sem efetivo.
+  const st = E.defaultSettings();
+  const hist = [['F', '', '', ''], ['', 'F', '', ''], ['', '', 'F', ''], ['', '', '', 'F'], ['F', '', '', ''], ['', '', 'F', '']];
+  for (const [Y, M, n] of [[2026, 9, 40], [2026, 7, 40], [2026, 10, 24]]) {
+    const mm = mkMonth(Y, M);
+    const emps = Array.from({ length: n }, (_, i) => mkEmp(mm.days, { ch: 186, prev: hist[i % hist.length] }));
+    const model = mkModel(Y, M, [emps]);
+    model.sheets[0].chTable = [{ ch: 186, maxH: 150, jorn: 6 }];
+    E.generate(model, st, { passes: 5 });
+
+    const dom = Array.from({ length: mm.days }, (_, d) => d).filter((d) => mm.dow[d] === 0);
+    const porDom = dom.map((d) => emps.filter((e) => ['F', 'AF', 'CH'].includes(E.eff(e, d))).length);
+    const ideal = n / dom.length;
+    const desvio = Math.max(...porDom.map((v) => Math.abs(v - ideal)));
+    console.log('   ' + mm.label + ' (' + n + 'p): ' + porDom.join('/') + '  ideal ' + ideal.toFixed(1));
+    ok(desvio <= 1.5, mm.label + ': nenhum domingo destoa mais de 1,5 pessoa do ideal (desvio ' + desvio.toFixed(1) + ')');
+    eq(porDom.reduce((a, b) => a + b, 0), n, mm.label + ': a soma dos domingos bate com o efetivo');
+  }
+}
+
+sec('11d. Domingo a mais vindo da planilha vira erro, sem estragar o resto');
+{
+  const st = E.defaultSettings();
+  const mm = mkMonth(2026, 7);
+  const dom = Array.from({ length: mm.days }, (_, d) => d).filter((d) => mm.dow[d] === 0);
+  const fixed = new Array(mm.days).fill('');
+  fixed[dom[0]] = 'F'; fixed[dom[2]] = 'F';   // dois domingos já lançados
+  const e = mkEmp(mm.days, { ch: 186, fixed });
+  const model = mkModel(2026, 7, [[e]]);
+  model.sheets[0].chTable = [{ ch: 186, maxH: 150, jorn: 6 }];
+  E.generate(model, st, { passes: 5 });
+
+  eq(e.stat.sun, 2, 'os dois domingos fixos são contados');
+  const erro = e.issues.find((i) => i.lv === 'erro' && /domingos de folga/.test(i.t));
+  ok(!!erro, 'acusa erro de domingo excedente');
+  ok(erro && erro.t.includes(String(dom[0] + 1)) && erro.t.includes(String(dom[2] + 1)), 'a mensagem diz quais dias (' + (erro ? erro.t : '') + ')');
+  ok(erro && /planilha/.test(erro.t), 'a mensagem avisa que vieram da planilha, para o ajuste ser feito no Excel');
+
+  // O ponto principal: o solver não pode sabotar o resto para fugir do erro.
+  ok(e.stat.counted >= e.stat.required, 'a meta de folgas continua cumprida (' + e.stat.counted + '/' + e.stat.required + ')');
+  ok(e.stat.maxRun <= st.maxRun, 'o 6x1 continua respeitado (maior sequência ' + e.stat.maxRun + ')');
+  eq(e.issues.filter((i) => i.lv === 'erro').length, 1, 'o domingo excedente é o único erro');
+  eq(e.gen.filter((c, d) => mm.dow[d] === 0 && c).length, 0, 'o gerador não acrescenta um terceiro domingo');
+}
+
+sec('11e. Edição manual que cria o 2º domingo é acusada');
+{
+  const st = E.defaultSettings();
+  const mm = mkMonth(2026, 7);
+  const dom = Array.from({ length: mm.days }, (_, d) => d).filter((d) => mm.dow[d] === 0);
+  const e = mkEmp(mm.days, { ch: 186 });
+  const model = mkModel(2026, 7, [[e]]);
+  model.sheets[0].chTable = [{ ch: 186, maxH: 150, jorn: 6 }];
+  E.generate(model, st, { passes: 5 });
+  eq(e.stat.sun, 1, 'nasce com 1 domingo');
+
+  // marca um segundo domingo na mão, como quem clica na célula
+  const jaTem = dom.find((d) => E.eff(e, d));
+  const outro = dom.find((d) => d !== jaTem && !E.eff(e, d));
+  e.manual[outro] = 'F';
+  E.validate(model, st);
+  eq(e.stat.sun, 2, 'a edição manual soma no contador de domingos');
+  ok(e.issues.some((i) => i.lv === 'erro' && /domingos de folga/.test(i.t)), 'a edição manual é acusada na hora');
+}
+
+sec('11f. Férias no domingo não consomem o domingo da pessoa');
+{
+  const st = E.defaultSettings();
+  const mm = mkMonth(2026, 7);
+  const dom = Array.from({ length: mm.days }, (_, d) => d).filter((d) => mm.dow[d] === 0);
+  const fixed = new Array(mm.days).fill('');
+  for (let d = 0; d <= dom[1]; d++) fixed[d] = 'L';  // férias cobrindo 2 domingos
+  const e = mkEmp(mm.days, { ch: 186, fixed });
+  const model = mkModel(2026, 7, [[e]]);
+  model.sheets[0].chTable = [{ ch: 186, maxH: 150, jorn: 6 }];
+  E.generate(model, st, { passes: 5 });
+
+  ok(!fixed.every(Boolean), 'o mês não é só de férias');
+  eq(e.stat.sun, 1, 'os domingos de férias não contam; sobra 1 domingo de folga de verdade');
+  ok(!e.issues.some((i) => i.lv === 'erro' && /domingos de folga/.test(i.t)), 'férias sobre domingos não viram erro de domingo excedente');
+}
+
 sec('12. Domingos bloqueados por férias → info, não erro');
 {
   const st = E.defaultSettings();

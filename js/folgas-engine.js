@@ -333,7 +333,11 @@
   }
 
   /* ---------- Solver (programação dinâmica por colaborador) ---------- */
-  const BIG = 1e6, SHORT = 1e5, SUNPEN = 5e4, FAPEN = 2e4, EXTRA = 300, ADJ = 60, GAP1 = 8;
+  // SUN2PEN pune o domingo excedente. Fica abaixo de SHORT e de BIG de
+  // propósito: o solver nunca deve furar a meta de folgas nem o 6x1 para
+  // evitar um segundo domingo — se a planilha já vier com dois fixos, ele
+  // aceita e a validação acusa, em vez de estragar o resto da escala.
+  const BIG = 1e6, SHORT = 1e5, SUNPEN = 5e4, SUN2PEN = 4e4, FAPEN = 2e4, EXTRA = 300, ADJ = 60, GAP1 = 8;
 
   function solveEmp(emp, ctx, costDay) {
     const { D, dow, st } = ctx;
@@ -362,8 +366,14 @@
     function dp(forced) {
       const Kc = need + 8;
       const R = maxRun + 1;
+      // `s` = já folgou algum domingo. O excedente não é contado no estado e
+      // sim cobrado na hora: cada domingo depois do primeiro paga SUN2PEN.
+      // Contar "0, 1, 2+" no estado não servia — o 2 virava absorvente e o
+      // terceiro domingo saía de graça, então a planilha que já vinha com
+      // dois ganhava um terceiro do gerador.
       const S = R * (Kc + 1) * 4;
       const idx = (run, k, s, pg) => ((run * (Kc + 1) + k) * 2 + s) * 2 + pg;
+      const domExtra = (s, ehDom) => (ehDom && s ? SUN2PEN : 0);
       let cur = new Float64Array(S).fill(Infinity);
       cur[idx(r0, 0, 0, 0)] = 0;
       const back = [];
@@ -382,7 +392,7 @@
               // FA já lançado na planilha: não trabalha, mas a sequência segue.
               const over = run + 1 > maxRun;
               relax(idx(Math.min(run + 1, maxRun), k, s, 0), c0 + (over ? BIG : 0), 0);
-            } else relax(idx(0, k, s || (f.sun ? 1 : 0), 0), c0, 0);
+            } else relax(idx(0, k, s || (f.sun ? 1 : 0), 0), c0 + domExtra(s, f.sun), 0);
             continue;
           }
           const fd = forced && forced[d];
@@ -393,7 +403,7 @@
                 const over = run + 1 > maxRun;
                 relax(idx(Math.min(run + 1, maxRun), k + 1, s, 1), c0 + costDay[d] + adjFixed(d) * 0.5 + (over ? BIG : 0), 2);
               } else {
-                relax(idx(0, k + 1, s || (dow[d] === 0 ? 1 : 0), 1), c0 + costDay[d] + adjFixed(d) * 0.5, 1);
+                relax(idx(0, k + 1, s || (dow[d] === 0 ? 1 : 0), 1), c0 + costDay[d] + adjFixed(d) * 0.5 + domExtra(s, dow[d] === 0), 1);
               }
             }
             continue;
@@ -404,7 +414,7 @@
           // folgar
           if (k + 1 <= Kc) {
             const pen = costDay[d] + (pg ? ADJ : 0) + adjFixed(d) + (run === 1 && !(pr.unknown && d - 2 < 0) ? GAP1 : 0);
-            relax(idx(0, k + 1, s || (dow[d] === 0 ? 1 : 0), 1), c0 + pen, 1);
+            relax(idx(0, k + 1, s || (dow[d] === 0 ? 1 : 0), 1), c0 + pen + domExtra(s, dow[d] === 0), 1);
           }
         }
         back.push({ bp, bc });
@@ -413,6 +423,8 @@
       let best = Infinity, bi = -1;
       for (let run = 0; run < R; run++) for (let k = 0; k <= Kc; k++) for (let s = 0; s < 2; s++) for (let pg = 0; pg < 2; pg++) {
         const i = idx(run, k, s, pg); if (cur[i] === Infinity) continue;
+        // Exatamente 1 domingo: a falta é punida aqui, o excedente já foi
+        // cobrado dia a dia por domExtra().
         let c = cur[i] + (k < need ? (need - k) * SHORT : (k - need) * EXTRA) + (!s && sunAvail ? SUNPEN : 0);
         if (c < best) { best = c; bi = i; }
       }
@@ -521,9 +533,19 @@
           list.push({ lv: 'erro', t: `${maxSeen} dias seguidos sem folga (${a} até o dia ${worst[1] + 1})${porFA}` });
         }
         if (!allL && counted < e.req.required) list.push({ lv: 'erro', t: `Faltam ${e.req.required - counted} folga(s): tem ${counted} de ${e.req.required}` });
-        const sunOff = codes.some((c, d) => dow[d] === 0 && (c === 'F' || c === 'AF' || c === 'CH'));
+        // Domingo de folga: exatamente um por mês. Férias (L) não entram —
+        // quem está de férias no domingo não "gastou" o domingo dele.
+        const sunDays = codes.map((c, d) => (dow[d] === 0 && (c === 'F' || c === 'AF' || c === 'CH') ? d : -1)).filter((d) => d >= 0);
+        const sunOff = sunDays.length > 0;
         const sunBlocked = codes.every((c, d) => dow[d] !== 0 || (c && c !== 'F' && c !== 'AF' && c !== 'CH'));
         if (!sunOff && !allL) list.push(sunBlocked ? { lv: 'info', t: 'Nenhum domingo livre (férias/curso em todos)' } : { lv: 'erro', t: 'Sem domingo de folga no mês' });
+        if (sunDays.length > 1) {
+          const quais = sunDays.map((d) => d + 1).join(', ');
+          const fixos = sunDays.filter((d) => e.fixed[d]).length;
+          const origem = fixos === sunDays.length ? ' — todos já vinham na planilha, ajuste no Excel'
+            : fixos ? ' — ' + fixos + ' já vinha na planilha' : '';
+          list.push({ lv: 'erro', t: `${sunDays.length} domingos de folga (dias ${quais}) — o certo é 1 por mês${origem}` });
+        }
         const faDays = codes.map((c, d) => (c === 'FA' ? d : -1)).filter((d) => d >= 0);
         for (const d of faDays) {
           if (dow[d] !== 6 && dow[d] !== 1) list.push({ lv: 'erro', t: `FA no dia ${d + 1} (${DOW[dow[d]]}) — só sábado ou segunda` });
@@ -542,7 +564,7 @@
         if (!e.gold && faDays.length) list.push({ lv: 'aviso', t: 'FA para nome que não é dourado' });
         if (!e.req.known) list.push({ lv: 'info', t: `Carga horária ${e.ch ?? '—'} não está na tabela CH; usei ${e.req.required} folgas` });
         const hours = e.req.maxH != null ? (e.ch - e.req.jorn * counted) : null;
-        e.stat = { counted, offs, required: e.req.required, maxRun: maxSeen, sunOff, fa: faDays.length, hours, maxH: e.req.maxH, allL };
+        e.stat = { counted, offs, required: e.req.required, maxRun: maxSeen, sunOff, sun: sunDays.length, fa: faDays.length, hours, maxH: e.req.maxH, allL };
         e.issues = list;
         issues += list.filter((x) => x.lv === 'erro').length;
       }
