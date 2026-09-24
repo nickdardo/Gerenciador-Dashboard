@@ -177,6 +177,7 @@ function folgasOverlayHTML() {
           <ul>
             <li>Todo colaborador folga pelo menos 1 domingo.</li>
             <li>Nome dourado: 1 FA no sábado ou na segunda, colada ao domingo de folga.</li>
+            <li>O FA <b>entra na conta das folgas do mês</b>, mas <b>não quebra a sequência</b> de dias trabalhados: ele é o dia extra colado no descanso, não o descanso em si. A sequência é medida de folga a folga, e o próprio dia de FA entra nela.</li>
             <li>Clique no nome para marcar/desmarcar dourado.</li>
           </ul>
         </div>
@@ -188,37 +189,37 @@ function folgasOverlayHTML() {
       </div>
     </details>
 
-        <nav class="fg-tabs" id="fg-tabs" role="tablist" aria-label="Abas da escala"></nav>
-        <div class="fg-blocks" id="fg-sheet"></div>
-
-      </div>
-      <aside class="fg-side">
-        <div class="fg-panel">
-          <h4>Como colar no Excel</h4>
-          <ol class="fg-how">
-            <li>Clique em <b>Copiar bloco</b> no grupo.</li>
-            <li>No Excel, clique na célula indicada no botão (ex.: <b>Q12</b>) — é o dia 1 do primeiro nome.</li>
-            <li><b>Ctrl+V</b>. Só as células dos dias mudam.</li>
-          </ol>
-        </div>
-        <div class="fg-panel">
-          <h4>Pendências</h4>
-          <div id="fg-issues"></div>
-        </div>
-        <div class="fg-panel">
-          <h4>Legenda</h4>
-          <div class="fg-legend">
-            <span class="fg-sw c-gen">F</span><span>Folga gerada pelo painel</span>
-            <span class="fg-sw c-F">F</span><span>Folga que já estava na escala</span>
-            <span class="fg-sw c-FA">FA</span><span>Folga agrupada (sáb/seg)</span>
-            <span class="fg-sw c-K">K</span><span>Curso — conta como trabalhado</span>
-            <span class="fg-sw c-AF">AF</span><span>Folga aniversário</span>
-            <span class="fg-sw c-L">L</span><span>Férias</span>
-            <span class="fg-sw c-gen c-man">F</span><span>Sua edição manual (fica travada)</span>
-            <span class="fg-sw c-man"></span><span>Dia travado como trabalho</span>
+        <div class="fg-panels">
+          <div class="fg-panel">
+            <h4>Como colar no Excel</h4>
+            <ol class="fg-how">
+              <li>Clique em <b>Copiar bloco</b> no grupo.</li>
+              <li>No Excel, clique na célula indicada no botão (ex.: <b>Q12</b>) — é o dia 1 do primeiro nome.</li>
+              <li><b>Ctrl+V</b>. Só as células dos dias daquelas linhas mudam.</li>
+            </ol>
+          </div>
+          <div class="fg-panel">
+            <h4>Pendências</h4>
+            <div id="fg-issues"></div>
+          </div>
+          <div class="fg-panel">
+            <h4>Legenda</h4>
+            <div class="fg-legend">
+              <span class="fg-sw c-gen">F</span><span>Folga gerada pelo painel</span>
+              <span class="fg-sw c-F">F</span><span>Folga que já estava na escala</span>
+              <span class="fg-sw c-FA">FA</span><span>Folga agrupada (sáb/seg) — não quebra o 6x1</span>
+              <span class="fg-sw c-K">K</span><span>Curso — conta como trabalhado</span>
+              <span class="fg-sw c-AF">AF</span><span>Folga aniversário</span>
+              <span class="fg-sw c-L">L</span><span>Férias</span>
+              <span class="fg-sw c-gen c-man">F</span><span>Sua edição manual (fica travada)</span>
+              <span class="fg-sw c-man"></span><span>Dia travado como trabalho</span>
+            </div>
           </div>
         </div>
-      </aside>
+
+        <nav class="fg-tabs" id="fg-tabs" role="tablist" aria-label="Abas da escala"></nav>
+        <div class="fg-blocks" id="fg-sheet"></div>
+      </div>
     </div>
   </div>
   <div id="fg-toast" class="fg-toast" role="status" hidden></div>`;
@@ -294,7 +295,7 @@ function folgasMontar() {
       <div class="stat"><span class="k">Folgas lançadas</span><span class="v">${gen}<small>sendo ${fa} FA</small></span></div>
       <div class="stat ${err ? 'bad' : 'good'}"><span class="k">Regras quebradas</span><span class="v">${err}<small>${warn} aviso${warn === 1 ? '' : 's'}</small></span></div>
       <div class="stat"><span class="k">Maior variação/dia</span><span class="v">${spreadMax}<small>pessoa${spreadMax === 1 ? '' : 's'} no grupo</small></span></div>`;
-    $('#fg-rules-hint').textContent = `· máx. ${S.st.maxRun} dias seguidos · 1 domingo · FA para dourados`;
+    $('#fg-rules-hint').textContent = `· máx. ${S.st.maxRun} dias seguidos · 1 domingo · FA para dourados (não quebra a sequência)`;
   }
 
   function renderTabs() {
@@ -372,7 +373,7 @@ function folgasMontar() {
         b.prevDates.forEach((d, i) => { html += `<th class="pv ${i === 0 ? 'first' : ''}" title="mês anterior">${d}</th>`; });
         html += `<th class="gap"></th>`;
         for (let d = 0; d < D; d++) html += `<th class="dc ${dow[d] === 0 ? 'sun' : dow[d] === 6 ? 'sat' : ''}"><span class="dn">${d + 1}</span><span class="dw">${WD[dow[d]]}</span></th>`;
-        html += `<th class="st" title="Folgas que contam / necessárias">Folgas</th><th class="st" title="Domingo de folga">Dom</th><th class="st" title="Folga agrupada">FA</th><th class="st" title="Maior sequência trabalhada">Seq</th><th class="st status">Situação</th></tr></thead><tbody>`;
+        html += `<th class="st" title="Folgas que contam / necessárias">Folgas</th><th class="st sm" title="Domingo de folga">Dom</th><th class="st sm" title="Folga agrupada">FA</th><th class="st sm" title="Maior sequência trabalhada (o FA não quebra a sequência)">Seq</th><th class="st status">Situação</th></tr></thead><tbody>`;
         g.emps.forEach((e, ei) => {
           const key = `${S.tab}|${bi}|${gi}|${ei}`;
           html += `<tr class="${e.gold ? 'gold' : ''}" id="r-${esc(key.replace(/\|/g, '-'))}"><td class="mat">${e.mat}</td>

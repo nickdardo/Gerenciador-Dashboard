@@ -183,6 +183,73 @@ function paginaDeTeste() {
     ok(r.sit.length > 0, 'a coluna Situação tem conteúdo (' + r.sit + ')');
   }
 
+  /* ---------------------------- 7b. faixas não podem ser esmagadas ---- */
+  sec('7b. Resumo e abas mantêm altura');
+  {
+    // .fg-main é uma coluna flex de altura fixa. Sem flex:none nos filhos, o
+    // navegador encolhe as faixas baixas para caber: o resumo virou 2px e a
+    // barra de abas 5px, com o conteúdo lá dentro, invisível.
+    const r = await page.evaluate(() => {
+      const h = (s) => { const e = document.querySelector(s); return e ? Math.round(e.getBoundingClientRect().height) : -1; };
+      return { resumo: h('#fg-summary'), stat: h('#fg-summary .stat'), abas: h('#fg-tabs'), aba: h('#fg-tabs .tab'), paineis: h('.fg-panels') };
+    });
+    console.log('   resumo ' + r.resumo + 'px · abas ' + r.abas + 'px · painéis ' + r.paineis + 'px');
+    ok(r.resumo >= 40, 'a faixa de resumo tem altura de verdade (' + r.resumo + 'px)');
+    ok(r.resumo >= r.stat, 'o resumo acomoda o conteúdo dos cartões');
+    ok(r.abas >= 20, 'a barra de abas não foi esmagada (' + r.abas + 'px)');
+    ok(r.paineis >= 80, 'a faixa de painéis tem altura (' + r.paineis + 'px)');
+  }
+
+  sec('7c. Tipografia aplicada');
+  {
+    // As regras usam o atalho `font:` com var(--f-display). Se esse token
+    // valer `inherit`, a família é inválida e o navegador descarta a
+    // declaração inteira — tamanho e peso junto. Tudo cai para 13px/400.
+    const t = await page.evaluate(() => {
+      const f = (s) => { const e = document.querySelector(s); if (!e) return null; const c = getComputedStyle(e); return { px: parseFloat(c.fontSize), peso: +c.fontWeight }; };
+      return { titulo: f('.fg-bar h2'), valor: f('#fg-summary .stat .v'), bloco: f('.block-head h2'), grupo: f('.grp-head h3') };
+    });
+    ok(t.titulo.px >= 24, 'o título da camada usa o tamanho de display (' + t.titulo.px + 'px)');
+    ok(t.valor.px >= 20, 'os números do resumo são grandes (' + t.valor.px + 'px)');
+    ok(t.bloco.px >= 20, 'o título do bloco usa display (' + t.bloco.px + 'px)');
+    ok(t.grupo.px >= 15, 'o nome do grupo usa display (' + t.grupo.px + 'px)');
+    ok(t.valor.peso >= 600, 'os números do resumo têm peso (' + t.valor.peso + ')');
+  }
+
+  sec('7d. Código do dia vence o tom de fim de semana');
+  {
+    // O FA é sempre sábado ou segunda. Nos sábados, o tom do fim de semana
+    // cobria o fundo do código e sobrava texto branco sobre azul claro.
+    for (const tema of ['dark', 'light']) {
+      await page.evaluate((t) => document.documentElement.setAttribute('data-theme', t), tema);
+      await page.waitForTimeout(40);
+      const r = await page.evaluate(() => {
+        const px = (s) => { const n = (s.match(/[\d.]+/g) || []).map(Number); return { r: n[0] || 0, g: n[1] || 0, b: n[2] || 0, a: n.length > 3 ? n[3] : 1 }; };
+        const fundo = (el) => { const p = []; let n = el; while (n) { p.push(px(getComputedStyle(n).backgroundColor)); n = n.parentElement; }
+          let o = { r: 255, g: 255, b: 255 };
+          for (let i = p.length - 1; i >= 0; i--) { const c = p[i]; if (!c.a) continue;
+            o = { r: c.r * c.a + o.r * (1 - c.a), g: c.g * c.a + o.g * (1 - c.a), b: c.b * c.a + o.b * (1 - c.a) }; }
+          return o; };
+        const lum = (c) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+          return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b); };
+        const sab = document.querySelector('tbody td.c-FA.sat') || document.querySelector('tbody td.c-FA');
+        // Um dia de fim de semana sem código: é o tom que estava vazando por cima.
+        const tom = document.querySelector('tbody td.dc.sat:not([class*="c-"])') || document.querySelector('tbody td.dc.sun:not([class*="c-"])');
+        const bgSab = getComputedStyle(sab).backgroundColor;
+        const real = fundo(sab);
+        const L1 = lum(px(getComputedStyle(sab).color)), L2 = lum(real);
+        return { sabado: sab.classList.contains('sat'),
+          opaco: px(bgSab).a === 1,
+          diferenteDoTom: !tom || bgSab !== getComputedStyle(tom).backgroundColor,
+          contraste: (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05) };
+      });
+      ok(r.opaco, '[' + tema + '] o FA tem fundo próprio e opaco' + (r.sabado ? ', mesmo no sábado' : ''));
+      ok(r.diferenteDoTom, '[' + tema + '] o fundo do FA não é o tom do fim de semana');
+      ok(r.contraste >= 3.5, '[' + tema + '] o FA fica legível (contraste ' + r.contraste.toFixed(2) + ':1)');
+    }
+    await page.evaluate(() => document.documentElement.removeAttribute('data-theme'));
+  }
+
   /* ------------------------------------------------ 8. fechar a camada */
   sec('8. Fechar devolve o painel');
   {

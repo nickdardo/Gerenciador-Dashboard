@@ -311,12 +311,22 @@
   // código efetivo de um dia (fixo > manual > gerado)
   const eff = (emp, d) => { const v = emp.fixed[d] || emp.manual[d] || emp.gen[d]; return v === '·' ? '' : v; };
 
+  // O FA é folga para a meta do mês, mas NÃO é o descanso semanal: ele vem
+  // grudado no F do domingo, como dia extra do nome dourado. Então não zera a
+  // contagem do 6x1 — a sequência é medida de descanso a descanso, e o próprio
+  // dia de FA entra nela. Ex.: F no sábado 17 e FA no sábado 24 seguido de F no
+  // domingo 25 são 7 dias (18 a 24) até o descanso de verdade.
+  function quebraSequencia(code, st) {
+    if (code === 'FA') return false;
+    const k = kind(code, st);
+    return k === 'offC' || k === 'offX';
+  }
+
   function prevRun(emp, st) {
     if (emp.prevUnknown) return { run: 0, found: true, unknown: true };
     let run = 0;
     for (let i = emp.prev.length - 1; i >= 0; i--) {
-      const k = kind(emp.prev[i], st);
-      if (k === 'offC' || k === 'offX') return { run, found: true };
+      if (quebraSequencia(emp.prev[i], st)) return { run, found: true };
       run++;
     }
     return { run, found: false };
@@ -333,7 +343,9 @@
     for (let d = 0; d < D; d++) {
       const code = emp.fixed[d] || emp.manual[d];
       const k = kind(code, st);
-      fx[d] = { k, sun: dow[d] === 0 && (code === 'F' || code === 'AF' || code === 'CH') };
+      // `quebra` separa "é folga" de "zera a sequência": o FA é folga para a
+      // meta, mas a sequência do 6x1 atravessa ele.
+      fx[d] = { k, quebra: quebraSequencia(code, st), sun: dow[d] === 0 && (code === 'F' || code === 'AF' || code === 'CH') };
       if (k === 'offC') counted++;
       if (code === 'FA') hasFA = true;
       if (dow[d] === 0 && k === 'free') sunAvail = true;
@@ -366,12 +378,24 @@
             if (f.k === 'work') {
               const over = run + 1 > maxRun;
               relax(idx(Math.min(run + 1, maxRun), k, s, 0), c0 + (over ? BIG : 0), 0);
+            } else if (!f.quebra) {
+              // FA já lançado na planilha: não trabalha, mas a sequência segue.
+              const over = run + 1 > maxRun;
+              relax(idx(Math.min(run + 1, maxRun), k, s, 0), c0 + (over ? BIG : 0), 0);
             } else relax(idx(0, k, s || (f.sun ? 1 : 0), 0), c0, 0);
             continue;
           }
           const fd = forced && forced[d];
           if (fd) {
-            if (k + 1 <= Kc) relax(idx(0, k + 1, s || (dow[d] === 0 ? 1 : 0), 1), c0 + costDay[d] + adjFixed(d) * 0.5, fd === 'FA' ? 2 : 1);
+            // O F do domingo zera a sequência; o FA colado nele, não.
+            if (k + 1 <= Kc) {
+              if (fd === 'FA') {
+                const over = run + 1 > maxRun;
+                relax(idx(Math.min(run + 1, maxRun), k + 1, s, 1), c0 + costDay[d] + adjFixed(d) * 0.5 + (over ? BIG : 0), 2);
+              } else {
+                relax(idx(0, k + 1, s || (dow[d] === 0 ? 1 : 0), 1), c0 + costDay[d] + adjFixed(d) * 0.5, 1);
+              }
+            }
             continue;
           }
           // trabalhar
@@ -482,14 +506,19 @@
         const pr = prevRun(e, st);
         let run = pr.run, maxSeen = 0, runStart = pr.run ? -pr.run : 0, worst = null;
         if (!pr.found && e.prev.length) list.push({ lv: 'aviso', t: `Sem folga nos ${e.prev.length} dias do mês anterior — tratei como ${e.prev.length} dias trabalhados` });
+        let temFAnaSeq = false, faNaSeq = false;
         for (let d = 0; d < D; d++) {
-          const k = kind(codes[d], st);
-          if (k === 'offC' || k === 'offX') { run = 0; runStart = d + 1; }
-          else { run++; if (run > maxSeen) { maxSeen = run; worst = [runStart, d]; } }
+          if (quebraSequencia(codes[d], st)) { run = 0; runStart = d + 1; faNaSeq = false; }
+          else {
+            if (codes[d] === 'FA') faNaSeq = true;
+            run++;
+            if (run > maxSeen) { maxSeen = run; worst = [runStart, d]; temFAnaSeq = faNaSeq; }
+          }
         }
         if (maxSeen > st.maxRun) {
           const a = worst[0] < 0 ? 'desde o mês anterior' : `dia ${worst[0] + 1}`;
-          list.push({ lv: 'erro', t: `${maxSeen} dias seguidos sem folga (${a} até o dia ${worst[1] + 1})` });
+          const porFA = temFAnaSeq ? ' — a folga agrupada no meio não quebra a sequência' : '';
+          list.push({ lv: 'erro', t: `${maxSeen} dias seguidos sem folga (${a} até o dia ${worst[1] + 1})${porFA}` });
         }
         if (!allL && counted < e.req.required) list.push({ lv: 'erro', t: `Faltam ${e.req.required - counted} folga(s): tem ${counted} de ${e.req.required}` });
         const sunOff = codes.some((c, d) => dow[d] === 0 && (c === 'F' || c === 'AF' || c === 'CH'));
@@ -577,6 +606,6 @@
     });
   }
 
-  const api = { loadWorkbook, buildModel, generate, validate, groupTSV, buildXlsx, defaultSettings, kind, eff, colName, DOW, MESES };
+  const api = { loadWorkbook, buildModel, generate, validate, groupTSV, buildXlsx, defaultSettings, kind, quebraSequencia, eff, colName, DOW, MESES };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.FolgaEngine = api;
 })(typeof window !== 'undefined' ? window : globalThis);

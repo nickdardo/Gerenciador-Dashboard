@@ -2942,7 +2942,9 @@ html, body:has(#app-shell) { overflow-x: auto; overflow-y: hidden; }
   --petrol:var(--blue); --petrol-ink:#06161C; --petrol-soft:rgba(0,160,210,.16); --petrol-2:var(--blue);
   --gold:#c9a24a; --gold-soft:rgba(201,162,74,.18); --gold-ink:#f0da9a;
   --gen:rgba(0,160,210,.18); --gen-ink:#bfe6f2;
-  --fa:#9f7aea; --fa-ink:#fff; --k:#38bdf8; --k-ink:#06161c;
+  /* Vermelho do projeto original. Na migração isto virou roxo por engano e
+     destoava da referência; o FA é a marca mais importante da tela. */
+  --fa:#e0503f; --fa-ink:#fff; --k:#38bdf8; --k-ink:#06161c;
   --af:#f6ad55; --af-ink:#2b1607;
   --l-ink:#c9a24a; --ch:#fb923c; --other:var(--text-secondary);
   --sun:rgba(246,173,85,.12); --sat:rgba(99,179,237,.10);
@@ -2950,7 +2952,13 @@ html, body:has(#app-shell) { overflow-x: auto; overflow-y: hidden; }
   --warn:#f6ad55; --warn-soft:rgba(246,173,85,.16);
   --err:#fc8181; --err-soft:rgba(252,129,129,.16);
   --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.25);
-  --f-display:inherit; --f-body:inherit;
+  /* Precisam ser uma família de verdade, não `inherit`: estes tokens são
+     usados dentro do atalho `font:` (ex.: font:600 26px/1.1 var(--f-display)),
+     e ali a palavra `inherit` como família invalida a declaração inteira — o
+     navegador descarta tamanho, peso e família juntos, sem avisar. É a mesma
+     pilha de fontes do painel. */
+  --f-display:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
+  --f-body:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
   --f-mono:ui-monospace,Menlo,Consolas,monospace;
   color:var(--ink);
 }
@@ -3053,7 +3061,13 @@ html, body:has(#app-shell) { overflow-x: auto; overflow-y: hidden; }
 .fg-scope .nm-btn:hover .star{opacity:.9}
 .fg-scope tr.gold .nm-btn{background:linear-gradient(90deg,var(--gold-soft),var(--gold));color:var(--ink)}
 .fg-scope tr.gold .nm-btn .star{color:var(--gold-ink);opacity:1}
-.fg-scope .nm .hr{display:block;font:500 11px var(--f-mono);color:var(--ink-3);margin-top:-2px}
+.fg-scope .nm .hr{display:block;font:500 11px/1.1 var(--f-mono);color:var(--ink-3);margin-top:-1px}
+/* A célula do nome tem duas linhas (nome + horário) e não cabe nos 28px das
+   células de dia, que são de uma linha só. Deixar a linha do corpo crescer
+   mantém o horário legível sem esticar a grade inteira. */
+.fg-scope .grid tbody td{height:auto;min-height:28px}
+.fg-scope .grid tbody tr{height:34px}
+.fg-scope .grid td.nm{padding-block:3px}
 .fg-scope .pv{width:20px;min-width:20px;font:600 11px var(--f-mono);color:var(--ink-3);background:var(--surface-2)}
 .fg-scope .pv.first{border-left:1px solid var(--line)}
 .fg-scope th.pv{font-size:10px}
@@ -3061,6 +3075,15 @@ html, body:has(#app-shell) { overflow-x: auto; overflow-y: hidden; }
 .fg-scope .dc{width:27px;min-width:27px;border-left:1px solid var(--line-soft)}
 .fg-scope .dc.sun{background:var(--sun)}
 .fg-scope .dc.sat{background:var(--sat)}
+/* O tom de fim de semana não pode cobrir a cor do código. O FA é sempre
+   sábado ou segunda, então metade deles caía justamente na coluna tingida e
+   ficava texto branco sobre azul claro — invisível no tema claro. Aqui o
+   código vence o tom do dia; o fim de semana continua marcado pelo cabeçalho
+   e pelas colunas sem código. */
+.fg-scope .dc.sun.c-FA,.fg-scope .dc.sat.c-FA{background:var(--fa);color:var(--fa-ink)}
+.fg-scope .dc.sun.c-K,.fg-scope .dc.sat.c-K{background:var(--k);color:var(--k-ink)}
+.fg-scope .dc.sun.c-AF,.fg-scope .dc.sat.c-AF{background:var(--af);color:var(--af-ink)}
+.fg-scope .dc.sun.c-gen,.fg-scope .dc.sat.c-gen{background:var(--gen);color:var(--gen-ink)}
 .fg-scope .cellbtn{all:unset;box-sizing:border-box;display:grid;place-items:center;width:100%;height:27px;font:600 12px var(--f-mono);cursor:pointer}
 .fg-scope .cellbtn:focus-visible{outline:2px solid var(--petrol);outline-offset:-2px}
 .fg-scope .cellbtn.locked{cursor:default}
@@ -3140,7 +3163,7 @@ html, body:has(#app-shell) { overflow-x: auto; overflow-y: hidden; }
    sticky fica confinado a um container de altura conhecida.
    ══════════════════════════════════════════════════════ */
 
-.fg-ov { position: fixed; inset: 0; z-index: 900; background: var(--bg); }
+.fg-ov { position: fixed; inset: 0; z-index: 900; background: var(--bg-app); }
 .fg-ov[hidden] { display: none; }
 .fg-ov .fg-scope { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100%; max-width: none; margin: 0; padding: 0; gap: 0; }
 body.fg-locked { overflow: hidden; }
@@ -3149,25 +3172,41 @@ body.fg-locked { overflow: hidden; }
 .fg-ov .fg-bar { display: flex; align-items: center; gap: 8px 18px; flex-wrap: wrap;
   padding: 10px 18px; border-bottom: 1px solid var(--line); background: var(--surface); }
 .fg-ov .fg-bar .fg-eyebrow { margin: 0; }
-.fg-ov .fg-bar h2 { margin: 0; font: 700 20px/1.15 var(--f-display); letter-spacing: .02em; text-transform: uppercase; color: var(--petrol); }
+.fg-ov .fg-bar h2 { margin: 0; font: 700 28px/1.1 var(--f-display); letter-spacing: .01em; color: var(--petrol-2, var(--petrol)); }
 .fg-ov .fg-bar .fg-barmeta { font-size: 13px; color: var(--ink-2); }
 .fg-ov .fg-bar .fg-actions { margin-left: auto; display: flex; flex-wrap: wrap; gap: 8px; }
 .fg-close { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px;
   border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); font-size: 18px; line-height: 1; }
 .fg-close:hover { background: var(--surface-2, var(--line-soft)); color: var(--ink); }
 
-/* corpo: principal rola sozinho, lateral rola sozinha */
-.fg-ov .fg-body { display: grid; grid-template-columns: minmax(0, 1fr) 312px; min-height: 0; overflow: hidden; }
+/* corpo: uma coluna só. A grade tem 31 colunas de dia mais as fixas — tirar a
+   barra lateral devolve ~312px para ela, que é onde a largura faz falta. Os
+   painéis de apoio viram uma faixa de 3 colunas acima da grade. */
+.fg-ov .fg-body { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; overflow: hidden; }
 .fg-ov .fg-main { overflow: auto; overscroll-behavior: contain; min-width: 0;
   padding: 16px 18px 72px; display: flex; flex-direction: column; gap: 14px; }
-.fg-ov .fg-side { overflow: auto; overscroll-behavior: contain; min-width: 0;
-  border-left: 1px solid var(--line); padding: 16px 14px 72px;
-  display: flex; flex-direction: column; gap: 12px; grid-template-columns: none; }
-.fg-ov .fg-tabs { position: sticky; top: -16px; z-index: 4; background: var(--bg); padding-top: 4px; }
-@media (max-width: 1180px) {
-  .fg-ov .fg-body { grid-template-columns: minmax(0, 1fr); }
-  .fg-ov .fg-side { border-left: 0; border-top: 1px solid var(--line); overflow: visible; }
-}
+/* Coluna flex de altura fixa: sem isto o navegador encolhe os filhos para
+   caber, e as faixas baixas (resumo, abas) são esmagadas a 2–5px enquanto a
+   grade fica com quase tudo. Aqui ninguém encolhe — quem sobra, rola. */
+.fg-ov .fg-main > * { flex: 0 0 auto; }
+.fg-ov .fg-tabs { position: sticky; top: -16px; z-index: 4; background: var(--bg-app); padding-top: 4px; }
+
+.fg-scope .fg-panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 12px; align-items: start; }
+.fg-scope .fg-panels .fg-panel { height: 100%; }
+.fg-scope .fg-panels .fg-legend { grid-template-columns: auto 1fr auto 1fr; }
+@media (max-width: 1100px) { .fg-scope .fg-panels .fg-legend { grid-template-columns: auto 1fr; } }
+
+/* Colunas de conferência. No print apareciam grudadas ("FolgasDomFASeq") por
+   falta de respiro, mas alargar todas jogava "Situação" para fora da tela:
+   a grade tem 31 colunas de dia e o espaço é disputado. Então cada uma ganha
+   só o que precisa — Dom, FA e Seq guardam um caractere. */
+.fg-scope .grid th.st, .fg-scope .grid td.st { padding: 0 5px; }
+.fg-scope .grid th.st { min-width: 52px; }
+.fg-scope .grid th.st.sm { min-width: 34px; }
+.fg-scope .grid th.st.status, .fg-scope .grid td.st.status { min-width: 72px; }
+.fg-scope .grid .nm { min-width: 206px; max-width: 250px; }
+.fg-scope .grid .dc { min-width: 25px; }
 
 /* ---- peso: só pinta o que está à vista ----
    content-visibility faz o navegador pular layout e pintura dos grupos
@@ -3196,3 +3235,27 @@ body.fg-locked { overflow: hidden; }
 .fg-lstatus .v { font: 600 19px/1.1 var(--f-display); color: var(--ink); }
 .fg-lstatus .v small { font: 400 12px var(--f-body); color: var(--ink-2); margin-left: 4px; }
 .fg-lstatus .bad .v { color: var(--danger, #c0392b); }
+
+/* ══════════════════════════════════════════════════════
+   GERADOR DE FOLGAS — tema claro
+   A paleta veio do projeto original, que só tinha modo escuro: as cores de
+   texto (--gen-ink, --gold-ink, --l-ink) são tons claros feitos para fundo
+   escuro e somem no branco. Aqui elas são trocadas pelos equivalentes
+   escuros; os fundos e as cores de destaque continuam os mesmos.
+   ══════════════════════════════════════════════════════ */
+[data-theme="light"] .fg-scope {
+  --gen: rgba(0,160,210,.16);  --gen-ink: #0a5872;
+  --fa: #d8392b;               /* o vermelho do original para fundo claro */
+  --gold: #c9a24a;             --gold-soft: rgba(201,162,74,.22); --gold-ink: #5e4712;
+  --l-ink: #7d6220;
+  --ch: #b45309;
+  --ok: #2f7d52;               --ok-soft: rgba(47,125,82,.14);
+  --warn: #9a6212;             --warn-soft: rgba(246,173,85,.20);
+  --err: #b4272b;              --err-soft: rgba(180,39,43,.12);
+  --sun: rgba(246,173,85,.16); --sat: rgba(66,133,200,.10);
+  --shadow: 0 1px 2px rgba(16,24,40,.06), 0 6px 18px rgba(16,24,40,.07);
+}
+/* O F gerado é o código mais frequente da tela — precisa de peso próprio,
+   não só de cor, para não sumir no meio dos dias em branco. */
+[data-theme="light"] .fg-scope .c-gen { font-weight: 700; }
+[data-theme="light"] .fg-scope .c-F { font-weight: 700; }

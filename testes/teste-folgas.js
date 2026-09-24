@@ -341,6 +341,115 @@ sec('15. FA manual em não-dourado gera aviso; FA em dia errado gera erro');
   ok(e.issues.some((i) => i.lv === 'aviso' && /não é dourado/.test(i.t)), 'FA em nome não dourado é aviso');
 }
 
+/* ========================= 15b. FA não quebra a sequência do 6x1 ========= */
+sec('15b. FA conta na meta, mas não quebra a sequência de dias trabalhados');
+{
+  const st = E.defaultSettings();
+  // Outubro/2026 — mesmo mês do caso relatado: sábados em 3, 10, 17, 24, 31
+  const mm = mkMonth(2026, 9);
+  eq(mm.days, 31, 'outubro/2026 tem 31 dias');
+  eq(mm.dow[16], 6, 'dia 17 é sábado');
+  eq(mm.dow[23], 6, 'dia 24 é sábado');
+  eq(mm.dow[24], 0, 'dia 25 é domingo');
+
+  const monta = (codigo24) => {
+    const manual = new Array(mm.days).fill('');
+    [3, 10, 17, 31].forEach((d) => { manual[d - 1] = 'F'; });
+    manual[23] = codigo24;
+    manual[24] = 'F';
+    const e = mkEmp(mm.days, { ch: 186, gold: true, prev: ['F'], manual });
+    const model = mkModel(2026, 9, [[e]]);
+    model.sheets[0].chTable = [{ ch: 186, maxH: 150, jorn: 6 }];
+    E.validate(model, st);
+    return e;
+  };
+
+  // O caso relatado: F no sábado 17, FA no sábado 24, F no domingo 25.
+  // Os dias 18 a 24 são 7 dias sem descanso de verdade.
+  const comFA = monta('FA');
+  eq(comFA.stat.maxRun, 7, 'com FA no dia 24, a sequência 18–24 é de 7 dias');
+  ok(comFA.issues.some((i) => i.lv === 'erro' && /7 dias seguidos/.test(i.t)), 'acusa os 7 dias trabalhados');
+  ok(comFA.issues.some((i) => /não quebra a sequência/.test(i.t)), 'a mensagem explica que foi a folga agrupada');
+  eq(comFA.stat.counted, 6, 'mesmo assim o FA continua valendo como folga do mês (6/6)');
+
+  // Trocando o FA por um F comum, a mesma escala fica válida.
+  const comF = monta('F');
+  eq(comF.stat.maxRun, 6, 'com F comum no dia 24, a maior sequência cai para 6');
+  eq(comF.issues.filter((i) => i.lv === 'erro').length, 0, 'sem FA no meio, a escala passa');
+  eq(comF.stat.counted, 6, 'a contagem de folgas é a mesma nos dois casos');
+}
+
+sec('15c. FA do mês anterior também atravessa a virada');
+{
+  const st = E.defaultSettings();
+  const D = mkMonth(2026, 9).days;
+  // mês anterior terminou: F, trabalho, trabalho, FA  → a sequência não zerou no FA
+  const e = mkEmp(D, { ch: 186, gold: true, prev: ['F', '', '', 'FA'] });
+  const m = mkModel(2026, 9, [[e]]);
+  m.sheets[0].chTable = [{ ch: 186, maxH: 150, jorn: 6 }];
+  E.generate(m, st, { passes: 5 });
+  const cod = codigos(m, e);
+  // O FA e os 2 dias depois dele já são 3 dias de sequência puxados do mês
+  // anterior, então só cabem mais 3 antes da folga: o limite é o dia 4.
+  const primeira = cod.findIndex((c) => c === 'F' || c === 'FA');
+  ok(primeira >= 0 && primeira <= 3, 'com 3 dias puxados (incl. o FA), a 1ª folga vem até o dia 4 (veio no dia ' + (primeira + 1) + ')');
+  ok(e.stat.maxRun <= 6, 'a virada do mês respeita o 6x1 contando o FA como dia da sequência');
+
+  // Sem o FA no fim do mês anterior, a sequência puxada seria menor e a
+  // primeira folga poderia vir depois — é isso que a regra nova muda.
+  const semFA = mkEmp(D, { ch: 186, gold: true, prev: ['F', '', '', 'F'] });
+  const m2 = mkModel(2026, 9, [[semFA]]);
+  m2.sheets[0].chTable = [{ ch: 186, maxH: 150, jorn: 6 }];
+  E.generate(m2, st, { passes: 5 });
+  const p2 = codigos(m2, semFA).findIndex((c) => c === 'F' || c === 'FA');
+  ok(p2 > primeira, 'com F (e não FA) fechando o mês anterior, a 1ª folga pode vir mais tarde: dia ' + (p2 + 1) + ' contra dia ' + (primeira + 1));
+}
+
+sec('15d. O gerador não cria escala que quebre a nova regra');
+{
+  const st = E.defaultSettings();
+  const mm = mkMonth(2026, 9);
+  const emps = Array.from({ length: 14 }, () => mkEmp(mm.days, { ch: 186, gold: true, prev: ['F', '', '', '', '', '', ''] }));
+  const model = mkModel(2026, 9, [emps]);
+  model.sheets[0].chTable = [{ ch: 186, maxH: 150, jorn: 6 }];
+  E.generate(model, st, { passes: 5 });
+
+  let comFA = 0;
+  for (const e of emps) {
+    const cod = codigos(model, e);
+    if (cod.some((c) => c === 'FA')) comFA++;
+    ok(e.stat.maxRun <= 6, e.name + ': sequência máxima ' + e.stat.maxRun + ' ≤ 6, já contando o FA');
+  }
+  console.log('   dourados que receberam FA sob a regra nova: ' + comFA + ' de ' + emps.length);
+  eq(model.errorCount, 0, 'bloco inteiro gerado sem erros com a regra nova');
+
+  // conferência independente: recontar a sequência fora do motor
+  for (const e of emps) {
+    const cod = codigos(model, e);
+    let run = 0, pior = 0;
+    for (const c of ['F', ...e.prev].slice(1).reverse()) { if (c === 'F' || c === 'L' || c === 'AF' || c === 'CH') run = 0; else run++; }
+    for (const c of cod) {
+      if (c && c !== 'FA' && c !== 'K' && c !== '·') run = 0; else run++;
+      if (run > pior) pior = run;
+    }
+    ok(pior <= 6, e.name + ': recontagem independente também dá ' + pior + ' ≤ 6');
+  }
+}
+
+sec('15e. quebraSequencia() exposta pelo motor');
+{
+  const st = E.defaultSettings();
+  eq(typeof E.quebraSequencia, 'function', 'motor exporta quebraSequencia()');
+  eq(E.quebraSequencia('F', st), true, 'F quebra a sequência');
+  eq(E.quebraSequencia('FA', st), false, 'FA não quebra a sequência');
+  eq(E.quebraSequencia('L', st), true, 'L (férias) quebra');
+  eq(E.quebraSequencia('AF', st), true, 'AF continua quebrando, conforme combinado');
+  eq(E.quebraSequencia('CH', st), true, 'CH quebra');
+  eq(E.quebraSequencia('K', st), false, 'K é dia trabalhado, não quebra');
+  eq(E.quebraSequencia('', st), false, 'dia vazio é trabalhado, não quebra');
+  eq(E.kind('FA', st), 'offC', 'FA segue contando como folga na meta do mês');
+}
+
 /* ======================================= 16. células fixas e manuais */
 sec('16. Células da planilha e edições manuais são preservadas');
 {
@@ -580,6 +689,21 @@ sec('28. Integração com a aba do Admin');
   // O mesmo erro em outra forma: seletor com o escopo repetido.
   const escopoDuplicado = (css.match(/\.fg-scope\s+\.fg-scope/g) || []).length;
   eq(escopoDuplicado, 0, 'nenhum seletor com .fg-scope repetido');
+
+  // Regressão: token de fonte valendo `inherit`. Ele é usado dentro do atalho
+  // `font:` (font:600 26px/1.1 var(--f-display)); ali a palavra `inherit` como
+  // família invalida a declaração toda e o navegador descarta tamanho e peso
+  // junto. Oito regras de tipografia morreram assim, sem nenhum aviso.
+  const fonteHerdada = /--f-(display|body)\s*:\s*inherit/.test(css);
+  ok(!fonteHerdada, '--f-display e --f-body apontam para uma família real, não para `inherit`');
+  ok(/--f-display\s*:\s*['"a-zA-Z]/.test(css), '--f-display define uma pilha de fontes');
+
+  // Regressão: o tom de sábado/domingo cobrindo o fundo dos códigos. O FA cai
+  // sempre em sábado ou segunda, então metade deles ficava sem cor.
+  ok(/\.dc\.sat\.c-FA|\.dc\.sun\.c-FA/.test(css), 'o código do dia tem regra que vence o tom de fim de semana');
+
+  // Regressão: coluna flex de altura fixa esmagando as faixas de cima.
+  ok(/\.fg-ov \.fg-main > \*\s*\{[^}]*flex:\s*0 0 auto/.test(css), 'os filhos da área rolável não encolhem');
 }
 
 /* ================================================= resumo */
