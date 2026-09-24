@@ -59,6 +59,16 @@ function folgasLauncherHTML() {
       <span class="fg-fname" id="fgl-cfile-name"></span>
     </label>
 
+    <label class="fg-drop fg-drop-sec" id="fgl-pdrop" for="fgl-pfile">
+      <input type="file" id="fgl-pfile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+      <span class="fg-ico">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="26" height="26"><path d="M8 2v4M16 2v4M3 10h18"/><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M8 14h3M8 18h6"/></svg>
+      </span>
+      <span><strong>Programação de cursos (.xlsx) — para planejar as datas</strong>
+        <span class="fg-dsub">A planilha com as abas CURSOS e JANELAS. O painel escolhe as datas que menos afetam a operação e devolve o arquivo preenchido.</span></span>
+      <span class="fg-fname" id="fgl-pfile-name"></span>
+    </label>
+
     <div id="fgl-status" class="fg-lstatus"></div>
   </div>`;
 }
@@ -102,7 +112,20 @@ function folgasLauncherMontar() {
   ['dragleave', 'drop'].forEach((t) => cdrop.addEventListener(t, (ev) => { ev.preventDefault(); cdrop.classList.remove('over'); }));
   cdrop.addEventListener('drop', (ev) => { ev.preventDefault(); pegar(ev.dataTransfer.files[0]); });
 
+  const pdrop = document.getElementById('fgl-pdrop');
+  const pinp = document.getElementById('fgl-pfile');
+  const pegarP = (f) => { if (f) folgasCarregarProgramacao(f); };
+  pinp.addEventListener('change', (ev) => pegarP(ev.target.files[0]));
+  ['dragenter', 'dragover'].forEach((t) => pdrop.addEventListener(t, (ev) => { ev.preventDefault(); pdrop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach((t) => pdrop.addEventListener(t, (ev) => { ev.preventDefault(); pdrop.classList.remove('over'); }));
+  pdrop.addEventListener('drop', (ev) => { ev.preventDefault(); pegarP(ev.dataTransfer.files[0]); });
+
   folgasLauncherSync();
+}
+
+function folgasCarregarProgramacao(file) {
+  folgasEnsureOverlay();
+  if (window._fgLoadProg) window._fgLoadProg(file);
 }
 
 // Ponto de entrada do arquivo de cursos, usado pelo cartão e pela camada.
@@ -163,6 +186,7 @@ function folgasOverlayHTML() {
       <div class="fg-actions">
         <button class="fg-btn" id="fg-btn-regen" type="button" disabled>Gerar de novo</button>
         <button class="fg-btn" id="fg-btn-clear" type="button" disabled>Desfazer minhas edições</button>
+        <button class="fg-btn" id="fg-btn-plan" type="button" title="Planejar as datas dos cursos">Planejar cursos…<input type="file" id="fg-pfile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden></button>
         <button class="fg-btn" id="fg-btn-cursos" type="button" title="Carregar o arquivo mensal de cursos">Cursos…<input type="file" id="fg-cfile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden></button>
         <button class="fg-btn fg-primary" id="fg-btn-dl" type="button" hidden>Baixar Excel preenchido</button>
         <button class="fg-close" id="fg-btn-close" type="button" title="Fechar (Esc)" aria-label="Fechar">&times;</button>
@@ -231,6 +255,10 @@ function folgasOverlayHTML() {
             <h4>Pendências</h4>
             <div id="fg-issues"></div>
           </div>
+          <div class="fg-panel fg-panel-larga" id="fg-panel-plano" hidden>
+            <h4>Plano de cursos</h4>
+            <div id="fg-plano"></div>
+          </div>
           <div class="fg-panel" id="fg-panel-cursos" hidden>
             <h4>Cursos do mês</h4>
             <div id="fg-cursos"></div>
@@ -269,7 +297,7 @@ function folgasMontar() {
   // e sem isso a planilha lida e as edições manuais se perderiam a cada ida
   // e volta. Só o DOM é recriado; o modelo continua de pé.
   if (!window._fgState) {
-    window._fgState = { wb: null, model: null, st: E.defaultSettings(), tab: 0, file: '', sample: false, open: new Set(), busy: false, cursos: null, cursosFile: '' };
+    window._fgState = { wb: null, model: null, st: E.defaultSettings(), tab: 0, file: '', sample: false, open: new Set(), busy: false, cursos: null, cursosFile: '', prog: null, progFile: '', plano: null };
   }
   const S = window._fgState;
 
@@ -509,7 +537,7 @@ function folgasMontar() {
     $('#fg-btn-regen').disabled = !has; $('#fg-btn-clear').disabled = !has || !allEmps(S.model).some(({ e }) => e.manual.some(Boolean));
     $('#fg-btn-dl').hidden = !S.wb;
     renderSummary(); if (!has) return;
-    renderTabs(); renderSheet(); renderIssues(); renderUnknown(); renderCursos();
+    renderTabs(); renderSheet(); renderIssues(); renderUnknown(); renderCursos(); renderPlano();
   }
 
   // Editar um dia mexe em: a célula, as 5 colunas de conferência da linha e o
@@ -575,6 +603,7 @@ function folgasMontar() {
       // Se os cursos já tinham sido carregados, entram agora — a ordem entre
       // os dois arquivos não importa.
       const rel = S.cursos ? E.aplicarCursos(model, S.cursos, S.st) : null;
+      if (S.prog) { try { planejar(); } catch (_) { /* relatado na tela */ } }
       renderAll();
       const fn = document.getElementById('fgl-file-name'); if (fn) fn.textContent = file.name;
       folgasLauncherSync();
@@ -610,6 +639,130 @@ function folgasMontar() {
       console.error(err);
       $('#fg-note').innerHTML = `<div class="err-note">Não consegui ler o arquivo de cursos: ${esc(err.message || err)}. Ele precisa ter as colunas <b>MATRÍCULA</b> e <b>DATA</b>.</div>`;
     }
+  }
+
+  /* ---------- planejamento de cursos ---------- */
+  const PL = () => window.PlanejadorCursos;
+
+  async function loadProgFile(file) {
+    if (!file) return;
+    try {
+      const buf = await file.arrayBuffer();
+      const dias = S.model && !S.sample ? S.model.month.days : 31;
+      S.prog = await PL().lerProgramacao(buf, dias);
+      S.progFile = file.name;
+      const n = document.getElementById('fgl-pfile-name'); if (n) n.textContent = file.name;
+      if (!S.model || S.sample) {
+        S.plano = null; renderPlano();
+        toast(`Programação lida: ${S.prog.linhas.length} inscrições. Agora solte a escala do mês para eu planejar as datas.`, 6000);
+        return;
+      }
+      planejar();
+    } catch (err) {
+      console.error(err);
+      $('#fg-note').innerHTML = `<div class="err-note">Não consegui ler a programação: ${esc(err.message || err)}. Use o modelo com as abas <b>CURSOS</b> e <b>JANELAS</b>.</div>`;
+    }
+  }
+
+  function planejar() {
+    if (!S.prog || !S.model || S.sample) return;
+    run(() => {
+      const plano = PL().planejar(S.model, S.prog, { tentativas: 6 });
+      // "antes": como sairia marcando cada um na primeira data livre do curso
+      const naMao = PL().medir(S.model, plano.itens.filter((i) => i.cands.length).map((i) => ({ emp: i.e, dia: i.cands[0] })));
+      const agora = PL().medir(S.model, plano.itens.filter((i) => i.dia !== null).map((i) => ({ emp: i.e, dia: i.dia })));
+      S.plano = { plano, naMao, agora };
+    });
+  }
+
+  function renderPlano() {
+    const box = $('#fg-plano'), painel = $('#fg-panel-plano');
+    if (!S.prog) { painel.hidden = true; box.innerHTML = ''; return; }
+    painel.hidden = false;
+    if (!S.plano) {
+      box.innerHTML = `<p class="fg-cur-head"><b>${S.prog.linhas.length}</b> inscrições lidas de <span class="arq">${esc(S.progFile)}</span></p>
+        <p class="fg-cur-esperando">Solte a escala do mês para eu planejar as datas.</p>`;
+      return;
+    }
+    const { plano, naMao, agora } = S.plano;
+    const M = plano.metricas, mm = S.model.month;
+    const noLimite = M.pico.pessoas <= M.picoFixo;
+    const pct = (v) => (v * 100).toFixed(0) + '%';
+    const max = Math.max(1, ...plano.porDia.map((p) => p.pessoas));
+
+    const barras = plano.porDia.map((p, d) => {
+      const fds = mm.dow[d] === 0 || mm.dow[d] === 6;
+      if (!p.pessoas && fds) return '';
+      const q = plano.queda[d] ? plano.queda[d].pct : 0;
+      const alerta = q >= 0.5 ? ' alto' : q >= 0.3 ? ' medio' : '';
+      return `<div class="fg-pl-dia${alerta}" title="Dia ${d + 1}: ${p.pessoas} pessoa(s) fora${p.externos ? ' · ' + p.externos + ' de curso externo' : ''}${q ? ' · pior queda de cobertura ' + pct(q) : ''}">
+        <span class="n">${d + 1}</span>
+        <span class="bar"><i style="height:${Math.round(p.pessoas / max * 100)}%"></i>${p.externos ? `<u style="height:${Math.round(p.externos / max * 100)}%"></u>` : ''}</span>
+        <span class="v">${p.pessoas || ''}</span></div>`;
+    }).join('');
+
+    const erros = plano.avisos.filter((a) => a.lv === 'erro');
+    const avs = plano.avisos.filter((a) => a.lv !== 'erro');
+
+    box.innerHTML = `
+      <div class="fg-pl-topo">
+        <div class="fg-pl-num"><b>${M.total}</b><span>cursos alocados</span></div>
+        <div class="fg-pl-num"><b>${M.externos}</b><span>externos (data imposta)</span></div>
+        <div class="fg-pl-num"><b>${M.internos}</b><span>internos (distribuídos)</span></div>
+        <div class="fg-pl-num ${noLimite ? 'ok' : ''}"><b>${M.pico.pessoas}</b><span>pico no dia ${M.pico.dia + 1}${noLimite ? ' · é o mínimo possível' : ''}</span></div>
+        <div class="fg-pl-num ${M.piorQueda.pct >= 0.5 ? 'bad' : ''}"><b>${pct(M.piorQueda.pct)}</b><span>maior queda de cobertura · dia ${M.piorQueda.dia + 1}</span></div>
+      </div>
+
+      <p class="fg-pl-frase">${noLimite
+        ? `Os cursos externos já ocupam <b>${M.picoFixo}</b> pessoa(s) no dia mais cheio. Com as datas que o fornecedor deu, <b>não dá para melhorar além disto</b> — o ganho do mês que vem depende de negociar essas datas.`
+        : `O piso imposto pelos externos é <b>${M.picoFixo}</b>; o plano chegou a <b>${M.pico.pessoas}</b>.`}</p>
+
+      <div class="fg-pl-cmp">
+        <span>Marcando na primeira data livre: pico <b>${naMao.pico}</b> · queda <b>${pct(naMao.piorPct)}</b></span>
+        <span class="seta">→</span>
+        <span>Com o plano: pico <b>${agora.pico}</b> · queda <b>${pct(agora.piorPct)}</b></span>
+      </div>
+
+      <div class="fg-pl-graf">${barras}</div>
+      <p class="fg-pl-leg"><i></i> pessoas fora &nbsp; <u></u> hachurado: cursos externos, data imposta &nbsp; · &nbsp; a cor da barra mostra a queda de cobertura do dia: azul até 30%, amarelo até 50%, vermelho acima</p>
+
+      <div class="fg-pl-acoes">
+        <button type="button" class="fg-btn fg-primary" id="fg-pl-baixar">Baixar programação com as datas</button>
+        <button type="button" class="fg-btn" id="fg-pl-aplicar">Aplicar direto na escala</button>
+        <button type="button" class="fg-btn" id="fg-pl-refazer">Tentar outra distribuição</button>
+      </div>
+
+      ${erros.length ? `<details class="fg-cur-bloco erro" open><summary>Precisam de atenção <b>${erros.length}</b></summary>
+        <ul>${erros.slice(0, 40).map((a) => `<li>${esc(a.t)}</li>`).join('')}</ul></details>` : ''}
+      ${avs.length ? `<details class="fg-cur-bloco aviso"><summary>Avisos <b>${avs.length}</b></summary>
+        <ul>${avs.slice(0, 40).map((a) => `<li>${esc(a.t)}</li>`).join('')}</ul></details>` : ''}`;
+  }
+
+  async function baixarProgramacao() {
+    try {
+      const blob = await PL().gravarProgramacao(S.prog, S.plano.plano.itens);
+      const nome = S.progFile.replace(/\.xlsx$/i, '') + ' - DATAS.xlsx';
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = nome; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      toast('Baixado. Confira no Excel, ajuste o que quiser e suba de novo — data preenchida fica travada.', 7000);
+    } catch (err) { toast('Não consegui gravar: ' + esc(err.message || err)); }
+  }
+
+  // Atalho: em vez de baixar e subir de novo, lança o plano como K agora.
+  function aplicarPlano() {
+    const itens = S.plano.plano.itens.filter((i) => i.dia !== null);
+    const mm = S.model.month;
+    const regs = itens.map((i) => ({
+      mat: i.e.mat, nome: i.e.name, func: i.l.func || '', curso: i.curso,
+      aba: 'PLANO', linha: i.l.linha,
+      data: new Date(Date.UTC(mm.year, mm.month, i.dia + 1)),
+    }));
+    S.cursos = { regs, semData: [], arquivoVazio: false };
+    S.cursosFile = (S.progFile || 'programação') + ' (plano)';
+    run(() => { E.aplicarCursos(S.model, S.cursos, S.st); });
+    toast(`${regs.length} curso(s) lançados na escala como K. O gerador redistribuiu as folgas em volta.`, 6000);
   }
 
   function tirarCursos() {
@@ -718,6 +871,13 @@ function folgasMontar() {
   $('#fg-btn-cursos').addEventListener('click', () => $('#fg-cfile').click());
   $('#fg-cfile').addEventListener('change', (ev) => { const f = ev.target.files[0]; ev.target.value = ''; if (f) loadCursosFile(f); });
   $('#fg-cursos').addEventListener('click', (ev) => { if (ev.target.closest('#fg-cur-limpar')) tirarCursos(); });
+  $('#fg-btn-plan').addEventListener('click', () => $('#fg-pfile').click());
+  $('#fg-pfile').addEventListener('change', (ev) => { const f = ev.target.files[0]; ev.target.value = ''; if (f) loadProgFile(f); });
+  $('#fg-plano').addEventListener('click', (ev) => {
+    if (ev.target.closest('#fg-pl-baixar')) baixarProgramacao();
+    else if (ev.target.closest('#fg-pl-aplicar')) aplicarPlano();
+    else if (ev.target.closest('#fg-pl-refazer')) planejar();
+  });
   $('#fg-opt-run').addEventListener('change', (ev) => { S.st.maxRun = +ev.target.value; regenerate(); });
   $('#fg-opt-af').addEventListener('change', (ev) => { S.st.afCounts = ev.target.checked; regenerate(); });
   $('#fg-unknown-list').addEventListener('change', (ev) => {
@@ -739,6 +899,7 @@ function folgasMontar() {
   window._fgRender = renderAll;
   window._fgLoadFile = loadFile;
   window._fgLoadCursos = loadCursosFile;
+  window._fgLoadProg = loadProgFile;
 
   /* ---------- início ---------- */
   // Só monta o exemplo se ainda não há planilha lida. Antes isso rodava

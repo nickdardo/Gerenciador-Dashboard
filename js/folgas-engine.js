@@ -765,6 +765,15 @@
       }
       if (upd.size) bySheet.set(sheet.path, upd);
     }
+    return patchWorkbook(wb, bySheet);
+  }
+
+  /* Regrava o .xlsx trocando só as células indicadas, preservando todo o
+     resto do arquivo — formatação, fórmulas, mesclagens. `bySheet` é um
+     Map de caminho da aba para Map de linha para Map de coluna para valor.
+     Separado de buildXlsx porque o planejador de cursos precisa do mesmo
+     mecanismo para devolver a programação com as datas preenchidas. */
+  async function patchWorkbook(wb, bySheet) {
     const dec = new TextDecoder(), enc = new TextEncoder();
     const out = [];
     for (const e of wb.entries) {
@@ -800,6 +809,6 @@
   }
 
   const api = { loadWorkbook, buildModel, generate, validate, groupTSV, buildXlsx, defaultSettings, kind, quebraSequencia, eff, colName, DOW, MESES,
-    loadCursos, indexarCursos, aplicarCursos, limparCursos, matNum, dataCurso };
+    loadCursos, indexarCursos, aplicarCursos, limparCursos, matNum, dataCurso, patchWorkbook };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.FolgaEngine = api;
 })(typeof window !== 'undefined' ? window : globalThis);
