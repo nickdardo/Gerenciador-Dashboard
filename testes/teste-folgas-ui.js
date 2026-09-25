@@ -56,11 +56,52 @@ function paginaDeTeste() {
   {
     const n = await page.evaluate(() => document.querySelectorAll('#admin-host *').length);
     console.log('   nós na aba: ' + n);
-    ok(n < 80, 'a aba tem menos de 80 elementos (veio ' + n + ')');
+    ok(n < 200, 'a aba continua leve — sem tabela nenhuma (veio ' + n + ' elementos)');
     eq(await page.locator('#admin-host table').count(), 0, 'nenhuma tabela é montada na aba');
     eq(await page.locator('#fg-overlay').count(), 0, 'a camada nem existe antes de abrir');
     const larg = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
     ok(larg, 'a página não ganha rolagem horizontal — era o que travava a navegação');
+  }
+
+  sec('1b. Os três passos, na ordem, com a escala marcada como obrigatória');
+  {
+    const r = await page.evaluate(() => {
+      const ps = [...document.querySelectorAll('.fg-passo')];
+      return {
+        qtd: ps.length,
+        ordem: ps.map((e) => e.querySelector('.fg-passo-n').textContent.trim() + ':' + e.querySelector('.fg-passo-tit').firstChild.textContent.trim()),
+        obrig: ps.filter((e) => e.classList.contains('req')).map((e) => e.querySelector('.fg-passo-tit').firstChild.textContent.trim()),
+        temComo: !!document.querySelector('.fg-como'),
+        vias: document.querySelectorAll('.fg-via').length,
+        inputs: ps.map((e) => e.querySelector('input[type=file]').id),
+      };
+    });
+    eq(r.qtd, 3, 'são três passos');
+    eq(JSON.stringify(r.ordem), JSON.stringify(['1:Programação de cursos', '2:Escala do mês', '3:Cursos do mês']),
+      'na ordem do trabalho: planejar, escala, cursos');
+    eq(JSON.stringify(r.obrig), JSON.stringify(['Escala do mês']), 'só a escala é obrigatória');
+    ok(r.temComo, 'tem o texto explicando como funciona');
+    eq(r.vias, 2, 'com os dois caminhos possíveis');
+    eq(JSON.stringify(r.inputs), JSON.stringify(['fgl-pfile', 'fgl-file', 'fgl-cfile']),
+      'cada passo tem o seu campo de arquivo, com os ids que o resto do módulo usa');
+  }
+
+  sec('1c. O botão de abrir não fica coberto pelo campo de arquivo');
+  {
+    // O input dos passos é position:absolute inset:0 dentro do label. Se um
+    // deles escapar do próprio cartão, engole os cliques da tela toda — já
+    // aconteceu antes nesta aba.
+    const r = await page.evaluate(() => {
+      const b = document.getElementById('fgl-open').getBoundingClientRect();
+      const emCima = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+      const vazam = [...document.querySelectorAll('.fg-passo input[type=file]')].filter((i) => {
+        const r = i.getBoundingClientRect(), p = i.closest('.fg-passo').getBoundingClientRect();
+        return r.width > p.width + 2 || r.height > p.height + 2;
+      }).length;
+      return { quemRecebe: emCima ? emCima.id || emCima.tagName : 'nada', vazam };
+    });
+    eq(r.quemRecebe, 'fgl-open', 'o clique no botão chega nele');
+    eq(r.vazam, 0, 'nenhum campo de arquivo ultrapassa o próprio passo');
   }
 
   /* ------------------------------------------------- 2. abrir a camada */

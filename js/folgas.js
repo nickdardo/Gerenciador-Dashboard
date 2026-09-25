@@ -26,48 +26,69 @@ function adminFolgasTab(el) {
 
 /* ---------------------------------------------------------- cartão da aba */
 function folgasLauncherHTML() {
+  // Três entradas, na ordem em que o trabalho acontece. Os passos 1 e 3 são
+  // caminhos alternativos para a mesma coisa — os cursos do mês —, e por isso
+  // os dois são opcionais: um serve para quando as datas ainda estão abertas,
+  // o outro para quando já estão fechadas. Só a escala é obrigatória.
+  // ids preservados: o resto do módulo já conversa com eles
+  const passo = (n, ids, tit, selo, txt, sub, icone) => `
+    <label class="fg-passo ${selo === 'obrigatório' ? 'req' : ''}" id="${ids.drop}" for="${ids.file}">
+      <input type="file" id="${ids.file}" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+      <span class="fg-passo-n">${n}</span>
+      <span class="fg-passo-txt">
+        <span class="fg-passo-tit">${tit}<em class="fg-selo ${selo === 'obrigatório' ? 'req' : ''}">${selo}</em></span>
+        <span class="fg-passo-desc">${txt}</span>
+        <span class="fg-passo-drop">${icone}<b>Solte o arquivo aqui</b> ou clique para escolher<span class="fg-passo-sub">${sub}</span></span>
+      </span>
+      <span class="fg-passo-ok" id="${ids.nome}"></span>
+    </label>`;
+
+  const icoCal = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4M16 2v4M3 10h18"/><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M8 14h3M8 18h6"/></svg>`;
+  const icoDoc = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6M12 11v8"/></svg>`;
+  const icoLista = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h11l3 3v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M8 7h6M8 11h8M8 15h5"/></svg>`;
+
   return `
   <div class="fg-scope fg-wrap fg-launcher">
     <div class="fg-top">
       <div>
         <div class="fg-eyebrow">Escala 6x1 · distribuição automática</div>
         <h2 class="fg-title">Gerador de Folgas</h2>
-        <p class="fg-sub">Lê a planilha da escala, preenche as folgas respeitando as regras e devolve o mesmo arquivo com a formatação original. A conferência abre em tela cheia, por cima do painel.</p>
       </div>
       <div class="fg-actions">
         <button class="fg-btn fg-primary" id="fgl-open" type="button">Abrir gerador</button>
       </div>
     </div>
 
-    <label class="fg-drop" id="fgl-drop" for="fgl-file">
-      <input type="file" id="fgl-file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
-      <span class="fg-ico">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="26" height="26"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6M12 11v8"/></svg>
-      </span>
-      <span><strong>Solte aqui a escala do mês (.xlsx)</strong>
-        <span class="fg-dsub">ou clique para escolher. O arquivo é lido só neste navegador — nada sobe pro banco. Ao terminar de ler, a tela cheia abre sozinha.</span></span>
-      <span class="fg-fname" id="fgl-file-name"></span>
-    </label>
+    <div class="fg-como">
+      <h3>Como funciona</h3>
+      <p>A escala é a base de tudo — sem ela o painel não tem o que distribuir. Os cursos entram de duas maneiras,
+         e você usa a que combinar com o seu mês:</p>
+      <div class="fg-como-vias">
+        <div class="fg-via">
+          <span class="fg-via-n">Ainda escolhendo as datas</span>
+          Suba a <b>programação</b> no passo 1 junto com a escala. O painel propõe as datas que menos
+          afetam a operação, você confere e baixa a planilha preenchida.
+        </div>
+        <div class="fg-via">
+          <span class="fg-via-n">Datas já fechadas</span>
+          Pule o passo 1 e suba o <b>arquivo de cursos</b> no passo 3, com as datas que você já recebeu.
+        </div>
+      </div>
+      <p class="fg-como-fim">Nos dois caminhos o fim é o mesmo: o gerador lança os cursos como <b>K</b> e
+         distribui as folgas em volta deles, respeitando 6x1, domingo único e a meta do mês.</p>
+    </div>
 
-    <label class="fg-drop fg-drop-sec" id="fgl-cdrop" for="fgl-cfile">
-      <input type="file" id="fgl-cfile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
-      <span class="fg-ico">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="26" height="26"><path d="M4 5a2 2 0 0 1 2-2h11l3 3v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M8 7h6M8 11h8M8 15h5"/></svg>
-      </span>
-      <span><strong>Cursos do mês (.xlsx) — opcional</strong>
-        <span class="fg-dsub">O arquivo que você recebe pronto. Dele só leio <b>matrícula</b> e <b>data</b>, para lançar <b>K</b> nos dias certos. Pode carregar antes ou depois da escala.</span></span>
-      <span class="fg-fname" id="fgl-cfile-name"></span>
-    </label>
+    ${passo(1, { drop: 'fgl-pdrop', file: 'fgl-pfile', nome: 'fgl-pfile-name' }, 'Programação de cursos', 'opcional',
+      'A planilha com as abas <b>CURSOS</b> e <b>JANELAS</b>, com a coluna DATA em branco no que você quer que o painel resolva. Linha que já tiver data fica travada.',
+      'Só isto não gera nada — é preciso a escala do passo 2 para medir o impacto.', icoCal)}
 
-    <label class="fg-drop fg-drop-sec" id="fgl-pdrop" for="fgl-pfile">
-      <input type="file" id="fgl-pfile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
-      <span class="fg-ico">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="26" height="26"><path d="M8 2v4M16 2v4M3 10h18"/><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M8 14h3M8 18h6"/></svg>
-      </span>
-      <span><strong>Programação de cursos (.xlsx) — para planejar as datas</strong>
-        <span class="fg-dsub">A planilha com as abas CURSOS e JANELAS. O painel escolhe as datas que menos afetam a operação e devolve o arquivo preenchido.</span></span>
-      <span class="fg-fname" id="fgl-pfile-name"></span>
-    </label>
+    ${passo(2, { drop: 'fgl-drop', file: 'fgl-file', nome: 'fgl-file-name' }, 'Escala do mês', 'obrigatório',
+      'A planilha da escala, como ela já é hoje. O arquivo é lido só neste navegador — nada sobe pro banco.',
+      'Ao terminar de ler, a tela cheia abre sozinha.', icoDoc)}
+
+    ${passo(3, { drop: 'fgl-cdrop', file: 'fgl-cfile', nome: 'fgl-cfile-name' }, 'Cursos do mês', 'opcional',
+      'O arquivo com as datas já decididas — o que você recebe pronto, ou a programação que baixou no passo 1. Dele só leio <b>matrícula</b> e <b>data</b>.',
+      'Pode carregar antes ou depois da escala.', icoLista)}
 
     <div id="fgl-status" class="fg-lstatus"></div>
   </div>`;

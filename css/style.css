@@ -3347,3 +3347,63 @@ body.fg-locked { overflow: hidden; }
 .fg-scope .fg-pl-acoes { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 4px; }
 .fg-scope .fg-pl-nota { margin: 6px 0 2px; font-size: 11.5px; color: var(--ink-3); line-height: 1.45; }
 .fg-scope .fg-pl-trava { flex-basis: 100%; font-size: 11.5px; color: var(--ink-3); }
+
+/* ══════════════════════════════════════════════════════
+   GERADOR DE FOLGAS — cartão da aba, em passos
+   Três entradas na ordem do trabalho. Os passos 1 e 3 são caminhos
+   alternativos para a mesma coisa (os cursos do mês), por isso os dois
+   são opcionais; só a escala é obrigatória e ganha destaque.
+   ══════════════════════════════════════════════════════ */
+
+.fg-scope .fg-como { border: 1px solid var(--line); border-radius: 12px; background: var(--surface);
+  padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; }
+.fg-scope .fg-como h3 { margin: 0; font: 700 13px var(--f-display); letter-spacing: .08em;
+  text-transform: uppercase; color: var(--ink-2); }
+.fg-scope .fg-como p { margin: 0; font-size: 13.5px; line-height: 1.55; color: var(--ink-2); }
+.fg-scope .fg-como b { color: var(--ink); }
+.fg-scope .fg-como-vias { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px; }
+.fg-scope .fg-via { border: 1px solid var(--line-soft); border-left: 3px solid var(--petrol); border-radius: 8px;
+  padding: 10px 12px; font-size: 13px; line-height: 1.5; color: var(--ink-2); background: var(--bg-app, transparent); }
+.fg-scope .fg-via-n { display: block; font-weight: 600; color: var(--ink); margin-bottom: 2px; }
+.fg-scope .fg-como-fim { font-size: 12.5px; color: var(--ink-3); border-top: 1px solid var(--line-soft); padding-top: 9px; }
+
+/* ---- os três passos ---- */
+.fg-scope .fg-passo { position: relative; display: grid; grid-template-columns: 34px 1fr auto; gap: 0 14px;
+  align-items: start; border: 1px solid var(--line); border-radius: 12px; background: var(--surface);
+  padding: 14px 16px; cursor: pointer; transition: border-color .15s, background .15s; }
+.fg-scope .fg-passo:hover { border-color: var(--petrol); }
+.fg-scope .fg-passo.over { border-color: var(--petrol); background: var(--petrol-soft); }
+.fg-scope .fg-passo input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.fg-scope .fg-passo.req { border-left: 3px solid var(--petrol); }
+
+/* Número do passo, selo e instrução são informação, não enfeite: --ink-3
+   mede 2,1:1 no escuro e 3,0:1 no claro, fraco demais para esse papel. */
+.fg-scope .fg-passo-n { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%;
+  border: 1.5px solid var(--line); font: 600 14px var(--f-display); color: var(--ink-2); flex: none; }
+.fg-scope .fg-passo.req .fg-passo-n { border-color: var(--petrol); background: var(--petrol); color: var(--petrol-ink); }
+
+.fg-scope .fg-passo-txt { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.fg-scope .fg-passo-tit { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font: 600 15px var(--f-body); color: var(--ink); }
+.fg-scope .fg-selo { font: 600 10px var(--f-body); letter-spacing: .08em; text-transform: uppercase;
+  font-style: normal; color: var(--ink-2); border: 1px solid var(--line); border-radius: 20px; padding: 1px 8px; }
+.fg-scope .fg-selo.req { color: var(--petrol); border-color: var(--petrol); }
+.fg-scope .fg-passo-desc { font-size: 13px; line-height: 1.5; color: var(--ink-2); }
+.fg-scope .fg-passo-desc b { color: var(--ink); font-weight: 600; }
+
+.fg-scope .fg-passo-drop { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin-top: 6px;
+  border: 1.5px dashed var(--line); border-radius: 9px; padding: 9px 12px; font-size: 12.5px; color: var(--ink-2); }
+.fg-scope .fg-passo:hover .fg-passo-drop { border-color: var(--petrol); }
+.fg-scope .fg-passo-drop b { color: var(--ink-2); font-weight: 600; }
+.fg-scope .fg-passo-drop svg { width: 18px; height: 18px; color: var(--petrol); flex: none; }
+.fg-scope .fg-passo-sub { flex-basis: 100%; font-size: 11.5px; color: var(--ink-2); }
+
+.fg-scope .fg-passo-ok { align-self: center; max-width: 220px; font: 500 12px var(--f-mono);
+  color: var(--ok); overflow-wrap: anywhere; text-align: right; }
+.fg-scope .fg-passo-ok:not(:empty)::before { content: '✓ '; font-family: var(--f-body); }
+.fg-scope .fg-passo-ok:not(:empty) { padding: 4px 10px; border-radius: 20px; background: var(--ok-soft); }
+
+@media (max-width: 720px) {
+  .fg-scope .fg-passo { grid-template-columns: 30px 1fr; }
+  .fg-scope .fg-passo-ok { grid-column: 2; text-align: left; margin-top: 6px; }
+}
