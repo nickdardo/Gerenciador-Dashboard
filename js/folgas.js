@@ -728,6 +728,8 @@ function folgasMontar() {
     }).join('');
 
     const sm = plano.semMedicao || [];
+    const ced = plano.cederam || [];
+    const nada = plano.semSaida || [];
     const erros = plano.avisos.filter((a) => a.lv === 'erro');
     const avs = plano.avisos.filter((a) => a.lv !== 'erro');
 
@@ -739,6 +741,8 @@ function folgasMontar() {
         <div class="fg-pl-num ${noLimite ? 'ok' : ''}"><b>${M.pico.pessoas}</b><span>pico no dia ${M.pico.dia + 1}${noLimite ? ' · é o mínimo possível' : ''}</span></div>
         <div class="fg-pl-num ${M.piorQueda.pct >= 0.5 ? 'bad' : ''}"><b>${pct(M.piorQueda.pct)}</b><span>maior queda de cobertura · dia ${M.piorQueda.dia + 1}</span></div>
         ${M.semMedicao ? `<div class="fg-pl-num bad"><b>${M.semMedicao}</b><span>com data, sem medição · ${M.pessoasSemMedicao} pessoa(s)</span></div>` : ''}
+        ${M.cederam ? `<div class="fg-pl-num"><b>${M.cederam}</b><span>alocados com regra cedida</span></div>` : ''}
+        ${M.semSaida ? `<div class="fg-pl-num bad"><b>${M.semSaida}</b><span>sem data — férias o mês todo</span></div>` : ''}
       </div>
 
       <p class="fg-pl-frase">${noLimite
@@ -762,6 +766,13 @@ function folgasMontar() {
         <button type="button" class="fg-btn" id="fg-pl-refazer">Tentar outra distribuição</button>
       </div>
 
+      ${nada.length ? `<details class="fg-cur-bloco erro" open><summary>Sem data — precisa da sua decisão <b>${nada.length}</b></summary>
+        <ul>${nada.map((i) => `<li><b>${i.e.mat}</b> ${esc(i.e.name)} · ${esc(i.curso)} — de férias em todos os dias do mês</li>`).join('')}</ul>
+        <p class="fg-pl-nota">Tire a pessoa da lista do curso ou reveja as férias dela. É o único caso em que a linha volta sem data.</p></details>` : ''}
+      ${ced.length ? `<details class="fg-cur-bloco aviso"><summary>Alocados com alguma regra cedida <b>${ced.length}</b></summary>
+        <ul>${ced.slice(0, 60).map((i) => `<li><b>${i.e.mat}</b> ${esc(i.e.name)} · ${esc(i.curso)} · dia ${i.dia + 1} — ${esc(i.cedeu)}</li>`).join('')}
+        ${ced.length > 60 ? `<li class="mais">… e mais ${ced.length - 60}</li>` : ''}</ul>
+        <p class="fg-pl-nota">Não havia dia que respeitasse todas as regras para essas pessoas. O painel cedeu a regra menos custosa em vez de deixar a linha em branco — confira se cada caso serve.</p></details>` : ''}
       ${sm.length ? `<details class="fg-cur-bloco aviso" open><summary>Com data, mas sem medição de impacto <b>${sm.length}</b></summary>
         <ul>${sm.slice(0, 60).map((i) => `<li><b>${i.e.mat}</b> ${esc(i.e.name)} · ${esc(i.curso)} · dia ${i.dia + 1} — ${esc(i.motivo)}</li>`).join('')}
         ${sm.length > 60 ? `<li class="mais">… e mais ${sm.length - 60}</li>` : ''}</ul>

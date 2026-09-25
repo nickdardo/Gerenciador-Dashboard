@@ -355,16 +355,36 @@
         }
       }
       if (!item.travado) {
-        for (let d = 0; d < D; d++) {
-          if (dow[d] === 0 || dow[d] === 6) continue;      // fim de semana nunca
-          if (j.dias && !j.dias.has(d)) continue;          // fora da janela do curso
-          const cod = E.eff(e, d);
-          if (cod === 'L' || cod === 'K') continue;        // férias ou curso já marcado
-          item.cands.push(d);
+        /* Antes, quando as regras não deixavam nenhum dia de pé, o item era
+           descartado e a linha voltava com a data em branco — o curso parecia
+           ter falhado sem dizer por quê. Agora as regras cedem uma de cada
+           vez, da menos custosa para a mais, e o painel diz qual cedeu.
+           Férias nunca cedem: quem está de férias não vai ao curso, e isso é
+           decisão de gente, não de algoritmo. */
+        const util = (d) => dow[d] !== 0 && dow[d] !== 6;
+        const naJanela = (d) => !j.dias || j.dias.has(d);
+        const monta = (filtro) => {
+          const out = [];
+          for (let d = 0; d < D; d++) if (E.eff(e, d) !== 'L' && filtro(d)) out.push(d);
+          return out;
+        };
+        const degraus = [
+          { c: (d) => util(d) && naJanela(d) && E.eff(e, d) !== 'K', cedeu: '' },
+          { c: (d) => util(d) && naJanela(d), cedeu: 'ficou no mesmo dia de outro curso' },
+          { c: (d) => naJanela(d), cedeu: 'caiu em fim de semana — a janela do curso não tem dia útil livre' },
+          { c: (d) => util(d) && E.eff(e, d) !== 'K', cedeu: 'saiu da janela do curso, que não tinha dia livre para esta pessoa' },
+          { c: (d) => util(d), cedeu: 'saiu da janela e ficou junto de outro curso' },
+          { c: () => true, cedeu: 'saiu da janela e caiu em fim de semana' },
+        ];
+        for (const g of degraus) {
+          item.cands = monta(g.c);
+          if (item.cands.length) { item.cedeu = g.cedeu; break; }
         }
         if (!item.cands.length) {
-          avisos.push({ lv: 'erro', t: `${l.mat} ${l.nome} · ${l.curso}: não sobrou nenhum dia possível (janela, férias ou fim de semana)` });
-          continue;
+          // só chega aqui quem está de férias o mês inteiro
+          item.semSaida = true;
+          avisos.push({ lv: 'erro', t: `${l.mat} ${l.nome} · ${l.curso}: sem data — está de férias em todos os dias do mês. `
+            + 'Tire esta pessoa da lista ou reveja as férias dela.' });
         }
       }
       item._mes = model.month;
@@ -429,7 +449,10 @@
 
     for (const it of itens) { (it.e._itens = it.e._itens || []).push(it); }
     const travados = itens.filter((i) => i.travado);
-    const livres = itens.filter((i) => !i.travado);
+    // Sem candidato não entra na busca: o solver tentaria alocar no dia -1.
+    // Fica com dia null de propósito — é o único caso em que a linha volta
+    // em branco, e ele tem erro próprio explicando o porquê.
+    const livres = itens.filter((i) => !i.travado && i.cands.length);
     for (const it of travados) aplicar(it, it.dia, 1);
 
     /* --- busca: várias tentativas, guarda a melhor --- */
@@ -517,9 +540,13 @@
     return {
       itens, base, def, porDia, queda, avisos, busca,
       semMedicao: itens.filter((i) => !i.medivel && i.dia !== null),
+      cederam: itens.filter((i) => i.cedeu && i.dia !== null),
+      semSaida: itens.filter((i) => i.semSaida),
       metricas: {
         total: itens.filter((i) => i.dia !== null).length,
         semMedicao: itens.filter((i) => !i.medivel && i.dia !== null).length,
+        cederam: itens.filter((i) => i.cedeu && i.dia !== null).length,
+        semSaida: itens.filter((i) => i.semSaida).length,
         pessoasSemMedicao: new Set(itens.filter((i) => !i.medivel && i.dia !== null).map((i) => i.e.mat)).size,
         travados: itens.filter((i) => i.travado).length,
         externos: itens.filter((i) => i.tipo === 'EXTERNO').length,

@@ -155,7 +155,7 @@ sec('6. Férias bloqueiam o dia');
   eq(E.eff(e, dele.dia), '', 'e o dia escolhido está livre');
 }
 
-sec('7. Sem dia possível vira erro nomeado, não silêncio');
+sec('7. Férias o mês inteiro: único caso que fica sem data, e com erro claro');
 {
   const mm = mkMonth(2026, 9);
   const fixed = new Array(mm.days).fill('');
@@ -164,10 +164,12 @@ sec('7. Sem dia possível vira erro nomeado, não silêncio');
   const model = mkModel(2026, 9, [e]);
   const rel = P.planejar(model, mkProg([{ mat: 300, curso: 'X', nome: 'DE FÉRIAS O MÊS' }],
     [{ curso: 'X', tipo: 'INTERNO', dias: null }]), { tentativas: 2 });
-  eq(todosItens(rel).length, 0, 'ninguém alocado');
-  const err = rel.avisos.find((a) => a.lv === 'erro' && /nenhum dia possível/.test(a.t));
+  eq(todosItens(rel).length, 0, 'ninguém alocado — não há dia que não seja férias');
+  const err = rel.avisos.find((a) => a.lv === 'erro' && /férias em todos os dias/.test(a.t));
   ok(!!err, 'o motivo é reportado como erro');
   ok(err && err.t.includes('300'), 'com a matrícula (' + (err ? err.t : '') + ')');
+  ok(err && /Tire esta pessoa da lista/.test(err.t), 'e diz o que fazer');
+  eq(rel.metricas.semSaida, 1, 'contabilizado como sem saída possível');
 }
 
 sec('8. Data já preenchida na planilha fica travada');
@@ -552,6 +554,95 @@ sec('27. As três formas de escrever os dias, no mês real');
   eq(JSON.stringify(dias('01 - 08')), JSON.stringify([1, 2, 3, 4, 5, 6, 7, 8]), 'traço = período completo');
   eq(JSON.stringify(uteis('01 - 08')), JSON.stringify([1, 2, 5, 6, 7, 8]), 'e o fim de semana sai na hora de alocar');
   eq(JSON.stringify(dias('01, 06, 13, 15')), JSON.stringify([1, 6, 13, 15]), 'lista longa de dias fixos');
+}
+
+sec('28. Sem dia livre, as regras cedem uma a uma — ninguém volta em branco');
+{
+  const st0 = mkMonth(2026, 9);
+  const uteis = Array.from({ length: st0.days }, (_, d) => d).filter((d) => st0.dow[d] !== 0 && st0.dow[d] !== 6);
+
+  // (a) todos os dias úteis já ocupados por outro curso (K na escala)
+  {
+    const fixed = new Array(st0.days).fill('');
+    for (const d of uteis) fixed[d] = 'K';
+    const e = mkEmp(st0.days, 2100, { fixed, nome: 'AGENDA LOTADA' });
+    const model = mkModel(2026, 9, [e]);
+    const rel = P.planejar(model, mkProg([{ mat: 2100, curso: 'X' }],
+      [{ curso: 'X', tipo: 'INTERNO', dias: null }]), { tentativas: 3 });
+    const it = rel.itens[0];
+    ok(it && it.dia !== null, 'recebe data mesmo com todos os dias úteis ocupados');
+    ok(it && it.cedeu, 'e o painel registra qual regra cedeu: "' + (it ? it.cedeu : '') + '"');
+    ok(it && st0.dow[it.dia] !== 0 && st0.dow[it.dia] !== 6, 'preferiu ceder o dia compartilhado a cair em fim de semana');
+    eq(rel.metricas.cederam, 1, 'contabilizado no relatório');
+  }
+
+  // (b) janela do curso só tem fim de semana
+  {
+    const sab = st0.dow.findIndex((d) => d === 6);
+    const dom = sab + 1;
+    const e = mkEmp(st0.days, 2200, { nome: 'JANELA SO FDS' });
+    const model = mkModel(2026, 9, [e]);
+    const janela = new Set([sab, dom]);
+    const rel = P.planejar(model, mkProg([{ mat: 2200, curso: 'Y' }],
+      [{ curso: 'Y', tipo: 'EXTERNO', dias: janela }]), { tentativas: 3 });
+    const it = rel.itens[0];
+    ok(it && it.dia !== null, 'recebe data mesmo quando a janela só tem sábado e domingo');
+    ok(it && janela.has(it.dia), 'e fica dentro da janela (dia ' + (it ? it.dia + 1 : '?') + ')');
+    ok(it && /fim de semana/.test(it.cedeu || ''), 'avisando que o fim de semana foi a regra que cedeu');
+  }
+
+  // (c) janela sem nenhum dia livre para aquela pessoa
+  {
+    const fixed = new Array(st0.days).fill('');
+    for (const d of [4, 5, 6, 7, 8]) fixed[d] = 'L';       // férias cobrindo a janela
+    const e = mkEmp(st0.days, 2300, { fixed, nome: 'FERIAS NA JANELA' });
+    const model = mkModel(2026, 9, [e]);
+    const rel = P.planejar(model, mkProg([{ mat: 2300, curso: 'Z' }],
+      [{ curso: 'Z', tipo: 'EXTERNO', dias: P.lerDias('5-9', st0.days) }]), { tentativas: 3 });
+    const it = rel.itens[0];
+    ok(it && it.dia !== null, 'recebe data mesmo com a janela toda em férias');
+    eq(E.eff(e, it.dia), '', 'e nunca em cima das férias');
+    ok(it && /janela/.test(it.cedeu || ''), 'avisando que saiu da janela: "' + (it ? it.cedeu : '') + '"');
+  }
+
+  // (d) ordem das concessões: o caminho barato vem antes do caro
+  {
+    const fixed = new Array(st0.days).fill('');
+    for (const d of uteis.slice(1)) fixed[d] = 'K';        // sobra 1 dia útil livre
+    const e = mkEmp(st0.days, 2400, { fixed });
+    const model = mkModel(2026, 9, [e]);
+    const rel = P.planejar(model, mkProg([{ mat: 2400, curso: 'W' }],
+      [{ curso: 'W', tipo: 'INTERNO', dias: null }]), { tentativas: 3 });
+    const it = rel.itens[0];
+    eq(it.dia, uteis[0], 'havendo um dia útil livre, é ele — nenhuma regra precisa ceder');
+    eq(it.cedeu, '', 'e nada é registrado como concessão');
+  }
+}
+
+sec('29. Nenhuma linha volta em branco num lote grande e apertado');
+{
+  const mm = mkMonth(2026, 9);
+  const emps = Array.from({ length: 25 }, (_, i) => {
+    const fixed = new Array(mm.days).fill('');
+    if (i % 5 === 0) for (let d = 0; d < 20; d++) fixed[d] = 'L';   // férias longas
+    return mkEmp(mm.days, 2500 + i, { fixed });
+  });
+  const model = mkModel(2026, 9, emps);
+  const linhas = [];
+  for (const e of emps) for (const c of ['A', 'B', 'C']) linhas.push({ mat: e.mat, curso: c });
+  // janelas estreitas de propósito
+  const rel = P.planejar(model, mkProg(linhas, [
+    { curso: 'A', tipo: 'EXTERNO', dias: P.lerDias('5, 6', mm.days) },
+    { curso: 'B', tipo: 'EXTERNO', dias: P.lerDias('12-13', mm.days) },
+    { curso: 'C', tipo: 'INTERNO', dias: null },
+  ]), { tentativas: 5 });
+
+  const semData = rel.itens.filter((i) => i.dia === null);
+  console.log('   ' + rel.itens.length + ' inscrições · ' + rel.metricas.cederam + ' com regra cedida · ' + semData.length + ' sem data');
+  eq(rel.itens.length, 75, 'as 75 inscrições viraram itens');
+  eq(semData.length, 0, 'nenhuma volta em branco');
+  const emFerias = rel.itens.filter((i) => E.eff(i.e, i.dia) === 'L');
+  eq(emFerias.length, 0, 'e nenhuma caiu em cima de férias');
 }
 
 /* ============================================== resumo */
