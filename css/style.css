@@ -3345,3 +3345,5 @@ body.fg-locked { overflow: hidden; }
   background-image: repeating-linear-gradient(45deg, transparent 0 2px, rgba(255,255,255,.55) 2px 4px); }
 
 .fg-scope .fg-pl-acoes { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 4px; }
+.fg-scope .fg-pl-nota { margin: 6px 0 2px; font-size: 11.5px; color: var(--ink-3); line-height: 1.45; }
+.fg-scope .fg-pl-trava { flex-basis: 100%; font-size: 11.5px; color: var(--ink-3); }

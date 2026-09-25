@@ -668,8 +668,13 @@ function folgasMontar() {
     if (!S.prog || !S.model || S.sample) return;
     run(() => {
       const plano = PL().planejar(S.model, S.prog, { tentativas: 6 });
-      // "antes": como sairia marcando cada um na primeira data livre do curso
-      const naMao = PL().medir(S.model, plano.itens.filter((i) => i.cands.length).map((i) => ({ emp: i.e, dia: i.cands[0] })));
+      // "antes": como sairia marcando cada um na primeira data livre do curso.
+      // As linhas que já vinham com data ficam onde estão nos dois lados —
+      // sem isso a comparação ignora as travadas e o "antes" parece melhor
+      // do que é.
+      const naMao = PL().medir(S.model, plano.itens
+        .map((i) => ({ emp: i.e, dia: i.travado ? i.dia : (i.cands.length ? i.cands[0] : null) }))
+        .filter((x) => x.dia !== null));
       const agora = PL().medir(S.model, plano.itens.filter((i) => i.dia !== null).map((i) => ({ emp: i.e, dia: i.dia })));
       S.plano = { plano, naMao, agora };
     });
@@ -701,6 +706,7 @@ function folgasMontar() {
         <span class="v">${p.pessoas || ''}</span></div>`;
     }).join('');
 
+    const sm = plano.semMedicao || [];
     const erros = plano.avisos.filter((a) => a.lv === 'erro');
     const avs = plano.avisos.filter((a) => a.lv !== 'erro');
 
@@ -711,17 +717,20 @@ function folgasMontar() {
         <div class="fg-pl-num"><b>${M.internos}</b><span>internos (distribuídos)</span></div>
         <div class="fg-pl-num ${noLimite ? 'ok' : ''}"><b>${M.pico.pessoas}</b><span>pico no dia ${M.pico.dia + 1}${noLimite ? ' · é o mínimo possível' : ''}</span></div>
         <div class="fg-pl-num ${M.piorQueda.pct >= 0.5 ? 'bad' : ''}"><b>${pct(M.piorQueda.pct)}</b><span>maior queda de cobertura · dia ${M.piorQueda.dia + 1}</span></div>
+        ${M.semMedicao ? `<div class="fg-pl-num bad"><b>${M.semMedicao}</b><span>com data, sem medição · ${M.pessoasSemMedicao} pessoa(s)</span></div>` : ''}
       </div>
 
       <p class="fg-pl-frase">${noLimite
         ? `Os cursos externos já ocupam <b>${M.picoFixo}</b> pessoa(s) no dia mais cheio. Com as datas que o fornecedor deu, <b>não dá para melhorar além disto</b> — o ganho do mês que vem depende de negociar essas datas.`
         : `O piso imposto pelos externos é <b>${M.picoFixo}</b>; o plano chegou a <b>${M.pico.pessoas}</b>.`}</p>
 
-      <div class="fg-pl-cmp">
+      ${M.travados >= M.total ? `<p class="fg-pl-frase">Todas as linhas já vinham com data preenchida, então não houve o que distribuir. Apague a coluna DATA do que quiser que o painel resolva.</p>`
+        : `<div class="fg-pl-cmp">
         <span>Marcando na primeira data livre: pico <b>${naMao.pico}</b> · queda <b>${pct(naMao.piorPct)}</b></span>
         <span class="seta">→</span>
         <span>Com o plano: pico <b>${agora.pico}</b> · queda <b>${pct(agora.piorPct)}</b></span>
-      </div>
+        ${M.travados ? `<span class="fg-pl-trava">${M.travados} de ${M.total} já vinham com data e ficaram onde estavam nos dois lados</span>` : ''}
+      </div>`}
 
       <div class="fg-pl-graf">${barras}</div>
       <p class="fg-pl-leg"><i></i> pessoas fora &nbsp; <u></u> hachurado: cursos externos, data imposta &nbsp; · &nbsp; a cor da barra mostra a queda de cobertura do dia: azul até 30%, amarelo até 50%, vermelho acima</p>
@@ -732,6 +741,10 @@ function folgasMontar() {
         <button type="button" class="fg-btn" id="fg-pl-refazer">Tentar outra distribuição</button>
       </div>
 
+      ${sm.length ? `<details class="fg-cur-bloco aviso" open><summary>Com data, mas sem medição de impacto <b>${sm.length}</b></summary>
+        <ul>${sm.slice(0, 60).map((i) => `<li><b>${i.e.mat}</b> ${esc(i.e.name)} · ${esc(i.curso)} · dia ${i.dia + 1} — ${esc(i.motivo)}</li>`).join('')}
+        ${sm.length > 60 ? `<li class="mais">… e mais ${sm.length - 60}</li>` : ''}</ul>
+        <p class="fg-pl-nota">Essas pessoas receberam data e foram espalhadas pelos dias mais vazios, mas o painel não conseguiu calcular o efeito delas na cobertura. Quem está <b>na escala sem horário</b> se resolve preenchendo entrada e saída na planilha da escala.</p></details>` : ''}
       ${erros.length ? `<details class="fg-cur-bloco erro" open><summary>Precisam de atenção <b>${erros.length}</b></summary>
         <ul>${erros.slice(0, 40).map((a) => `<li>${esc(a.t)}</li>`).join('')}</ul></details>` : ''}
       ${avs.length ? `<details class="fg-cur-bloco aviso"><summary>Avisos <b>${avs.length}</b></summary>

@@ -357,11 +357,62 @@ sec('18. Matrícula fora da escala e pessoa sem horário são reportadas');
 
   const na = rel.avisos.find((a) => /9999/.test(a.t));
   ok(!!na, 'matrícula fora da escala é reportada');
-  ok(na && /2 curso/.test(na.t), 'dizendo quantos cursos ficaram de fora (' + (na ? na.t : '') + ')');
+  ok(na && /2 curso/.test(na.t), 'dizendo quantos cursos são (' + (na ? na.t : '') + ')');
+  ok(na && /não está na escala/.test(na.t), 'com a causa: fora da escala');
+
   const sh = rel.avisos.find((a) => a.lv === 'erro' && /sem horário/.test(a.t));
-  ok(!!sh, 'pessoa sem horário de entrada/saída é reportada como erro');
+  ok(!!sh, 'quem está na escala sem horário vira erro');
   ok(sh && /1301/.test(sh.t), 'com a matrícula');
-  eq(todosItens(rel).length, 1, 'só quem dá para medir é alocado');
+  ok(sh && /na escala mas sem horário/.test(sh.t), 'e com a causa separada da anterior — a ação é outra');
+  ok(sh && /Preencha entrada e saída/.test(sh.t), 'dizendo o que fazer');
+
+  // O ponto do ajuste: ninguém volta com a data em branco.
+  eq(todosItens(rel).length, 4, 'TODOS recebem data, inclusive quem não dá para medir');
+  const semMedida = rel.itens.filter((i) => !i.medivel);
+  eq(semMedida.length, 3, 'três itens ficam marcados como não medíveis');
+  ok(semMedida.every((i) => i.dia !== null), 'e todos eles têm data');
+  ok(semMedida.every((i) => i.motivo), 'cada um sabe o próprio motivo');
+  const motivos = [...new Set(semMedida.map((i) => i.motivo))].sort();
+  eq(JSON.stringify(motivos), JSON.stringify(['fora da escala', 'sem horário na escala']), 'os dois motivos são distinguidos');
+}
+
+sec('18b. Quem não dá para medir é espalhado, não empilhado');
+{
+  const mm = mkMonth(2026, 9);
+  // ninguém da escala: todos fantasmas, só dá para equilibrar por cabeça
+  const e = mkEmp(mm.days, 1350);
+  const model = mkModel(2026, 9, [e]);
+  const linhas = [];
+  for (let i = 0; i < 40; i++) linhas.push({ mat: 900000 + i, nome: 'FORA ' + i, curso: 'X' });
+  const rel = P.planejar(model, mkProg(linhas, [{ curso: 'X', tipo: 'INTERNO', dias: null }]), { tentativas: 5 });
+
+  eq(todosItens(rel).length, 40, 'os 40 recebem data');
+  const uteis = Array.from({ length: mm.days }, (_, d) => d).filter((d) => mm.dow[d] !== 0 && mm.dow[d] !== 6);
+  const porDia = uteis.map((d) => rel.porDia[d].pessoas);
+  const ideal = 40 / uteis.length;
+  const desvio = Math.max(...porDia.map((v) => Math.abs(v - ideal)));
+  console.log('   ' + porDia.join('/') + '   ideal ' + ideal.toFixed(1));
+  ok(desvio <= 1.5, 'ficam parelhos pelos dias úteis (desvio ' + desvio.toFixed(1) + ')');
+  eq(porDia.filter((v, i) => v === 0).length, 0, 'nenhum dia útil fica vazio enquanto outro acumula');
+  ok(uteis.every((d) => mm.dow[d] !== 0 && mm.dow[d] !== 6), 'e nada em fim de semana');
+}
+
+sec('18c. Janela e data travada continuam valendo para quem não dá para medir');
+{
+  const mm = mkMonth(2026, 9);
+  const e = mkEmp(mm.days, 1360);
+  const model = mkModel(2026, 9, [e]);
+  const linhas = [
+    { mat: 900001, nome: 'FORA A', curso: 'EXT' },
+    { mat: 900002, nome: 'FORA B', curso: 'EXT' },
+    { mat: 900003, nome: 'FORA C', curso: 'EXT', data: new Date(Date.UTC(2026, 9, 22)) },
+  ];
+  const rel = P.planejar(model, mkProg(linhas, [{ curso: 'EXT', tipo: 'EXTERNO', dias: P.lerDias('5-9', mm.days) }]), { tentativas: 4 });
+  const livres = rel.itens.filter((i) => !i.travado);
+  ok(livres.every((i) => i.dia >= 4 && i.dia <= 8), 'respeitam a janela 5-9 mesmo sem estar na escala');
+  const travado = rel.itens.find((i) => i.travado);
+  eq(travado.dia, 21, 'e a data travada continua travada');
+  eq(todosItens(rel).length, 3, 'os três com data');
 }
 
 sec('19. Curso ausente da aba JANELAS vira interno, com aviso');
@@ -474,6 +525,33 @@ sec('25. Curso repetido na aba JANELAS junta os dias em vez de perder um');
   ok(dias.every((d) => [4, 5, 19, 20].includes(d)), 'as duas janelas valem: dias 5, 6, 20 e 21 (' + dias.map((d) => d + 1).join(',') + ')');
   const usados = new Set(dias);
   ok(usados.size >= 3, 'e o painel reparte entre elas em vez de empilhar numa só');
+}
+
+sec('26. Dias que o Excel converteu em data viram erro, não "mês inteiro"');
+{
+  // Sem o apóstrofo, o Excel transforma "1-8" em 1 de agosto. Antes isso
+  // caía calado no mês inteiro e o curso externo ficava livre no mês todo.
+  eq(P.viroudata(new Date(Date.UTC(2026, 7, 1))), true, 'uma data é reconhecida como acidente');
+  eq(P.viroudata(46235), true, 'um serial do Excel também');
+  eq(P.viroudata('01 - 08'), false, 'o texto certo não é confundido');
+  eq(P.viroudata('05, 28'), false, 'nem a lista de dias fixos');
+  eq(P.viroudata(15), false, 'nem o dia solto escrito como número');
+  eq(P.viroudata(31), false, 'nem o dia 31');
+  eq(P.viroudata(null), false, 'nem a célula vazia');
+  eq(P.lerDias(new Date(Date.UTC(2026, 7, 1)), 31), null, 'lerDias recusa a data em vez de inventar dias');
+}
+
+sec('27. As três formas de escrever os dias, no mês real');
+{
+  const mm = mkMonth(2026, 9);
+  const dias = (t) => { const s = P.lerDias(t, mm.days); return s ? [...s].sort((a, b) => a - b).map((d) => d + 1) : null; };
+  const uteis = (t) => { const s = P.lerDias(t, mm.days); return s ? [...s].sort((a, b) => a - b).filter((d) => mm.dow[d] !== 0 && mm.dow[d] !== 6).map((d) => d + 1) : null; };
+  eq(JSON.stringify(dias('05, 28')), JSON.stringify([5, 28]), 'vírgula = dias fixos');
+  eq(JSON.stringify(dias('15')), JSON.stringify([15]), 'número solto = só aquele dia');
+  eq(JSON.stringify(dias(15)), JSON.stringify([15]), 'inclusive sem o apóstrofo, como número');
+  eq(JSON.stringify(dias('01 - 08')), JSON.stringify([1, 2, 3, 4, 5, 6, 7, 8]), 'traço = período completo');
+  eq(JSON.stringify(uteis('01 - 08')), JSON.stringify([1, 2, 5, 6, 7, 8]), 'e o fim de semana sai na hora de alocar');
+  eq(JSON.stringify(dias('01, 06, 13, 15')), JSON.stringify([1, 6, 13, 15]), 'lista longa de dias fixos');
 }
 
 /* ============================================== resumo */

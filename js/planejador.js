@@ -46,8 +46,19 @@
 
   /* ══════════════════════════════════ leitura da planilha ══════════════ */
 
+  /* Excel converte "1-8" digitado sem apóstrofo em 1 de agosto. O valor
+     chega aqui como data ou como serial, lerDias não entende, e o curso
+     externo virava livre no mês inteiro sem ninguém perceber — o pior tipo
+     de erro, o que não aparece. Dá para distinguir: dia do mês vai até 31,
+     serial de data passa de 40000. */
+  function viroudata(v) {
+    if (v instanceof Date) return true;
+    return typeof v === 'number' && v > 1000;
+  }
+
   // "10-23" · "11, 28" · "6-9, 13-16, 27" → Set de índices de dia (base 0)
   function lerDias(txt, D) {
+    if (viroudata(txt)) return null;
     const s = String(txt ?? '').trim();
     if (!s) return null;                       // null = mês inteiro
     const dias = new Set();
@@ -186,6 +197,10 @@
           // as datas da primeira sumiriam sem aviso. Melhor juntar os dias e
           // avisar — foi o que aconteceu com RAMPA DNATA e LIMPEZA DE
           // AERONAVE numa planilha real.
+          if (viroudata(col.dias ? get(r, col.dias) : null)) {
+            avisos.push({ lv: 'erro', t: `Curso "${curso}": o Excel entendeu os dias permitidos como uma data. `
+              + 'Escreva com apóstrofo na frente — por exemplo \'01 - 08 — e envie de novo.' });
+          }
           const anterior = janelas.get(curso);
           if (anterior) {
             repetidos.add(curso);
@@ -299,19 +314,38 @@
     for (const s of model.sheets) for (const b of s.blocks) for (const g of b.groups) for (const e of g.emps) porMat.set(e.mat, e);
 
     const avisos = prog.avisos.slice();
-    const itens = [], naoEncontrados = new Map();
+    const itens = [], naoEncontrados = new Map(), semHorarioUsado = new Map();
+
+    /* Pessoa que a escala não conhece ainda precisa de data: o curso existe
+       e vai acontecer. Este é um colaborador de mentira, só para o item ter
+       onde se apoiar — sem turno, e por isso sem medição de impacto.
+       Antes eu pulava essas linhas, e elas voltavam com a data em branco na
+       planilha, como se o curso tivesse falhado. */
+    const fantasma = (mat, nome) => ({
+      mat, name: nome || ('MAT ' + mat), row: 0,
+      fixed: new Array(D).fill(''), manual: new Array(D).fill(''), gen: new Array(D).fill(''),
+      _slots: null, _foraDaEscala: true,
+    });
+    const fantasmas = new Map();
 
     for (const l of prog.linhas) {
       if (!l.curso) continue;
-      const e = porMat.get(l.mat);
+      let e = porMat.get(l.mat);
+      let motivo = '';
       if (!e) {
         if (!naoEncontrados.has(l.mat)) naoEncontrados.set(l.mat, { mat: l.mat, nome: l.nome, qtd: 0 });
         naoEncontrados.get(l.mat).qtd++;
-        continue;
+        if (!fantasmas.has(l.mat)) fantasmas.set(l.mat, fantasma(l.mat, l.nome));
+        e = fantasmas.get(l.mat);
+        motivo = 'fora da escala';
+      } else if (!e._slots) {
+        if (!semHorarioUsado.has(l.mat)) semHorarioUsado.set(l.mat, { mat: l.mat, nome: e.name, qtd: 0 });
+        semHorarioUsado.get(l.mat).qtd++;
+        motivo = 'sem horário na escala';
       }
-      if (!e._slots) continue;                            // sem horário: já reportado
       const j = prog.janelas.get(l.curso) || { tipo: '', dias: null };
-      const item = { l, e, curso: l.curso, tipo: j.tipo || 'INTERNO', dia: null, travado: false, cands: [] };
+      const item = { l, e, curso: l.curso, tipo: j.tipo || 'INTERNO', dia: null, travado: false, cands: [],
+        medivel: !motivo, motivo };
 
       if (l.data) {                                       // data já fechada na planilha
         if (l.data.getUTCFullYear() === model.month.year && l.data.getUTCMonth() === model.month.month) {
@@ -336,12 +370,24 @@
       item._mes = model.month;
       itens.push(item);
     }
-    for (const x of naoEncontrados.values()) avisos.push({ lv: 'aviso', t: `Matrícula ${x.mat} ${x.nome} não está na escala — ${x.qtd} curso(s) fora do plano` });
-    for (const e of semHorario) avisos.push({ lv: 'erro', t: `${e.mat} ${e.name} está sem horário de entrada/saída na escala — não consigo medir o impacto dessa pessoa` });
+    // Duas causas diferentes, duas ações diferentes: uma se resolve subindo a
+    // escala certa, a outra preenchendo a entrada/saída na planilha da escala.
+    for (const x of naoEncontrados.values())
+      avisos.push({ lv: 'aviso', t: `${x.mat} ${x.nome} não está na escala — ${x.qtd} curso(s) com data, porém sem medição de impacto` });
+    for (const x of semHorarioUsado.values())
+      avisos.push({ lv: 'erro', t: `${x.mat} ${x.nome} está na escala mas sem horário de entrada/saída — ${x.qtd} curso(s) com data, porém sem medição de impacto. Preencha entrada e saída na escala.` });
+    for (const e of semHorario) if (!semHorarioUsado.has(e.mat))
+      avisos.push({ lv: 'aviso', t: `${e.mat} ${e.name} está na escala sem horário de entrada/saída (não tem curso este mês)` });
 
     /* --- déficit: quantas pessoas saem de cada slot de cada dia --- */
     const def = Array.from({ length: D }, () => new Float64Array(SLOTS));
+    // Quantas pessoas ficam fora em cada dia, medíveis ou não. É a única
+    // régua disponível para quem não tem turno: sem curva de cobertura, o
+    // melhor que dá para fazer é mandar essa gente para os dias mais vazios.
+    const carga = new Float64Array(D);
     const aplicar = (item, d, sinal) => {
+      carga[d] += sinal;
+      if (!item.medivel) return;
       // Curso em dia que a pessoa já não trabalhava (folga lançada) não
       // derruba cobertura nenhuma — ela não estava em pista de qualquer
       // jeito. Contar aqui inventaria um buraco que não existe. O custo
@@ -360,9 +406,15 @@
     const custoSlot = (d, x) => { const b = base[d][x]; return def[d][x] * def[d][x] / (b > 1 ? b : 1); };
     const custoDe = (item, d) => {
       let c = 0;
-      for (const seg of item.e._slots) {
-        const dd = d + seg.dia; if (dd >= D) continue;
-        for (let x = seg.de; x < seg.ate; x++) c += custoSlot(dd, x);
+      if (item.medivel) {
+        for (const seg of item.e._slots) {
+          const dd = d + seg.dia; if (dd >= D) continue;
+          for (let x = seg.de; x < seg.ate; x++) c += custoSlot(dd, x);
+        }
+      } else {
+        // Quadrático sobre o total do dia: empurra para os vales, do mesmo
+        // jeito que o custo de cobertura faz com quem tem turno.
+        c += carga[d] * carga[d] * 0.8;
       }
       const cod = E.eff(item.e, d);
       if (cod === 'F' || cod === 'FA') c += PESO_FOLGA;      // obrigaria a remanejar a folga
@@ -381,7 +433,14 @@
     for (const it of travados) aplicar(it, it.dia, 1);
 
     /* --- busca: várias tentativas, guarda a melhor --- */
-    const total = () => { let c = 0; for (let d = 0; d < D; d++) for (let x = 0; x < SLOTS; x++) c += custoSlot(d, x); return c; };
+    const total = () => {
+      let c = 0;
+      for (let d = 0; d < D; d++) {
+        for (let x = 0; x < SLOTS; x++) c += custoSlot(d, x);
+        c += carga[d] * carga[d] * 0.4;      // desequilíbrio de cabeças, secundário
+      }
+      return c;
+    };
     const tentativas = opts.tentativas ?? 6;
     let melhor = null, melhorCusto = Infinity, historico = [];
 
@@ -457,8 +516,11 @@
 
     return {
       itens, base, def, porDia, queda, avisos, busca,
+      semMedicao: itens.filter((i) => !i.medivel && i.dia !== null),
       metricas: {
         total: itens.filter((i) => i.dia !== null).length,
+        semMedicao: itens.filter((i) => !i.medivel && i.dia !== null).length,
+        pessoasSemMedicao: new Set(itens.filter((i) => !i.medivel && i.dia !== null).map((i) => i.e.mat)).size,
         travados: itens.filter((i) => i.travado).length,
         externos: itens.filter((i) => i.tipo === 'EXTERNO').length,
         internos: itens.filter((i) => i.tipo === 'INTERNO').length,
@@ -508,6 +570,6 @@
     return { custo, piorPct, piorDia, pico: Math.max(...porDia), porDia, base, def };
   }
 
-  const api = { lerProgramacao, lerDias, aplicarDB, papelDaAba, planejar, medir, coberturaBase, turnoSlots, paraSlot, gravarProgramacao, fmtData, SLOTS };
+  const api = { lerProgramacao, lerDias, viroudata, aplicarDB, papelDaAba, planejar, medir, coberturaBase, turnoSlots, paraSlot, gravarProgramacao, fmtData, SLOTS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.PlanejadorCursos = api;
 })(typeof window !== 'undefined' ? window : globalThis);
