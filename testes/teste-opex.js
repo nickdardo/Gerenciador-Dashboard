@@ -278,8 +278,154 @@ sec('14. OPEX sem par no dimensionamento também é reportado');
   ok(s.avisos.some((a) => /MAO/.test(a.t)), 'e o OPEX de MAO sem aba correspondente é avisado');
 }
 
-/* ============================================== 15. leitura real */
-sec('15. Leitura dos arquivos (.xlsx)');
+/* ============================================== 15. lista para colar */
+sec('15. A função do catálogo, não só o grupo');
+{
+  const orig = new Map([...CATALOGO.keys()].map((k) => [k, k.replace('AUXILIAR', 'Auxiliar')]));
+  const i = X.montarIndice(CATALOGO, orig);
+  eq(X.casar('ASG LIMPEZA I', i, null).funcao, 'ASG LIMPEZA I', 'nome idêntico devolve a função');
+  eq(X.casar('AGENTE SERV A PAX', i, null).funcao, 'AGENTE SERV A PASSAGEIRO I', 'nome abreviado devolve a grafia do OPEX');
+  eq(X.casar('AUXILIAR DE RAMPA I', i, null).funcao, 'Auxiliar DE RAMPA I', 'e devolve exatamente como o catálogo escreve');
+
+  // O que é ambíguo no catálogo inteiro deixa de ser dentro do grupo:
+  // "AUXILIAR DE RAMPA" existe em Rampa e em SPAX, mas uma vez decidido o
+  // grupo só sobra um cargo com esse esqueleto.
+  const m = X.casar('AUXILIAR DE RAMPA', i, new Map([['AUXILIAR DE RAMPA', 'Rampa']]));
+  eq(m.grupo, 'Rampa', 'o de-para resolve o grupo');
+  eq(m.funcao, 'Auxiliar DE RAMPA I', 'e a função sai sozinha dentro do grupo escolhido');
+
+  const ig = X.casar('ASG LIMPEZA I', i, new Map([['ASG LIMPEZA I', null]]));
+  ok(ig.ignorar === true, 'de-para com grupo nulo marca o cargo para ser ignorado');
+}
+
+sec('16. Repartir o total entre as linhas de noturno');
+{
+  const L = (not, ini) => ({ noturno: not, inicial: ini });
+  eq(X.distribuir([L(0, 10)], 14)[0], 14, 'linha única recebe tudo');
+
+  const d = X.distribuir([L(0, 30), L(6, 10)], 44);
+  eq(d[0] + d[1], 44, 'a soma bate com o total dimensionado');
+  eq(d[0], 33, 'e mantém a proporção de antes (30:10 → 33:11)');
+  eq(d[1], 11, 'inclusive na linha noturna');
+
+  const r = X.distribuir([L(0, 1), L(6, 1), L(3, 1)], 5);
+  eq(r.reduce((a, b) => a + b, 0), 5, 'o que não divide exato não se perde');
+
+  const z = X.distribuir([L(6, 0), L(0, 0)], 7);
+  eq(z[1], 7, 'sem referência anterior, tudo vai para a linha sem noturno');
+  eq(z[0], 0, 'e nada é inventado no noturno');
+
+  eq(X.distribuir([L(0, 30), L(6, 10)], 0).join(','), '0,0', 'função que saiu do dimensionamento zera');
+}
+
+sec('17. Lista pronta para colar no OPEX');
+{
+  const grade = (rows) => ({ cabecalho: 12, primeira: 13, ultima: 12 + rows.length,
+    colGrupo: 'Y', colInicial: 'AD', temChMes: true, temChDia: true,
+    linhas: rows.map((r, i) => ({ linha: 13 + i, grupo: r[0], funcao: r[1], chMes: r[2], chDia: r[3], noturno: r[4], inicial: r[5] })) });
+
+  const mes = { aba: 'NOVEMBRO', grade: grade([
+    ['Limpeza', 'ASG LIMPEZA I', 180, 6, 0, 28],
+    ['Limpeza', 'ASG LIMPEZA I', 180, 6, 6, 4],
+    ['Limpeza', 'ASG LIMPEZA II', 180, 6, 0, 5],
+    ['Rampa', 'AUXILIAR DE RAMPA I', 180, 6, 0, 80],
+    ['Administrativo', 'AUXILIAR ADMINISTRATIVO I', 210, 7, 0, 5],
+  ]) };
+  const dim = mkBase('BEL', [
+    [40, 'ASG LIMPEZA I', 6],        // 32 → 40, com noturno a manter
+    [77, 'AUXILIAR DE RAMPA I', 6],  // 80 → 77
+    [12, 'ASG LIMPEZA I', 3],        // carga horária que não existe na grade
+    [3, 'MECANICO I', 7],            // função do catálogo, sem linha no mês
+  ]);
+  const L = X.montarLista(dim, mes, CATALOGO, null, null);
+
+  eq(L.colunas.join('|'), 'Grupo|Função|CH mês|CH dia|noturno|inicial', 'as colunas saem na ordem da grade');
+
+  const asg6 = L.linhas.filter((l) => X.norm(l.funcao) === 'ASG LIMPEZA I' && l.chDia === 6);
+  eq(asg6.length, 2, 'a função continua com as duas linhas de noturno que tinha');
+  eq(asg6[0].inicial + asg6[1].inicial, 40, 'somando o que o dimensionamento pede');
+  eq(asg6[0].noturno, 0, 'a primeira sem horas noturnas');
+  eq(asg6[1].noturno, 6, 'e a segunda com as 6 que já estavam lá');
+  eq(asg6[1].inicial, 5, 'a proporção de antes foi mantida (28:4 de 32 → 35:5 de 40)');
+
+  const ram = L.linhas.find((l) => l.grupo === 'Rampa');
+  eq(ram.inicial, 77, 'Rampa passa a refletir o dimensionamento');
+  eq(ram.antes, 80, 'guardando o que estava no OPEX');
+  eq(ram.estado, 'ajustada', 'e é marcada como ajustada');
+
+  const adm = L.linhas.find((l) => l.grupo === 'Administrativo');
+  eq(adm.inicial, 5, 'grupo de apoio não é zerado — o dimensionamento não fala dele');
+  eq(adm.estado, 'apoio', 'e sai marcado como mantido');
+
+  const asg2 = L.linhas.find((l) => X.norm(l.funcao) === 'ASG LIMPEZA II');
+  eq(asg2.inicial, 0, 'função do grupo dimensionado que sumiu do dimensionamento vai a zero');
+  eq(asg2.estado, 'zerada', 'e é apontada, não escondida');
+  ok(L.zeradas.some((z) => X.norm(z.funcao) === 'ASG LIMPEZA II'), 'aparecendo na lista de zeradas');
+
+  eq(L.novas.length, 2, 'duas linhas novas: ASG LIMPEZA I de 3H e MECANICO I');
+  const nova3 = L.novas.find((l) => l.chDia === 3);
+  eq(nova3.inicial, 12, 'com a quantidade dimensionada');
+  eq(nova3.noturno, 0, 'noturno zero — o dimensionamento não sabe essa quebra');
+  eq(nova3.chMes, 90, 'e a CH mensal deduzida da própria grade (180/6 = 30 por hora)');
+  eq(L.faltamNoCatalogo.length, 0, 'nenhuma função está fora do catálogo do OPEX');
+  eq(L.semReferencia.length, 2, 'mas as duas novas saem sem referência de noturno');
+
+  ok(L.repartidas.some((r) => X.norm(r.funcao) === 'ASG LIMPEZA I'),
+    'a função que teve o total repartido entre linhas de noturno é reportada');
+
+  const linhasTsv = L.tsv().split('\n');
+  eq(linhasTsv[0], 'Grupo\tFunção\tCH mês\tCH dia\tnoturno\tinicial', 'o TSV começa pelo cabeçalho');
+  eq(linhasTsv.length, L.linhas.length + 1, 'e traz uma linha por linha da lista');
+  eq(linhasTsv[1].split('\t').length, 6, 'com seis colunas, prontas para colar lado a lado');
+  const semCab = L.tsv(false).split('\n');
+  eq(semCab.length, L.linhas.length, 'sem cabeçalho quando é para colar na grade, que já tem o dela');
+  eq(semCab[0], linhasTsv[1], 'e a primeira linha é a mesma');
+  eq(L.onde.coluna, 'Y', 'e o painel sabe dizer em que coluna colar');
+  eq(L.onde.linha, 13, 'e em que linha');
+}
+
+sec('18. Função fora do catálogo é informada, nunca inventada');
+{
+  const mes = { aba: 'NOVEMBRO', grade: { cabecalho: 12, primeira: 13, ultima: 13, colGrupo: 'Y', colInicial: 'AD',
+    temChMes: true, temChDia: true,
+    linhas: [{ linha: 13, grupo: 'Rampa', funcao: 'AUXILIAR DE RAMPA I', chMes: 180, chDia: 6, noturno: 0, inicial: 70 }] } };
+  const dim = mkBase('BEL', [[70, 'AUXILIAR DE RAMPA I', 6], [4, 'AJUDANTE DE PATIO', 6]]);
+  const L = X.montarLista(dim, mes, CATALOGO, new Map([['AJUDANTE DE PATIO', 'Rampa']]), null);
+
+  eq(L.pendentes.length, 0, 'o de-para resolveu o grupo');
+  const n = L.novas.find((l) => X.norm(l.funcao) === 'AJUDANTE DE PATIO');
+  ok(!!n, 'a linha entra na lista com o nome que o dimensionamento usa');
+  eq(L.faltamNoCatalogo.length, 1, 'e é apontada como função que não existe no OPEX');
+  eq(L.faltamNoCatalogo[0].inicial, 4, 'com as pessoas que dependem dela');
+}
+
+sec('19. Pendente trava a lista, como trava o delta');
+{
+  const mes = { aba: 'NOV', grade: { cabecalho: 12, primeira: 13, ultima: 13, colGrupo: 'Y', colInicial: 'AD',
+    temChMes: true, temChDia: true,
+    linhas: [{ linha: 13, grupo: 'Rampa', funcao: 'AUXILIAR DE RAMPA I', chMes: 180, chDia: 6, noturno: 0, inicial: 90 }] } };
+  const dim = mkBase('BEL', [[77, 'AUXILIAR DE RAMPA I', 6], [21, 'AUXILIAR DE RAMPA', 6]]);
+  const L = X.montarLista(dim, mes, CATALOGO, null, null);
+  eq(L.pendentes.length, 1, 'o cargo ambíguo fica pendente');
+  eq(L.totais.pendQtd, 21, 'com as 21 pessoas dele');
+  eq(L.linhas.find((l) => l.grupo === 'Rampa').inicial, 77,
+    'e a lista sai com 77 em vez de 98 — por isso o painel avisa antes de você colar');
+}
+
+sec('20. OPEX sem a grade de lançamento ainda gera lista');
+{
+  const mes = { aba: 'NOVEMBRO', grade: null };
+  const dim = mkBase('BEL', [[30, 'ASG LIMPEZA I', 6], [5, 'ASG LIMPEZA I', 3]]);
+  const L = X.montarLista(dim, mes, CATALOGO, null, null);
+  eq(L.grade, false, 'o painel sabe que não achou a grade');
+  eq(L.linhas.length, 2, 'e monta a lista direto do dimensionamento');
+  eq(L.novas.length, 2, 'tudo entra como linha nova');
+  eq(L.linhas[0].chMes, 180, 'com CH mensal no padrão de 30 dias quando não há de onde aprender');
+  ok(L.linhas.every((l) => l.noturno === 0), 'e noturno zero em todas — nada a copiar');
+}
+
+/* ============================================== 21. leitura real */
+sec('21. Leitura dos arquivos (.xlsx)');
 {
   const fs = require('fs');
   const dir = path.join(__dirname, 'fixtures');

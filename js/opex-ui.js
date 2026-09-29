@@ -51,6 +51,9 @@ function opexTabHTML() {
         <div class="fg-via"><span class="fg-via-n">Você decide o que sobra</span>
           Cargo ambíguo — "AUXILIAR DE RAMPA" existe em dois grupos — fica para você resolver. A decisão é
           guardada e vale nos próximos meses.</div>
+        <div class="fg-via"><span class="fg-via-n">E a lista para colar</span>
+          No fim de cada base sai a lista pronta — Grupo, Função, CH, noturno e inicial — refletindo o
+          dimensionamento linha a linha. Copia e cola na grade do OPEX.</div>
       </div>
       <p class="fg-como-fim">FTE = pessoas × carga horária ÷ 6, a mesma conta que os dois arquivos fazem por dentro.</p>
     </div>
@@ -157,12 +160,101 @@ function opexMontar() {
       return;
     }
     const { comparacoes, avisos } = S.res;
-    box.innerHTML = comparacoes.map(cartao).join('')
+    box.innerHTML = comparacoes.map((c, i) => cartao(c, i)).join('')
       + (avisos.length ? `<details class="fg-cur-bloco aviso"><summary>Avisos da leitura <b>${avisos.length}</b></summary>
           <ul>${avisos.map((a) => `<li>${esc(a.t)}</li>`).join('')}</ul></details>` : '');
   }
 
-  function cartao(c) {
+  /* ---------- lista para colar no OPEX ---------- */
+
+  const ESTADO = {
+    igual: ['igual', 'já estava certo'],
+    ajustada: ['ajustada', 'mudou de quantidade'],
+    zerada: ['zerada', 'saiu do dimensionamento'],
+    nova: ['nova', 'não existe no mês'],
+    apoio: ['mantida', 'apoio — não é dimensionada'],
+  };
+
+  function blocoLista(c, i) {
+    const L = c.lista;
+    if (!L) return '';
+    const T = L.totais;
+    const mostra = 14;
+    const jaMostrou = new Set();
+    const linha = (l, oculta) => {
+      const [rot, tit] = ESTADO[l.estado] || ['', ''];
+      const chave = l.grupo + '|' + l.funcao + '|' + l.chDia;
+      const repetida = jaMostrou.has(chave);
+      jaMostrou.add(chave);
+      const cargos = repetida ? '' : (l.cargos || []).map((x) => esc(x.cargo) + ' (' + x.qtd + ')').join(' · ');
+      return `<tr class="ox-l-${l.estado}"${oculta ? ' hidden data-extra="' + i + '"' : ''}>
+        <td>${esc(l.grupo)}</td>
+        <td>${esc(l.funcao)}${cargos ? `<span class="ox-cargos">${cargos}</span>` : ''}</td>
+        <td class="n">${l.chMes || ''}</td><td class="n">${l.chDia || ''}</td>
+        <td class="n">${l.noturno || 0}</td>
+        <td class="n forte">${l.inicial}</td>
+        <td class="ox-l-est"><span class="ox-chip ${l.estado}" title="${tit}">${rot}</span>${
+          l.estado === 'ajustada' || l.estado === 'zerada' ? `<span class="ox-de">era ${l.antes}</span>` : ''}</td>
+      </tr>`;
+    };
+
+    return `
+    <section class="ox-lista" data-lista="${i}">
+      <header class="ox-lista-head">
+        <div>
+          <h4>Lista para colar no OPEX <span class="ox-badge">${T.linhas} linhas</span></h4>
+          <p class="ox-lista-onde">${L.grade
+            ? `Cole na aba <b>${esc(L.onde.aba)}</b>, na coluna <b>${esc(L.onde.coluna)}</b>, a partir da linha <b>${L.onde.linha}</b> — as ${L.colunas.length} colunas entram lado a lado.`
+            : `Não achei a grade de lançamento neste OPEX, então a lista sai direto do dimensionamento: confira as colunas antes de colar.`}</p>
+        </div>
+        <div class="ox-lista-btns">
+          <button type="button" class="fg-btn fg-primary" data-copiar="${i}">Copiar lista</button>
+          <button type="button" class="fg-btn" data-baixar="${i}">Baixar .csv</button>
+        </div>
+      </header>
+
+      ${T.pendQtd ? `<div class="ox-alerta">Esta lista está incompleta: <b>${T.pendQtd} pessoa(s)</b> ainda sem grupo.
+        Classifique os cargos pendentes antes de colar, senão você vai gravar no OPEX um efetivo menor do que o dimensionado.</div>` : ''}
+
+      ${L.faltamNoCatalogo.length ? `<div class="ox-alerta atencao">
+        <b>${L.faltamNoCatalogo.length} função(ões) não existem no catálogo do OPEX</b> — crie na aba <b>Funções</b> antes de colar,
+        senão a validação da coluna vai recusar:
+        <ul class="ox-mini">${L.faltamNoCatalogo.map((l) => `<li><b>${esc(l.funcao)}</b> · ${esc(l.grupo)} · ${l.chDia}H · ${l.inicial} pessoa(s)
+          <span class="ox-de">vem de ${l.cargos.map((x) => esc(x.cargo)).join(', ')}</span></li>`).join('')}</ul></div>` : ''}
+
+      <div class="ox-lista-notas">
+        <div class="ox-nota"><b>Quem manda em quê</b><span>
+          O dimensionamento define o <i>total</i> de cada função. A quebra por <i>horas noturnas</i> ele não tem —
+          essa vem da própria grade que já está no OPEX, mantendo a proporção que você usava.</span></div>
+        ${L.repartidas.length ? `<div class="ox-nota"><b>${L.repartidas.length} função(ões) repartidas</b><span>
+          ${L.repartidas.slice(0, 3).map((r) => `${esc(r.funcao)} ${r.chDia}H: ${r.total} em ${r.partes.map((p) => `${p.para}${p.noturno ? ' com ' + p.noturno + 'h not.' : ''}`).join(' + ')}`).join('<br>')}
+          ${L.repartidas.length > 3 ? `<br>e mais ${L.repartidas.length - 3}.` : ''}</span></div>` : ''}
+        ${L.semReferencia.length ? `<div class="ox-nota"><b>${L.semReferencia.length} linha(s) novas com noturno zero</b><span>
+          Não havia linha equivalente no mês para copiar a quebra. Se alguma dessas turmas tem hora noturna, ajuste depois de colar.</span></div>` : ''}
+        ${L.zeradas.length ? `<div class="ox-nota"><b>${L.zeradas.length} função(ões) zeradas</b><span>
+          ${L.zeradas.slice(0, 4).map((z) => `${esc(z.funcao)} ${z.chDia}H (era ${z.antes})`).join(' · ')}
+          — o dimensionamento deste mês não pede ninguém nelas.</span></div>` : ''}
+        ${T.apoio ? `<div class="ox-nota"><b>${num(T.apoio)} pessoas de apoio preservadas</b><span>
+          Grupos que o dimensionamento não cobre saem com o número que já estava no OPEX, em vez de zerar.</span></div>` : ''}
+      </div>
+
+      <table class="ox-tab ox-lista-tab">
+        <thead><tr>${L.colunas.map((h, j) => `<th${j >= 2 ? ' class="n"' : ''}>${esc(h)}</th>`).join('')}<th>situação</th></tr></thead>
+        <tbody>
+          ${L.linhas.slice(0, mostra).map((l) => linha(l, false)).join('')}
+          ${L.linhas.slice(mostra).map((l) => linha(l, true)).join('')}
+        </tbody>
+        <tfoot><tr><th colspan="${L.colunas.length - 1}">Total da lista</th>
+          <th class="n">${T.pessoas}</th>
+          <th class="ox-l-est">${T.pessoas !== T.antes ? `<span class="ox-de">era ${T.antes}</span>` : ''}</th></tr></tfoot>
+      </table>
+      ${L.linhas.length > mostra
+        ? `<button type="button" class="ox-mais" data-mais="${i}">${L.linhas.length - mostra === 1
+            ? 'Ver a última linha' : `Ver as outras ${L.linhas.length - mostra} linhas`}</button>` : ''}
+    </section>`;
+  }
+
+  function cartao(c, i) {
     const T = c.totais;
     const mes = c.periodo ? c.periodo.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric', timeZone: 'UTC' }) : '';
     const pend = c.pendentes.length;
@@ -233,6 +325,8 @@ function opexMontar() {
           </div>`).join('')}
       </div>` : ''}
 
+      ${blocoLista(c, i)}
+
       ${c.apoio.length ? `<details class="ox-apoio"><summary>Existe no OPEX e não é dimensionado
           <b>${num(T.apoioQtd)} pessoas · ${num(T.apoioFte)} FTE</b></summary>
         <p class="ox-pend-ajuda">Funções de apoio que o dimensionamento operacional não cobre. Ficam fora do delta
@@ -261,7 +355,67 @@ function opexMontar() {
   }
   $('#ox-recarregar').addEventListener('click', recalcular);
 
-  $('#ox-saida').addEventListener('click', (ev) => {
+  /* A área de transferência é o caminho curto: o formato de colar do Excel é
+     TSV, então basta o texto — o Excel espalha nas colunas sozinho. Onde a
+     API moderna não existir (ou o navegador negar fora de HTTPS), o textarea
+     escondido com execCommand ainda funciona. */
+  async function copiar(txt) {
+    try {
+      if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(txt); return true; }
+    } catch (e) { /* cai no plano B */ }
+    const ta = document.createElement('textarea');
+    ta.value = txt;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:-1000px;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    ta.remove();
+    return ok;
+  }
+
+  function baixar(nome, texto, tipo) {
+    const url = URL.createObjectURL(new Blob([texto], { type: tipo }));
+    const a = document.createElement('a');
+    a.href = url; a.download = nome;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+
+  const listaDe = (i) => (S.res && S.res.comparacoes[i] ? S.res.comparacoes[i] : null);
+
+  $('#ox-saida').addEventListener('click', async (ev) => {
+    const bc = ev.target.closest('[data-copiar]');
+    if (bc) {
+      const c = listaDe(+bc.dataset.copiar);
+      if (!c || !c.lista) return;
+      const ok = await copiar(c.lista.tsv(!c.lista.grade));
+      bc.textContent = ok ? 'Copiado!' : 'Não consegui copiar';
+      setTimeout(() => { bc.textContent = 'Copiar lista'; }, 2200);
+      if (ok) {
+        toast(c.lista.grade
+          ? `${c.lista.totais.linhas} linhas na área de transferência. Cole na aba <b>${esc(c.lista.onde.aba)}</b>, coluna <b>${esc(c.lista.onde.coluna)}</b>, linha <b>${c.lista.onde.linha}</b> — <b>sem</b> o cabeçalho, que já fica na planilha.`
+          : `${c.lista.totais.linhas} linhas copiadas, com cabeçalho.`, 9000);
+      }
+      return;
+    }
+    const bb = ev.target.closest('[data-baixar]');
+    if (bb) {
+      const c = listaDe(+bb.dataset.baixar);
+      if (!c || !c.lista) return;
+      baixar(`opex-${c.base}-${c.mesOpex}.csv`.replace(/\s+/g, '-').toLowerCase(),
+        c.lista.csv(), 'text/csv;charset=utf-8');
+      return;
+    }
+    const bm = ev.target.closest('[data-mais]');
+    if (bm) {
+      const i = bm.dataset.mais;
+      document.querySelectorAll(`[data-extra="${CSS.escape(i)}"]`).forEach((tr) => { tr.hidden = false; });
+      bm.remove();
+      return;
+    }
+
     const b = ev.target.closest('[data-exp]');
     if (!b) return;
     const chave = b.dataset.exp;

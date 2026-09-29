@@ -3474,3 +3474,47 @@ body.fg-locked { overflow: hidden; }
 .fg-scope .ox-apoio summary { cursor: pointer; font-size: 12.5px; color: var(--ink-2);
   display: flex; gap: 8px; align-items: baseline; }
 .fg-scope .ox-apoio summary b { margin-left: auto; font-family: var(--f-mono); color: var(--ink); }
+
+/* ── Lista para colar no OPEX ──────────────────────────
+   É o entregável da aba: precisa parecer um bloco que você pega e leva,
+   não mais uma tabela de análise. Daí a borda em petróleo e os botões no
+   topo, onde a mão vai primeiro. */
+.fg-scope .ox-lista { border: 1px solid var(--petrol); border-radius: 10px; padding: 14px;
+  display: flex; flex-direction: column; gap: 12px; background: var(--surface); }
+.fg-scope .ox-lista-head { display: flex; align-items: flex-start; gap: 14px; flex-wrap: wrap; }
+.fg-scope .ox-lista-head > div:first-child { flex: 1 1 320px; display: flex; flex-direction: column; gap: 3px; }
+.fg-scope .ox-lista-head h4 { margin: 0; font: 700 13px var(--f-display); letter-spacing: .06em;
+  text-transform: uppercase; color: var(--petrol); display: flex; align-items: center; gap: 8px; }
+.fg-scope .ox-lista-head h4 .ox-badge { background: var(--petrol-soft); color: var(--petrol); }
+.fg-scope .ox-lista-onde { margin: 0; font-size: 12.5px; color: var(--ink-2); line-height: 1.5; }
+.fg-scope .ox-lista-onde b { color: var(--ink); font-family: var(--f-mono); }
+.fg-scope .ox-lista-btns { display: flex; gap: 8px; flex: none; }
+
+.fg-scope .ox-alerta.atencao { border-color: var(--err); background: var(--err-soft); }
+.fg-scope .ox-mini { margin: 6px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; }
+.fg-scope .ox-mini li { font-size: 12.5px; }
+
+.fg-scope .ox-lista-notas { display: grid; grid-template-columns: repeat(auto-fit, minmax(235px, 1fr)); gap: 8px; }
+.fg-scope .ox-lista-notas .ox-nota { border: 1px solid var(--line-soft); border-radius: 8px;
+  padding: 9px 11px; font-size: 12px; color: var(--ink-2); line-height: 1.5; }
+.fg-scope .ox-lista-notas .ox-nota > b { display: block; margin-bottom: 2px;
+  font: 600 11px var(--f-body); letter-spacing: .06em; text-transform: uppercase; color: var(--ink); }
+.fg-scope .ox-lista-notas .ox-nota i { font-style: normal; font-weight: 600; color: var(--ink); }
+
+.fg-scope .ox-lista-tab .ox-cargos { display: block; margin-top: 1px; }
+.fg-scope .ox-lista-tab .forte { font-weight: 700; color: var(--ink); }
+.fg-scope .ox-lista-tab .ox-cargos { font-size: 11px; }
+.fg-scope .ox-l-est { text-align: right; white-space: nowrap; }
+.fg-scope .ox-de { font: 500 11px var(--f-mono); color: var(--ink-3); margin-left: 6px; }
+.fg-scope .ox-chip { display: inline-block; font: 600 10.5px var(--f-body); letter-spacing: .04em;
+  text-transform: uppercase; padding: 2px 7px; border-radius: 999px;
+  background: var(--line-soft); color: var(--ink-2); }
+.fg-scope .ox-chip.ajustada { background: var(--petrol-soft); color: var(--petrol); }
+.fg-scope .ox-chip.nova { background: var(--ok-soft); color: var(--ok); }
+.fg-scope .ox-chip.zerada { background: var(--err-soft); color: var(--err); }
+.fg-scope .ox-chip.apoio { background: var(--warn-soft); color: var(--warn); }
+.fg-scope .ox-l-zerada td { opacity: .72; }
+
+.fg-scope .ox-mais { align-self: flex-start; border: 1px dashed var(--line); background: none;
+  border-radius: 8px; padding: 6px 12px; font-size: 12.5px; color: var(--ink-2); }
+.fg-scope .ox-mais:hover { border-color: var(--petrol); color: var(--petrol); }
