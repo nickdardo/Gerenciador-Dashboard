@@ -79,7 +79,7 @@ function opexMontar() {
 
   // Estado fora da função: o Admin recria o DOM a cada troca de aba, e sem
   // isso os arquivos lidos se perderiam a cada ida e volta.
-  if (!window._oxState) window._oxState = { dim: null, dimNome: '', opexes: [], opexNomes: [], depara: new Map(), res: null, busy: false };
+  if (!window._oxState) window._oxState = { dim: null, dimNome: '', opexes: [], opexNomes: [], depara: new Map(), res: null, busy: false, baseSel: '__resumo' };
   const S = window._oxState;
 
   let toastT = 0;
@@ -160,9 +160,97 @@ function opexMontar() {
       return;
     }
     const { comparacoes, avisos } = S.res;
-    box.innerHTML = comparacoes.map((c, i) => cartao(c, i)).join('')
+    /* Com uma base só, aba é cerimônia sem função — mostra o cartão direto.
+       Com várias, nove cartões empilhados viram rolagem: entra a barra de
+       abas, e a primeira é um resumo de todas, que é o que se quer ver
+       primeiro. A escolha sobrevive ao re-render, senão resolver um cargo
+       pendente jogaria você de volta para o começo. */
+    const chaves = comparacoes.map(chaveBase);
+    const varias = comparacoes.length > 1;
+    if (!varias) S.baseSel = chaves[0] || '__resumo';
+    else if (S.baseSel !== '__resumo' && !chaves.includes(S.baseSel)) S.baseSel = '__resumo';
+
+    const i = chaves.indexOf(S.baseSel);
+    const corpo = !varias ? (comparacoes.length ? cartao(comparacoes[0], 0) : '')
+      : S.baseSel === '__resumo' ? resumoBases(comparacoes)
+        : cartao(comparacoes[i], i);
+
+    box.innerHTML = (varias ? barraBases(comparacoes) : '') + corpo
       + (avisos.length ? `<details class="fg-cur-bloco aviso"><summary>Avisos da leitura <b>${avisos.length}</b></summary>
           <ul>${avisos.map((a) => `<li>${esc(a.t)}</li>`).join('')}</ul></details>` : '');
+  }
+
+  /* ---------- abas de base ---------- */
+
+  const chaveBase = (c) => c.base || c.aba;
+
+  function barraBases(cs) {
+    const pendTotal = cs.reduce((s, c) => s + c.pendentes.length, 0);
+    const aba = (k, rot, dir, pend, sel) => `
+      <button type="button" class="ox-aba${sel ? ' sel' : ''}" data-base-sel="${esc(k)}"
+        ${pend ? `title="${pend} cargo(s) ainda a classificar"` : ''}>
+        <span class="ox-aba-n">${esc(rot)}</span>
+        ${dir}${pend ? '<span class="ox-aba-pend" aria-label="tem cargo a classificar"></span>' : ''}
+      </button>`;
+
+    return `<div class="ox-abas">
+      ${aba('__resumo', 'Resumo', `<span class="ox-aba-d">${cs.length} bases</span>`, pendTotal, S.baseSel === '__resumo')}
+      <span class="ox-abas-sep"></span>
+      ${cs.map((c) => aba(chaveBase(c), chaveBase(c),
+        `<span class="ox-aba-d ${cls(c.totais.deltaQtd)}">${sinal(c.totais.deltaQtd)}</span>`,
+        c.pendentes.length, S.baseSel === chaveBase(c))).join('')}
+    </div>`;
+  }
+
+  /* Uma linha por base, para ver o conjunto sem rolar. Clicar abre a base. */
+  function resumoBases(cs) {
+    const som = (f) => cs.reduce((s, c) => s + f(c.totais), 0);
+    const pendTotal = cs.reduce((s, c) => s + c.pendentes.length, 0);
+    const pendQtd = som((T) => T.pendQtd);
+
+    return `
+    <section class="ox-card">
+      <header class="ox-card-head">
+        <h3>Resumo</h3>
+        <span class="ox-sub">${cs.length} bases comparadas · clique numa linha para abrir</span>
+      </header>
+
+      ${pendTotal ? `<div class="ox-alerta"><b>${num(pendQtd)} pessoa(s)</b> em ${pendTotal} linha(s) ainda sem grupo,
+        espalhadas por ${cs.filter((c) => c.pendentes.length).length} base(s) — os deltas abaixo estão incompletos
+        enquanto isso. As bases com pendência estão marcadas com um ponto na aba.</div>` : ''}
+
+      <table class="ox-tab ox-resumo">
+        <thead><tr>
+          <th>Base</th><th>Mês</th>
+          <th class="n">Dimens.</th><th class="n">OPEX</th><th class="n d">Δ pessoas</th>
+          <th class="n">Dimens. FTE</th><th class="n">OPEX FTE</th><th class="n d">Δ FTE</th>
+          <th class="n">A classificar</th>
+        </tr></thead>
+        <tbody>
+          ${cs.map((c) => {
+            const T = c.totais;
+            return `<tr class="ox-res-l" data-base-sel="${esc(chaveBase(c))}">
+              <td><b>${esc(chaveBase(c))}</b></td>
+              <td class="ox-res-mes">${esc(c.mesOpex)}</td>
+              <td class="n">${num(T.dimQtd)}</td><td class="n">${num(T.opexQtd)}</td>
+              <td class="n d ${cls(T.deltaQtd)}">${sinal(T.deltaQtd)}</td>
+              <td class="n">${num(T.dimFte)}</td><td class="n">${num(T.opexFte)}</td>
+              <td class="n d ${cls(T.deltaFte)}">${sinal(T.deltaFte)}</td>
+              <td class="n">${c.pendentes.length
+                ? `<span class="ox-res-pend">${c.pendentes.length}</span>` : '—'}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+        <tfoot><tr>
+          <th colspan="2">Total</th>
+          <th class="n">${num(som((T) => T.dimQtd))}</th><th class="n">${num(som((T) => T.opexQtd))}</th>
+          <th class="n d ${cls(som((T) => T.deltaQtd))}">${sinal(som((T) => T.deltaQtd))}</th>
+          <th class="n">${num(som((T) => T.dimFte))}</th><th class="n">${num(som((T) => T.opexFte))}</th>
+          <th class="n d ${cls(som((T) => T.deltaFte))}">${sinal(som((T) => T.deltaFte))}</th>
+          <th class="n">${pendTotal || '—'}</th>
+        </tr></tfoot>
+      </table>
+    </section>`;
   }
 
   /* ---------- lista para colar no OPEX ---------- */
@@ -386,6 +474,16 @@ function opexMontar() {
   const listaDe = (i) => (S.res && S.res.comparacoes[i] ? S.res.comparacoes[i] : null);
 
   $('#ox-saida').addEventListener('click', async (ev) => {
+    const ab = ev.target.closest('[data-base-sel]');
+    if (ab) {
+      S.baseSel = ab.dataset.baseSel;
+      render();
+      // Trocar de base recarrega o topo do bloco — leva a vista junto, senão
+      // você troca de aba e continua olhando o meio da página.
+      const topo = $('#adm-opex');
+      if (topo && topo.getBoundingClientRect().top < 0) topo.scrollIntoView({ block: 'start' });
+      return;
+    }
     const bc = ev.target.closest('[data-copiar]');
     if (bc) {
       const c = listaDe(+bc.dataset.copiar);

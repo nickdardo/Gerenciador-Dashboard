@@ -3518,3 +3518,32 @@ body.fg-locked { overflow: hidden; }
 .fg-scope .ox-mais { align-self: flex-start; border: 1px dashed var(--line); background: none;
   border-radius: 8px; padding: 6px 12px; font-size: 12.5px; color: var(--ink-2); }
 .fg-scope .ox-mais:hover { border-color: var(--petrol); color: var(--petrol); }
+
+/* ── Abas de base ──────────────────────────────────────
+   Nove bases empilhadas viram rolagem. A barra troca o cartão no lugar, e
+   cada aba já adianta o delta — assim dá para escolher qual abrir sem
+   abrir todas. O ponto marca base com cargo pendente, que é o que exige
+   ação de gente. */
+.fg-scope .ox-abas { display: flex; flex-wrap: wrap; align-items: stretch; gap: 6px;
+  padding-bottom: 12px; margin-bottom: 2px; border-bottom: 1px solid var(--line-soft); }
+.fg-scope .ox-abas-sep { width: 1px; background: var(--line); margin: 2px 4px; flex: none; }
+.fg-scope .ox-aba { position: relative; display: flex; flex-direction: column; align-items: flex-start;
+  gap: 1px; border: 1px solid var(--line); background: var(--surface); border-radius: 9px;
+  padding: 6px 12px; min-width: 76px; cursor: pointer; }
+.fg-scope .ox-aba:hover { border-color: var(--petrol); }
+.fg-scope .ox-aba.sel { border-color: var(--petrol); background: var(--petrol-soft); }
+.fg-scope .ox-aba-n { font: 700 13px/1.2 var(--f-display); letter-spacing: .04em; color: var(--ink); }
+.fg-scope .ox-aba.sel .ox-aba-n { color: var(--petrol); }
+.fg-scope .ox-aba-d { font: 600 11px var(--f-mono); color: var(--ink-2); }
+.fg-scope .ox-aba-d.mais { color: var(--warn); }
+.fg-scope .ox-aba-d.menos { color: var(--err); }
+.fg-scope .ox-aba-d.zero { color: var(--ok); }
+.fg-scope .ox-aba-pend { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px;
+  border-radius: 50%; background: var(--warn); }
+
+.fg-scope .ox-resumo tbody tr { cursor: pointer; }
+.fg-scope .ox-resumo tbody tr:hover { background: var(--petrol-soft); }
+.fg-scope .ox-resumo tbody td:first-child b { color: var(--petrol); letter-spacing: .04em; }
+.fg-scope .ox-res-mes { font-size: 12px; color: var(--ink-2); text-transform: lowercase; }
+.fg-scope .ox-res-pend { display: inline-block; min-width: 20px; padding: 1px 6px; border-radius: 999px;
+  background: var(--warn-soft); color: var(--warn); font: 600 11px var(--f-mono); }
