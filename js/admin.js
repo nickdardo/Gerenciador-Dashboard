@@ -1367,20 +1367,46 @@ async function adminLoadMalha(input) {
           hora_chegada:parts[7]?.trim()||null,hora_saida:parts[8]?.trim()||null,
           cia:parts[2]?.trim()||null,aeronave:parts[10]?.trim()||null,updated_at:new Date()});
       }
-      const total=records.length;
+      // O Postgres recusa o lote inteiro — "ON CONFLICT DO UPDATE command
+      // cannot affect row a second time" — quando duas linhas do MESMO envio
+      // disputam a mesma chave (base, data, voo, hora_chegada). Acontece
+      // quando o RVPE traz o mesmo voo repetido, e derrubava o upload todo
+      // com um 500 sem dizer qual voo era.
+      // A chave é única no banco, então guardar as duas é impossível de
+      // qualquer jeito: fica a última, que é a versão mais recente da linha.
+      // Linha com voo ou hora em branco fica fora dessa poda — para o banco
+      // cada uma delas é distinta, e juntá-las apagaria voo de verdade.
+      const porChave=new Map(); const semChave=[]; const repetidos=[];
+      for (const r of records) {
+        if (!r.voo || !r.hora_chegada) { semChave.push(r); continue; }
+        const k=`${r.base}|${r.data}|${r.voo}|${r.hora_chegada}`;
+        if (porChave.has(k)) repetidos.push(k);
+        porChave.set(k,r);
+      }
+      const limpos=[...porChave.values()].concat(semChave);
+      if (repetidos.length) {
+        console.warn(`[malha] ${repetidos.length} linha(s) repetidas no arquivo — ficou a última de cada:`,
+          [...new Set(repetidos)].slice(0,20));
+      }
+
+      const total=limpos.length;
       adminSetFileStatus('malha',`Gravando ${total.toLocaleString()} voos...`,'load');
       const BATCH=500; let saved=0;
-      for (let i=0;i<records.length;i+=BATCH) {
-        const {error}=await db.from('malha').upsert(records.slice(i,i+BATCH),{onConflict:'base,data,voo,hora_chegada'});
-        if (error) throw new Error(error.message);
-        saved+=Math.min(BATCH,records.length-i);
+      for (let i=0;i<limpos.length;i+=BATCH) {
+        const {error}=await db.from('malha').upsert(limpos.slice(i,i+BATCH),{onConflict:'base,data,voo,hora_chegada'});
+        if (error) {
+          const l=limpos[i], u=limpos[Math.min(i+BATCH,limpos.length)-1];
+          throw new Error(`${error.message} — parou no bloco ${l.base} ${l.data} até ${u.base} ${u.data}`);
+        }
+        saved+=Math.min(BATCH,limpos.length-i);
         adminSetFileStatus('malha',`Gravando... ${saved.toLocaleString()}/${total.toLocaleString()}`,'load');
       }
       adminFiles.malha={count:total,bases:basesSet.size,date:new Date().toLocaleDateString('pt-BR')};
       window.malhaRows = null; // força recarregar na próxima vez que abrir o dashboard, já com esse mês
       malhaVoos = undefined;
       adminAddHistory('malha',file.name);
-      adminSetFileStatus('malha',`✓ ${total.toLocaleString()} voos · ${basesSet.size} bases`,'ok');
+      adminSetFileStatus('malha',`✓ ${total.toLocaleString()} voos · ${basesSet.size} bases`
+        + (repetidos.length ? ` · ${repetidos.length} repetido(s) no arquivo, ficou a última linha de cada` : ''),'ok');
       if (typeof malhaParseCSV==='function') malhaParseCSV(text);
       input.value='';
     } catch(err) { adminSetFileStatus('malha','Erro: '+err.message,'err'); console.error(err); }
