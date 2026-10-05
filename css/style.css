@@ -3668,3 +3668,46 @@ body.fg-locked { overflow: hidden; }
   .pc-flex .page-title  { font-size: 20px; }
   .pc-flex .page-sub    { margin-top: 2px; }
 }
+
+/* ── Escala → DP ───────────────────────────────────────
+   Reaproveita os blocos da aba de OPEX; só o que é próprio entra aqui. */
+.fg-scope .dp-bloco { border: 1px solid var(--line-soft); border-radius: 10px; padding: 14px;
+  display: flex; flex-direction: column; gap: 10px; }
+.fg-scope .dp-bloco h4 { margin: 0; font: 700 13px var(--f-display); letter-spacing: .06em;
+  text-transform: uppercase; color: var(--ink); display: flex; align-items: center; gap: 8px; }
+.fg-scope .dp-inp { background: var(--surface-2); border: 1px solid var(--line); border-radius: 7px;
+  padding: 6px 10px; color: var(--ink); font: 600 13px var(--f-mono); width: 92px; }
+.fg-scope .dp-inp.larga { width: 110px; letter-spacing: .08em; text-transform: uppercase; }
+.fg-scope .dp-inp:focus { outline: none; border-color: var(--petrol); }
+.fg-scope .dp-falta { color: var(--warn); }
+.fg-scope .dp-ok { margin: 0; font-size: 12.5px; color: var(--ok); }
+.fg-scope .dp-bloco .forte { font-family: var(--f-mono); font-weight: 700; color: var(--ink); }
+
+/* Relatório da exportação — sobreposto, porque é o momento em que a
+   pessoa decide se manda o arquivo ou conserta antes. */
+.dp-rel-fundo { position: fixed; inset: 0; z-index: 2000; background: rgba(0,0,0,.55);
+  display: flex; align-items: center; justify-content: center; padding: 32px; }
+.dp-rel { background: var(--bg-surface); border: 1px solid var(--border-strong); border-radius: 14px;
+  width: min(760px, 100%); max-height: 86vh; overflow: auto; padding: 22px 24px;
+  display: flex; flex-direction: column; gap: 16px; box-shadow: 0 24px 64px rgba(0,0,0,.4); }
+.dp-rel header { display: flex; align-items: flex-start; gap: 14px; }
+.dp-rel header h3 { margin: 0; flex: 1; font-size: 17px; color: var(--text-primary); }
+.dp-rel-x { border: none; background: none; color: var(--text-muted); font-size: 17px; cursor: pointer; line-height: 1; }
+.dp-rel-x:hover { color: var(--text-primary); }
+.dp-rel-nums { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px;
+  background: var(--border); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.dp-rel-nums > div { background: var(--bg-surface); padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.dp-rel-nums .k { font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
+.dp-rel-nums .v { font: 700 22px var(--f-mono, monospace); color: var(--text-primary); }
+.dp-rel-nums .bom .v { color: #5fa87a; }
+.dp-rel-nums .alerta .v { color: #f6ad55; }
+.dp-rel-ok { border: 1px solid #5fa87a; border-left-width: 3px; background: rgba(95,168,122,.1);
+  border-radius: 8px; padding: 10px 13px; font-size: 13px; color: var(--text-secondary); }
+.dp-rel-aviso { border: 1px solid #f6ad55; border-left-width: 3px; background: rgba(246,173,85,.1);
+  border-radius: 8px; padding: 10px 13px; font-size: 13px; line-height: 1.5; color: var(--text-secondary); }
+.dp-rel-b { border: 1px solid var(--border); border-radius: 9px; padding: 12px 14px; }
+.dp-rel-b.leve { opacity: .8; }
+.dp-rel-b h4 { margin: 0 0 4px; font-size: 13.5px; color: var(--text-primary); }
+.dp-rel-b p { margin: 0 0 7px; font-size: 12.5px; color: var(--text-muted); line-height: 1.45; }
+.dp-rel-b ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 2px;
+  font-size: 12.5px; color: var(--text-secondary); }

@@ -145,6 +145,9 @@ async function adminRender() {
       <button class="adm-tab-btn" onclick="adminTabSwitch('opex',this)">
         <i class="ti ti-scale" aria-hidden="true"></i> Dimensionamento × OPEX
       </button>
+      <button class="adm-tab-btn" onclick="adminTabSwitch('dp',this)">
+        <i class="ti ti-file-export" aria-hidden="true"></i> Escala → DP
+      </button>
       <button class="adm-tab-btn" onclick="adminTabSwitch('folgas',this)">
         <i class="ti ti-calendar-stats" aria-hidden="true"></i> Gerador de Folgas
       </button>
@@ -175,6 +178,7 @@ function adminTabSwitch(tab, btn) {
     case 'parametros':adminParametrosTab(el);                  break;
     case 'folgas':   adminFolgasTab(el);                       break;
     case 'opex':     adminOpexTab(el);                         break;
+    case 'dp':       adminDpTab(el);                           break;
     case 'logs':     el.innerHTML = adminLogsTab(logs||[]);     break;
   }
 }

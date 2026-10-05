@@ -32,6 +32,7 @@ function escalaIcone(nome) {
     sheet: `<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>`,
     alert: `<path d="M10.3 3.6 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.6a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>`,
     check: `<circle cx="12" cy="12" r="10"/><polyline points="8.5 12.5 11 15 16 9.5"/>`,
+    fileExport: `<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h7"/><polyline points="14 2 14 8 20 8"/><line x1="15" y1="18" x2="22" y2="18"/><polyline points="19 15 22 18 19 21"/>`,
   };
   return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px" aria-hidden="true">${icones[nome]||''}</svg>`;
 }
@@ -844,6 +845,7 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
             ${escalaMenuItem('sheet', 'Baixar Excel da escala', 'escalaExportarExcel()')}
             ${escalaMenuItem('upload', 'Importar escala do Excel', `document.getElementById('escala-import-input').click()`, travada)}
             ${escalaMenuItem('printer', 'Imprimir / PDF', 'escalaImprimir()')}
+            ${escalaMenuItem('fileExport', 'Exportar para o sistema do DP', 'escalaExportarDP()')}
             ${escalaMenuDivisor()}
             ${escalaMenuSecao('Horários e férias')}
             ${escalaMenuItem('clock', 'Recalcular saídas pela CH', 'escalaRecalcularSaidas()', travada)}
