@@ -3547,3 +3547,124 @@ body.fg-locked { overflow: hidden; }
 .fg-scope .ox-res-mes { font-size: 12px; color: var(--ink-2); text-transform: lowercase; }
 .fg-scope .ox-res-pend { display: inline-block; min-width: 20px; padding: 1px 6px; border-radius: 999px;
   background: var(--warn-soft); color: var(--warn); font: 600 11px var(--f-mono); }
+
+/* ══════════════════════════════════════════════════════
+   CÓDIGOS DE STATUS DA ESCALA (F, FA, L, J, K, CH)
+
+   Antes a cor era a mesma nos dois temas — tintas claras com fundo a 18%.
+   No escuro funciona; no claro é tinta clara sobre papel branco. Medido
+   contra o fundo real de cada célula, o contraste ia de 1,74 (K no fim de
+   semana) a 2,54 — o mínimo legível é 4,5. Na prática o K sumia.
+
+   Agora são dois conjuntos, um por tema, com a mesma identidade de cor:
+   F cinza, FA roxo, L dourado, K azul, CH laranja, J vermelho. O pior
+   caso dos dois temas, contando zebra, fim de semana e feriado, é 4,98.
+   Quem mexer nestes valores: testes/teste-contraste-escala.js refaz a
+   conta e falha se algum cair abaixo de 4,5.
+════════════════════════════════════════════════════════ */
+:root {
+  --st-F:#c2cfe2; --st-FA:#d0c0ff; --st-L:#f0d793;
+  --st-K:#95dffd; --st-CH:#fecb9b; --st-J:#ffbaba;
+  --st-fill: 18%;   /* opacidade do fundo da pastilha */
+  --st-edge: 38%;   /* opacidade da borda */
+}
+[data-theme="light"] {
+  --st-F:#44526b; --st-FA:#6625d4; --st-L:#7a5207;
+  --st-K:#0b5c87; --st-CH:#9c3c0c; --st-J:#b31717;
+  --st-fill: 11%;
+  --st-edge: 30%;
+}
+
+/* Código desconhecido cai no cinza do F em vez de sumir sem cor. As duas
+   classes andam juntas de propósito: pastilha da grade e bolinha da
+   legenda leem a mesma variável, então não têm como divergir. */
+.escala-cod, .escala-leg-cor                      { --st-c: var(--st-F);  }
+.escala-cod.st-F,  .escala-leg-cor.st-F           { --st-c: var(--st-F);  }
+.escala-cod.st-FA, .escala-leg-cor.st-FA          { --st-c: var(--st-FA); }
+.escala-cod.st-L,  .escala-leg-cor.st-L           { --st-c: var(--st-L);  }
+.escala-cod.st-K,  .escala-leg-cor.st-K           { --st-c: var(--st-K);  }
+.escala-cod.st-CH, .escala-leg-cor.st-CH          { --st-c: var(--st-CH); }
+.escala-cod.st-J,  .escala-leg-cor.st-J           { --st-c: var(--st-J);  }
+
+.escala-cod {
+  width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 4px;
+  font-weight: 800;
+  font-size: var(--escala-fs-status, 12.5px);
+  letter-spacing: .02em;
+  color: var(--st-c);
+  background: color-mix(in srgb, var(--st-c) var(--st-fill), transparent);
+  border: 1px solid color-mix(in srgb, var(--st-c) var(--st-edge), transparent);
+}
+
+/* A bolinha da legenda usa os mesmos tokens. Antes o F da legenda era
+   --text-muted e o da célula era #8896aa: legenda e grade não combinavam. */
+.escala-leg-cor {
+  display: inline-block; width: 9px; height: 9px; border-radius: 2px;
+  margin-right: 5px; background: var(--st-c);
+}
+
+/* No papel o fundo é branco, então vale sempre a paleta do tema claro —
+   senão quem imprime com o painel escuro recebe folhas com código quase
+   invisível. */
+@media print {
+  body.escala-imprimindo {
+    --st-F:#44526b; --st-FA:#6625d4; --st-L:#7a5207;
+    --st-K:#0b5c87; --st-CH:#9c3c0c; --st-J:#b31717;
+    --st-fill: 11%; --st-edge: 30%;
+  }
+}
+
+/* ── Faixa de ferramentas recolhida ────────────────────
+   Uma linha só, no lugar do cartão inteiro. Os botões que se usa enquanto
+   edita ficam; o resto vai pro painel. As etiquetas mostram o que está
+   filtrando — sem elas, recolher esconderia estado. */
+.escala-ferr-mini {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  position: relative;
+  margin-bottom: 12px; padding: 7px 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.escala-ferr-sep { width: 1px; align-self: stretch; margin: 1px 2px; background: var(--border-strong); }
+
+/* O chevron gira pra dizer em que estado está: pra baixo abre, pra cima recolhe. */
+.escala-btn-abrir svg   { transform: rotate(-90deg); }
+.escala-btn-recolher svg { transform: rotate(180deg); }
+
+.escala-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.escala-chip {
+  border: 1px solid color-mix(in srgb, var(--blue) 45%, transparent);
+  background: color-mix(in srgb, var(--blue) 14%, transparent);
+  color: var(--blue);
+  border-radius: 999px; padding: 3px 10px;
+  font-size: 11px; font-weight: 600; white-space: nowrap; cursor: pointer;
+}
+.escala-chip:hover { background: color-mix(in srgb, var(--blue) 24%, transparent); }
+.escala-chip-vazio { font-size: 11px; color: var(--text-muted); }
+
+.escala-leg-btn {
+  flex: none; width: 22px; height: 22px; border-radius: 50%;
+  border: 1px solid var(--border-strong); background: var(--bg-hover);
+  color: var(--text-secondary); font-size: 12px; font-weight: 700; cursor: pointer;
+  line-height: 1;
+}
+.escala-leg-btn:hover { border-color: var(--blue); color: var(--blue); }
+.escala-leg-popover {
+  position: absolute; top: calc(100% + 6px); right: 8px; z-index: 40;
+  display: flex; flex-direction: column; gap: 6px;
+  background: var(--bg-surface); border: 1px solid var(--border-strong);
+  border-radius: 9px; padding: 10px 12px;
+  font-size: 11.5px; color: var(--text-secondary); white-space: nowrap;
+  box-shadow: var(--adh-shadow-card);
+}
+
+/* Em tela baixa a grade é o que importa: o cabeçalho da página encolhe
+   pra não gastar altura com o que é só contexto. */
+@media (max-height: 900px) {
+  .pc-flex .page-header { margin-bottom: 10px; }
+  .pc-flex .page-title  { font-size: 20px; }
+  .pc-flex .page-sub    { margin-top: 2px; }
+}

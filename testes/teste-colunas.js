@@ -1026,7 +1026,9 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaColunasSecundarias: fal
   ok('FA aparece como status na célula', r[2].status === 'FA', JSON.stringify(r[2]));
   ok('FA tem texto visível na célula', r[2].exibido === 'FA');
   ok('FA gera HTML, não célula vazia', sandbox.escalaCelHTML(r[2]).length > 0);
-  ok('FA usa a cor roxa da legenda', sandbox.escalaCelHTML(r[2]).includes('a78bfa'));
+  // A cor saiu do JS e virou token de tema (ver teste-contraste-escala.js):
+  // o que a célula carrega agora é a classe, e é ela que escolhe a tinta.
+  ok('FA sai marcado com a própria classe de cor', sandbox.escalaCelHTML(r[2]).includes('escala-cod st-FA'));
   ok('FA tem tooltip explicando o agrupamento',
     /agrupada/i.test(sandbox.escalaCelHTML(r[2])));
 

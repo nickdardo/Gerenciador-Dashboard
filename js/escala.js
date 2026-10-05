@@ -803,7 +803,9 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
       ${escalaIcone('check')}${(window._escalaColabs||[]).length} colaborador(es) carregados automaticamente, cruzando com o horário planejado (ponto) dessa base nesse mês. Use a busca abaixo só se faltar alguém, ou o ✕ na linha se alguém não devia estar aqui.
     </div>` : ''}
 
-    <div class="hc-panel" style="margin-bottom:16px">
+    ${escalaFaixaMiniHTML(dis)}
+
+    <div class="hc-panel escala-ferr" id="escala-ferramentas" style="margin-bottom:16px">
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding-bottom:2px">
         <div style="position:relative;flex:1 1 240px;min-width:200px;max-width:320px">
           <input id="escala-busca" class="adh-search-input" ${dis} style="width:100%;box-sizing:border-box;padding:9px 12px;background:var(--bg-hover);border:1px solid var(--border-strong);border-radius:8px;color:var(--text-primary)"
@@ -820,18 +822,17 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
           title="Puxa os horários e as cargas do dimensionamento salvo no Gerador para esta escala">
           ${escalaIcone('zap')}Aplicar horário Dimensionamento
         </button>` : ''}
-        ${escalaCenario() === 'dimensionada' ? `
-        <button class="adh-refresh-btn" ${dis} style="border-color:#9f7aea66;color:#b794f4"
-          onclick="escalaAplicarDimensionamento()"
-          title="Traz os horários e as CH do último dimensionamento salvo para esta base e mês">
-          ${escalaIcone('zap')}Aplicar horário Dimensionamento
-        </button>` : ''}
+        <!-- O botão "Aplicar horário Dimensionamento" aparecia duas vezes,
+             com o mesmo onclick e textos de ajuda diferentes. Ficou um. -->
         <button id="escala-btn-remover-sel" class="adh-refresh-btn" ${dis} style="color:#fc8181;display:none" onclick="escalaRemoverSelecionados()">${escalaIcone('trash')}Remover selecionados (0)</button>
 
         <div style="flex:1 1 auto"></div>
 
-        <button class="adh-refresh-btn" style="${window._escalaAgruparPorTurno?'background:var(--blue);color:#0b0f1a;border:none;font-weight:600':''}" onclick="escalaToggleAgruparTurno()" title="Agrupa a lista por grupo (função) e depois por setor, com contagem por bloco">${escalaIcone('layers')}Agrupar</button>
-        <button id="escala-btn-colunas-sec" class="adh-refresh-btn" style="${window._escalaColunasSecundarias===false?'background:var(--blue);color:#0b0f1a;border:none;font-weight:600':''}" onclick="escalaToggleColunasSecundarias()" title="Esconde Setor/Turno/Bloco/Intervalos — sobra mais espaço pra grade de dias">${escalaIcone('columns')}${window._escalaColunasSecundarias===false?'Mostrar colunas':'Colunas essenciais'}</button>
+        ${escalaBtnAgruparHTML()}
+        ${escalaBtnColunasHTML()}
+
+        <button class="adh-refresh-btn escala-btn-recolher" onclick="escalaToggleFerramentas()"
+          title="Recolhe este painel e a legenda — sobra espaço pra grade em monitor pequeno">${escalaIconeSolto('chevronDown', 12)}Recolher</button>
 
         <!-- Ações que se usa uma vez por mês vão pro menu: antes eram 12
              botões numa linha só, que quebrava em duas ou três em qualquer
@@ -888,17 +889,11 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
             <option value="__recolhido__" ${window._escalaBlocosRecolhidos?'selected':''}>Recolhido (só cabeçalho e total)</option>
           </select>
         </div>
-        <div>
-          <label style="font-size:10.5px;color:var(--text-muted);display:block;margin-bottom:3px">Situação</label>
-          <select class="adh-month-select" onchange="escalaSetFiltroSituacao(this.value)" title="Filtra quem aparece na grade pelo que acontece com a pessoa nesse mês">
-            <option value="todos"        ${!window._escalaFiltroSituacao||window._escalaFiltroSituacao==='todos'?'selected':''}>Todos</option>
-            <option value="ferias"       ${window._escalaFiltroSituacao==='ferias'?'selected':''}>Só quem está de férias</option>
-            <option value="sem_ferias"   ${window._escalaFiltroSituacao==='sem_ferias'?'selected':''}>Só quem NÃO está de férias</option>
-            <option value="sem_folgas"   ${window._escalaFiltroSituacao==='sem_folgas'?'selected':''}>Só quem está sem folga marcada</option>
-            <option value="meta_aberta"  ${window._escalaFiltroSituacao==='meta_aberta'?'selected':''}>Só quem está abaixo da meta de folgas</option>
-            <option value="fora_cadastro"${window._escalaFiltroSituacao==='fora_cadastro'?'selected':''}>Só quem está fora do cadastro do RH</option>
-          </select>
-        </div>
+        <!-- Havia DOIS seletores "Situação" lado a lado, os dois chamando
+             escalaSetFiltroSituacao: um com a lista escrita à mão (6 opções)
+             e outro vindo de ESCALA_FILTROS_SITUACAO (8). Ficou o da lista,
+             que é a completa — o outro escondia duas opções e ainda ocupava
+             espaço repetindo o mesmo controle. -->
         <div>
           <label style="font-size:10.5px;color:var(--text-muted);display:block;margin-bottom:3px">Situação</label>
           <select class="adh-month-select" onchange="escalaSetFiltroSituacao(this.value)" title="Mostra só quem está na situação escolhida — os sub-blocos e as contagens acompanham o filtro">
@@ -935,18 +930,14 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
     </div>
 
     <div class="hc-panel escala-fill" style="display:flex;flex-direction:column;min-height:0">
-      <div style="display:flex;gap:14px;margin-bottom:12px;font-size:11px;color:var(--text-secondary);flex-wrap:wrap;flex-shrink:0">
-        <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:var(--text-muted);margin-right:5px"></span>F · Folga</span>
-        <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#a78bfa;margin-right:5px"></span>FA · Folga agrupada</span>
-        <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#c9a24a;margin-right:5px"></span>L · Férias (automático)</span>
-        <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#fc8181;margin-right:5px"></span>J · Afastado</span>
-        <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#38bdf8;margin-right:5px"></span>K · Cursos</span>
-        <span><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:#fb923c;margin-right:5px"></span>CH · Folga compensa (tecla C)</span>
+      <div id="escala-legenda-linha" style="display:flex;gap:14px;margin-bottom:12px;font-size:11px;color:var(--text-secondary);flex-wrap:wrap;flex-shrink:0">
+        ${escalaLegendaItensHTML()}
         <span style="color:var(--text-muted)">clique numa célula vazia ou de trabalho pra marcar F/J/K/C/A · fim de semana e feriado ficam destacados nas colunas · <span style="color:#f6ad55">laranja</span>/<span style="color:#fc8181">vermelho</span> na linha "Trabalhando no dia" = bem abaixo da média do mês</span>
       </div>
       <div id="escala-grade-wrap" class="${window._escalaDensidade==='compacto'?'escala-compacto':''}" style="flex:1;min-height:120px;overflow:auto;border-radius:8px;background:var(--bg-app)">${escalaGradeTabelaHTML(ano, mesNum, diasNoMes)}</div>
     </div>
   `;
+  escalaAplicarEstadoFerramentas();
   escalaAjustarStickyOffset();
 }
 
@@ -970,6 +961,7 @@ function escalaGradeAtualiza() {
     const n = (window._escalaColabs||[]).length;
     contador.textContent = `${n} colaborador${n===1?'':'es'}`;
   }
+  escalaAtualizarChips();
   escalaAjustarStickyOffset();
   escalaRestaurarSelecaoVisual();
 
@@ -1244,10 +1236,191 @@ function escalaConteudoDoMes(c, ano, mesNum, diasNoMes) {
   });
 }
 
+// ══════════════════════════════════════════════════════
+// PAINEL DE FERRAMENTAS RECOLHÍVEL
+//
+// Em monitor de 768px de altura, o cabeçalho + o cartão de ferramentas +
+// a legenda + as quatro linhas fixas da grade comiam metade da tela: a
+// primeira pessoa aparecia na metade vertical. Recolher devolve ~200px,
+// que são seis ou sete linhas.
+//
+// Recolhido não é "sumir": fica uma faixa com os botões que se usa
+// editando e, principalmente, com os filtros ativos à vista. Esconder
+// filtro sem mostrar que ele existe é como alguém acaba olhando uma grade
+// filtrada sem entender por que falta gente.
+// ══════════════════════════════════════════════════════
+
+const ESCALA_FERR_CHAVE = 'gde_escala_ferramentas';
+
+function escalaFerramentasRecolhido() {
+  if (window._escalaFerrRecolhido === undefined) {
+    let salvo = null;
+    try { salvo = localStorage.getItem(ESCALA_FERR_CHAVE); } catch (_) {}
+    // Sem escolha anterior, decide pela altura da janela: quem está no
+    // monitor pequeno já encontra recolhido, sem ter que descobrir o botão.
+    window._escalaFerrRecolhido = salvo !== null ? salvo === '1' : window.innerHeight < 900;
+  }
+  return window._escalaFerrRecolhido;
+}
+
+function escalaToggleFerramentas() {
+  window._escalaFerrRecolhido = !escalaFerramentasRecolhido();
+  try { localStorage.setItem(ESCALA_FERR_CHAVE, window._escalaFerrRecolhido ? '1' : '0'); } catch (_) {}
+  escalaAplicarEstadoFerramentas();
+}
+
+// Mostrar/esconder, nunca re-renderizar: a grade de 289 pessoas × 31 dias
+// custa caro pra remontar, e aqui nada do conteúdo mudou.
+function escalaAplicarEstadoFerramentas() {
+  const rec = escalaFerramentasRecolhido();
+  const painel  = document.getElementById('escala-ferramentas');
+  const faixa   = document.getElementById('escala-ferr-mini');
+  const legenda = document.getElementById('escala-legenda-linha');
+  if (painel)  painel.style.display  = rec ? 'none' : '';
+  if (faixa)   faixa.style.display   = rec ? 'flex' : 'none';
+  if (legenda) legenda.style.display = rec ? 'none' : 'flex';
+  escalaAtualizarChips();
+  escalaSincronizarBotoesEstado();
+  // A altura acima da grade mudou — as linhas fixas precisam remedir, senão
+  // "Trabalhando no dia" descola do cabeçalho.
+  escalaAjustarStickyOffset();
+}
+
+/* Só entra etiqueta do que está FORA do padrão. A faixa existe pra avisar
+   que algo está filtrando, não pra espelhar o painel inteiro — sete
+   etiquetas sempre visíveis quebrariam em duas linhas e devolveriam a
+   rolagem que viemos resolver. */
+function escalaChipsFiltros() {
+  const chips = [];
+  const add = (rot, dica) => chips.push({ rot, dica });
+
+  const gv = window._escalaGruposVisiveis;
+  if (gv) {
+    const sl = gv.size === 2 && gv.has('Supervisores') && gv.has('Líder de Operações');
+    add(sl ? 'Supervisores e Líderes' : `${gv.size} grupo(s)`, 'Mostrar grupos');
+  }
+
+  const crit = typeof escalaCriterioSubBloco === 'function' ? escalaCriterioSubBloco() : null;
+  const disp = typeof escalaCriteriosSubBlocoDisponiveis === 'function' ? escalaCriteriosSubBlocoDisponiveis() : [];
+  if (crit && disp.length && disp[0].valor !== crit) {
+    const c = disp.find((x) => x.valor === crit);
+    if (c) add(c.label, 'Dividir grupo por');
+  }
+
+  if (window._escalaBlocosRecolhidos) add('Blocos recolhidos', 'Blocos');
+
+  const sit = window._escalaFiltroSituacao || 'todos';
+  if (sit !== 'todos') {
+    const f = ESCALA_FILTROS_SITUACAO.find((x) => x.valor === sit);
+    if (f) add(f.label, 'Situação');
+  }
+
+  const piso = typeof escalaFatorPiso === 'function' ? escalaFatorPiso() : 0.85;
+  if (piso !== 0.85) add(piso === 0.95 ? 'Piso rígido (95%)' : 'Piso flexível (75%)', 'Piso de cobertura');
+
+  const am = typeof escalaAmortecimentoDemanda === 'function' ? escalaAmortecimentoDemanda() : 0.35;
+  if (am !== 0.35) add(am === 0.6 ? 'Malha: alta' : 'Malha: baixa', 'Sensibilidade à malha');
+
+  if (window._escalaDensidade === 'compacto') add('Compacto', 'Densidade');
+  if (window._escalaColunasSecundarias === false) add('Só colunas essenciais', 'Colunas');
+
+  return chips;
+}
+
+function escalaChipsHTML() {
+  const chips = escalaChipsFiltros();
+  if (!chips.length) return `<span class="escala-chip-vazio">sem filtros</span>`;
+  return chips.map((c) => `<button type="button" class="escala-chip" onclick="escalaToggleFerramentas()"
+    title="${escalaEscapeAttr(c.dica)} — clique para abrir as ferramentas">${escalaEscapeAttr(c.rot)}</button>`).join('');
+}
+
+function escalaAtualizarChips() {
+  const el = document.getElementById('escala-chips');
+  if (el) el.innerHTML = escalaChipsHTML();
+}
+
+/* Os botões de estado existem em dois lugares — painel e faixa. Marcá-los
+   por data-attribute em vez de id mantém os dois em sincronia; de quebra
+   conserta o "Agrupar", que só atualizava o destaque no render inteiro. */
+function escalaBtnAgruparHTML() {
+  return `<button class="adh-refresh-btn" data-esc-toggle="agrupar" onclick="escalaToggleAgruparTurno()"
+    title="Agrupa a lista por grupo (função) e depois por setor, com contagem por bloco">${escalaIcone('layers')}Agrupar</button>`;
+}
+
+function escalaBtnColunasHTML() {
+  const so = window._escalaColunasSecundarias === false;
+  return `<button class="adh-refresh-btn" data-esc-toggle="colunas" onclick="escalaToggleColunasSecundarias()"
+    title="Esconde Setor/Turno/Bloco/Intervalos — sobra mais espaço pra grade de dias">${escalaIcone('columns')}<span data-esc-rotulo>${so ? 'Mostrar colunas' : 'Colunas essenciais'}</span></button>`;
+}
+
+function escalaSincronizarBotoesEstado() {
+  const ligado = {
+    agrupar: !!window._escalaAgruparPorTurno,
+    colunas: window._escalaColunasSecundarias === false,
+  };
+  document.querySelectorAll('[data-esc-toggle]').forEach((b) => {
+    const on = !!ligado[b.dataset.escToggle];
+    b.style.background = on ? 'var(--blue)' : '';
+    b.style.color      = on ? '#0b0f1a'    : '';
+    b.style.border     = on ? 'none'       : '';
+    b.style.fontWeight = on ? '600'        : '';
+    const rot = b.querySelector('[data-esc-rotulo]');
+    if (rot && b.dataset.escToggle === 'colunas') rot.textContent = on ? 'Mostrar colunas' : 'Colunas essenciais';
+  });
+}
+
+function escalaFaixaMiniHTML(dis) {
+  return `
+    <div id="escala-ferr-mini" class="escala-ferr-mini" style="display:none">
+      <button class="adh-refresh-btn escala-btn-abrir" onclick="escalaToggleFerramentas()"
+        title="Mostra a busca, os filtros e as demais ações">${escalaIconeSolto('chevronDown', 12)}Ferramentas</button>
+      <button class="adh-refresh-btn" ${dis} style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600"
+        onclick="escalaGerarFolgasAuto()">${escalaIcone('zap')}Gerar folgas</button>
+      ${escalaBtnAgruparHTML()}
+      ${escalaBtnColunasHTML()}
+      <span class="escala-ferr-sep"></span>
+      <span id="escala-chips" class="escala-chips">${escalaChipsHTML()}</span>
+      <span style="flex:1 1 auto"></span>
+      <button type="button" class="escala-leg-btn" onclick="escalaToggleLegendaMini(event)"
+        title="Legenda dos códigos">?</button>
+      <div id="escala-leg-popover" class="escala-leg-popover" style="display:none">
+        ${escalaLegendaItensHTML()}
+      </div>
+    </div>`;
+}
+
+function escalaToggleLegendaMini(ev) {
+  if (ev) ev.stopPropagation();
+  const p = document.getElementById('escala-leg-popover');
+  if (!p) return;
+  const abrindo = p.style.display === 'none';
+  p.style.display = abrindo ? 'flex' : 'none';
+  if (abrindo) {
+    const fechar = () => { p.style.display = 'none'; document.removeEventListener('click', fechar); };
+    setTimeout(() => document.addEventListener('click', fechar), 0);
+  }
+}
+
+// A legenda nasce da mesma lista que pinta as células, com os mesmos
+// tokens de cor. Antes era HTML solto com hex escritos à mão, e o F da
+// legenda (--text-muted) não era o F da grade (#8896aa).
+const ESCALA_LEGENDA = [
+  ['F',  'Folga'],
+  ['FA', 'Folga agrupada'],
+  ['L',  'Férias (automático)'],
+  ['J',  'Afastado'],
+  ['K',  'Cursos'],
+  ['CH', 'Folga compensa (tecla C)'],
+];
+
+function escalaLegendaItensHTML() {
+  return ESCALA_LEGENDA
+    .map(([cod, txt]) => `<span><span class="escala-leg-cor st-${cod}"></span>${cod} · ${txt}</span>`)
+    .join('');
+}
+
 function escalaCelHTML(item) {
   if (!item.exibido) return '';
-  const cores = { F:'#8896aa', FA:'#a78bfa', L:'#c9a24a', K:'#38bdf8', CH:'#fb923c', J:'#fc8181' };
-  const cor = cores[item.exibido] || '#8896aa';
   const titulos = {
     L: 'Férias — automático, vem do cadastro',
     CH: 'Folga compensa (banco de horas)',
@@ -1257,13 +1430,12 @@ function escalaCelHTML(item) {
     F: 'Folga',
   };
   const titulo = titulos[item.status] || '';
-  // Fonte e contraste maiores: em 10px com fundo a 13% de opacidade, o
-  // código do status quase sumia numa grade de 31 colunas. Agora usa o
-  // tamanho da densidade escolhida, peso 800 e uma borda fina da própria
-  // cor, que dá recorte contra o fundo da linha.
-  return `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;`
-    + `background:${cor}2e;color:${cor};border:1px solid ${cor}66;border-radius:4px;`
-    + `font-weight:800;font-size:var(--escala-fs-status,12.5px);letter-spacing:.02em" title="${titulo}">${item.exibido}</div>`;
+  // A cor sai do CSS, não daqui: são dois conjuntos de tokens, um por tema,
+  // porque a mesma paleta nos dois deixava o código ilegível no claro (ver
+  // o bloco "CÓDIGOS DE STATUS DA ESCALA" no style.css). Aqui fica só a
+  // classe — assim trocar de tema repinta a grade sem re-renderizar.
+  const cod = String(item.exibido).replace(/[^A-Za-z]/g, '');
+  return `<div class="escala-cod st-${cod}" title="${titulo}">${item.exibido}</div>`;
 }
 
 // Setor = turno do dia, calculado a partir do horário de entrada (nomes
@@ -1367,6 +1539,7 @@ function escalaToggleAgruparTurno() {
   window._escalaAgruparPorTurno = !window._escalaAgruparPorTurno;
   try { localStorage.setItem('gde_escala_agrupar', window._escalaAgruparPorTurno ? '1' : '0'); } catch (_) {}
   escalaGradeAtualiza();
+  escalaSincronizarBotoesEstado();
 }
 
 // ── Controles de organização dos grupos/setores ────────
@@ -1429,6 +1602,7 @@ function escalaSetDensidade(valor) {
   try { localStorage.setItem('gde_escala_densidade', window._escalaDensidade); } catch (_) {}
   const wrap = document.getElementById('escala-grade-wrap');
   if (wrap) wrap.classList.toggle('escala-compacto', window._escalaDensidade === 'compacto');
+  escalaAtualizarChips();
   // Mudar a densidade muda a altura do cabeçalho — sem remedir, a linha
   // "Trabalhando no dia" fica flutuando por cima ou por baixo dele.
   escalaAjustarStickyOffset();
@@ -1441,11 +1615,7 @@ function escalaToggleColunasSecundarias() {
   window._escalaColunasSecundarias = !window._escalaColunasSecundarias;
   try { localStorage.setItem('gde_escala_colunas_secundarias', window._escalaColunasSecundarias ? '1' : '0'); } catch (_) {}
   escalaGradeAtualiza();
-  const btn = document.getElementById('escala-btn-colunas-sec');
-  if (btn) {
-    btn.style.background = window._escalaColunasSecundarias ? '' : 'var(--blue)';
-    btn.style.color = window._escalaColunasSecundarias ? '' : '#0b0f1a';
-  }
+  escalaSincronizarBotoesEstado();
 }
 
 // Salva o turno digitado/selecionado pro colaborador — igual qualquer outro
