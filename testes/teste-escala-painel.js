@@ -30,9 +30,16 @@ const sec = (t) => console.log('\n\x1b[36m── ' + t + '\x1b[0m');
 function paginaDeTeste() {
   return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
 <link rel="stylesheet" href="../css/style.css"></head><body>
+<div id="topbar"><div class="tb-left"><span class="tb-page-title" id="tb-title">Escala Online</span>
+<button class="tb-foco-btn" id="tb-foco" onclick="escalaToggleFerramentas()" aria-label="Modo grade"></button></div></div>
+<div id="page-content" class="pc-flex">
+<div class="page-header"><h1 class="page-title">Escala Online</h1></div>
+<div class="escala-nota">carga automática</div>
+<div class="escala-nota escala-nota-trava">escala travada</div>
 <div id="escala-ferr-mini" class="escala-ferr-mini" style="display:none"><span id="escala-chips"></span></div>
 <div class="hc-panel escala-ferr" id="escala-ferramentas">painel</div>
 <div id="escala-legenda-linha" style="display:flex">legenda</div>
+</div>
 <script>window.db={from(){return{select:()=>Promise.resolve({data:[],error:null})}}};<\/script>
 <script src="../js/escala.js"><\/script>
 </body></html>`;
@@ -140,7 +147,73 @@ function paginaDeTeste() {
       await p.close();
     }
 
-    sec('6. Nenhum erro de script');
+    sec('6. Modo grade — some com TUDO que está acima da grade');
+    {
+      const p = await abrir(1000);
+      await p.evaluate(() => { window._escalaFerrRecolhido = false; escalaAplicarEstadoFerramentas(); });
+      ok(await display(p, '.page-header') !== 'none', 'aberto, o cabeçalho da página aparece');
+
+      // o botão da barra superior é o interruptor principal
+      await p.click('#tb-foco');
+      ok(await p.evaluate(() => document.body.classList.contains('escala-modo-grade')),
+        'o clique no botão da barra superior liga o modo grade');
+      ok(await display(p, '.page-header') === 'none',
+        'e o cabeçalho da página some junto — era o que faltava, não só o cartão de ferramentas');
+      ok(await display(p, '#escala-ferramentas') === 'none', 'o cartão de ferramentas também');
+      ok(await display(p, '.escala-nota:not(.escala-nota-trava)') === 'none', 'e os avisos de rotina');
+      ok(await display(p, '.escala-nota-trava') !== 'none',
+        'menos o de escala travada: ele muda o que você pode fazer, então fica');
+      ok(await p.$eval('#tb-foco', (e) => e.classList.contains('aceso')),
+        'o botão acende, para você saber em que estado está');
+      ok(/Sair do modo grade/.test(await p.$eval('#tb-foco', (e) => e.title)),
+        'e a dica do botão passa a oferecer a saída');
+
+      await p.click('#tb-foco');
+      ok(await display(p, '.page-header') !== 'none', 'clicar de novo traz tudo de volta');
+      ok(!(await p.$eval('#tb-foco', (e) => e.classList.contains('aceso'))), 'e o botão apaga');
+      await p.close();
+    }
+
+    sec('7. A faixa leva o contexto junto');
+    {
+      const p = await abrir(1000);
+      await p.evaluate(() => {
+        window._escalaBase = 'CGH'; window._escalaMes = '2026-10';
+        const html = escalaFaixaMiniHTML('', ['BEL', 'CGH', 'FOR'], '2026-10', 'CGH');
+        document.getElementById('escala-ferr-mini').outerHTML = html;
+      });
+      const sels = await p.$$eval('#escala-ferr-mini select', (a) => a.length);
+      // Esconder o cabeçalho sem levar base e mês junto é como alguém acaba
+      // editando CGH achando que está em BEL.
+      ok(sels === 3, 'base, mês e cenário continuam à mão na faixa (' + sels + ' seletores)');
+      const base = await p.$eval('#escala-ferr-mini select', (e) => e.value);
+      ok(base === 'CGH', 'e a base mostrada é a que está aberta, não a primeira da lista');
+      await p.close();
+    }
+
+    sec('8. Atalho de teclado');
+    {
+      const p = await abrir(1000);
+      await p.evaluate(() => { window._escalaFerrRecolhido = false; escalaAplicarEstadoFerramentas(); });
+      await p.keyboard.press('Control+Shift+G');
+      ok(await p.evaluate(() => document.body.classList.contains('escala-modo-grade')),
+        'Ctrl+Shift+G liga o modo grade sem precisar de célula selecionada');
+      await p.keyboard.press('Control+Shift+G');
+      ok(!(await p.evaluate(() => document.body.classList.contains('escala-modo-grade'))),
+        'e desliga');
+
+      // As letras soltas marcam F/J/K/C/A na célula — por isso o atalho tem
+      // modificador. E dentro de um campo de texto ele não pode disparar.
+      await p.evaluate(() => {
+        const i = document.createElement('input'); i.id = 'tst'; document.body.appendChild(i); i.focus();
+      });
+      await p.keyboard.press('Control+Shift+G');
+      ok(!(await p.evaluate(() => document.body.classList.contains('escala-modo-grade'))),
+        'digitando num campo, o atalho não dispara');
+      await p.close();
+    }
+
+    sec('9. Nenhum erro de script');
     ok(erros.length === 0, 'a página carregou sem exceção' + (erros.length ? ': ' + erros.join(' | ') : ''));
   } finally {
     await browser.close();

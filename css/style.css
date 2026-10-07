@@ -3711,3 +3711,40 @@ body.fg-locked { overflow: hidden; }
 .dp-rel-b p { margin: 0 0 7px; font-size: 12.5px; color: var(--text-muted); line-height: 1.45; }
 .dp-rel-b ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 2px;
   font-size: 12.5px; color: var(--text-secondary); }
+
+/* ── Modo grade ────────────────────────────────────────
+   Um interruptor só, na barra superior, ao lado do título. Esconde tudo
+   que está acima da grade — cabeçalho da página, avisos, ferramentas e
+   legenda — e a grade ocupa o que sobrar. Fica na barra, e não dentro da
+   página, porque o que ele esconde é o cabeçalho da própria página: um
+   botão que some junto com o que comanda não traz nada de volta. */
+.tb-foco-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; margin-left: 10px; flex: none;
+  border: 1px solid var(--border-strong); background: transparent;
+  border-radius: 7px; color: var(--text-secondary); cursor: pointer;
+}
+.tb-foco-btn:hover { border-color: var(--blue); color: var(--blue); }
+.tb-foco-btn.aceso { background: var(--blue); border-color: var(--blue); color: #0b0f1a; }
+
+body.escala-modo-grade #page-content > .page-header,
+body.escala-modo-grade #page-content > .hc-panel.escala-ferr,
+body.escala-modo-grade #escala-legenda-linha { display: none !important; }
+
+/* Os avisos entre o cabeçalho e as ferramentas somem junto — menos o de
+   escala travada, que muda o que você pode fazer e precisa continuar à
+   vista. Por isso são marcados por classe, e não por um seletor que
+   adivinha pelo estilo inline. */
+body.escala-modo-grade .escala-nota:not(.escala-nota-trava) { display: none; }
+
+/* Sem o cabeçalho, a grade herda a altura toda. */
+body.escala-modo-grade #page-content { padding-top: 10px; }
+body.escala-modo-grade .escala-fill { margin-top: 0; }
+
+/* Seletor compacto dentro da faixa — o mesmo controle do cabeçalho, em
+   menos espaço, porque ali ele divide a linha com botões e etiquetas. */
+.fg-scope .adh-month-select.compacto,
+.escala-ferr-mini .adh-month-select.compacto {
+  padding: 5px 8px; font-size: 12px; max-width: 150px;
+}
+.escala-ferr-mini .adh-base-badge { flex: none; }

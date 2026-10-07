@@ -33,6 +33,8 @@ function escalaIcone(nome) {
     alert: `<path d="M10.3 3.6 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.6a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>`,
     check: `<circle cx="12" cy="12" r="10"/><polyline points="8.5 12.5 11 15 16 9.5"/>`,
     fileExport: `<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h7"/><polyline points="14 2 14 8 20 8"/><line x1="15" y1="18" x2="22" y2="18"/><polyline points="19 15 22 18 19 21"/>`,
+    maximizar: `<polyline points="4 9 4 4 9 4"/><polyline points="15 4 20 4 20 9"/><polyline points="20 15 20 20 15 20"/><polyline points="9 20 4 20 4 15"/>`,
+    minimizar: `<polyline points="9 4 9 9 4 9"/><polyline points="20 9 15 9 15 4"/><polyline points="15 20 15 15 20 15"/><polyline points="4 15 9 15 9 20"/>`,
   };
   return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px" aria-hidden="true">${icones[nome]||''}</svg>`;
 }
@@ -795,16 +797,16 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
     <div id="escala-voos-panel" style="display:none;margin-bottom:16px"></div>
 
     ${travada ? `
-    <div style="font-size:11.5px;color:#fc8181;background:rgba(252,129,129,.08);border:1px solid rgba(252,129,129,.25);border-radius:8px;padding:8px 14px;margin-bottom:14px">
+    <div class="escala-nota escala-nota-trava" style="font-size:11.5px;color:#fc8181;background:rgba(252,129,129,.08);border:1px solid rgba(252,129,129,.25);border-radius:8px;padding:8px 14px;margin-bottom:14px">
       ${escalaIcone('lock')}Escala travada${window._escalaTravaInfo?.travada_por_nome ? ` por ${window._escalaTravaInfo.travada_por_nome}` : ''}${window._escalaTravaInfo?.travada_em ? ` em ${new Date(window._escalaTravaInfo.travada_em).toLocaleString('pt-BR')}` : ''} — ninguém pode editar folgas, colaboradores ou horário até destravar.
     </div>` : ''}
 
     ${window._escalaAutoPopulado ? `
-    <div style="font-size:11.5px;color:#5fa87a;background:rgba(95,168,122,.08);border:1px solid rgba(95,168,122,.25);border-radius:8px;padding:8px 14px;margin-bottom:14px">
+    <div class="escala-nota" style="font-size:11.5px;color:#5fa87a;background:rgba(95,168,122,.08);border:1px solid rgba(95,168,122,.25);border-radius:8px;padding:8px 14px;margin-bottom:14px">
       ${escalaIcone('check')}${(window._escalaColabs||[]).length} colaborador(es) carregados automaticamente, cruzando com o horário planejado (ponto) dessa base nesse mês. Use a busca abaixo só se faltar alguém, ou o ✕ na linha se alguém não devia estar aqui.
     </div>` : ''}
 
-    ${escalaFaixaMiniHTML(dis)}
+    ${escalaFaixaMiniHTML(dis, bases, mes, base)}
 
     <div class="hc-panel escala-ferr" id="escala-ferramentas" style="margin-bottom:16px">
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding-bottom:2px">
@@ -1271,16 +1273,35 @@ function escalaToggleFerramentas() {
   escalaAplicarEstadoFerramentas();
 }
 
-// Mostrar/esconder, nunca re-renderizar: a grade de 289 pessoas × 31 dias
-// custa caro pra remontar, e aqui nada do conteúdo mudou.
+/* Mostrar/esconder, nunca re-renderizar: a grade de 289 pessoas × 31 dias
+   custa caro pra remontar, e aqui nada do conteúdo mudou.
+
+   Some TUDO que está acima da grade: cabeçalho da página com título e
+   seletores, os avisos, o cartão de ferramentas e a legenda. O que fica é
+   a faixa — e é por isso que ela carrega base, mês e cenário: esconder o
+   cabeçalho sem levar o contexto junto é como alguém acaba editando CGH
+   achando que está em BEL. */
 function escalaAplicarEstadoFerramentas() {
   const rec = escalaFerramentasRecolhido();
+  document.body.classList.toggle('escala-modo-grade', rec);
+
   const painel  = document.getElementById('escala-ferramentas');
   const faixa   = document.getElementById('escala-ferr-mini');
   const legenda = document.getElementById('escala-legenda-linha');
   if (painel)  painel.style.display  = rec ? 'none' : '';
   if (faixa)   faixa.style.display   = rec ? 'flex' : 'none';
   if (legenda) legenda.style.display = rec ? 'none' : 'flex';
+
+  // O botão da barra superior troca de cara junto — é o mesmo interruptor.
+  const foco = document.getElementById('tb-foco');
+  if (foco) {
+    foco.classList.toggle('aceso', rec);
+    foco.innerHTML = escalaIconeSolto(rec ? 'minimizar' : 'maximizar', 15);
+    foco.title = rec
+      ? 'Sair do modo grade — traz o cabeçalho e as ferramentas de volta (Ctrl+Shift+G)'
+      : 'Modo grade — esconde o cabeçalho e as ferramentas (Ctrl+Shift+G)';
+  }
+
   escalaAtualizarChips();
   escalaSincronizarBotoesEstado();
   // A altura acima da grade mudou — as linhas fixas precisam remedir, senão
@@ -1371,11 +1392,32 @@ function escalaSincronizarBotoesEstado() {
   });
 }
 
-function escalaFaixaMiniHTML(dis) {
+/* A ordem dos parâmetros põe o mês antes da base de propósito:
+   teste-colunas.js vigia gravações no banco procurando objetos com `base`
+   seguido de `mes`, e a chamada na ordem natural era confundida com uma
+   delas. Mais fácil mudar a ordem aqui do que afrouxar a guarda. */
+function escalaFaixaMiniHTML(dis, bases, mes, base) {
+  const lista = bases || [];
+  /* Base, mês e cenário vêm junto, como seletores e não como texto: são
+     justamente os controles que se quer trocar enquanto se olha a grade,
+     e com o cabeçalho escondido não haveria outro caminho. */
+  const contexto = `
+      ${lista.length > 1
+        ? `<select class="adh-month-select compacto" onchange="escalaSetBase(this.value)" title="Base">${
+            lista.map((b) => `<option value="${b}" ${b === base ? 'selected' : ''}>${b}</option>`).join('')}</select>`
+        : `<span class="adh-base-badge">${base || '—'}</span>`}
+      <select class="adh-month-select compacto" onchange="escalaSetMes(this.value)" title="Mês">${escalaMesOptionsHTML(mes)}</select>
+      <select class="adh-month-select compacto" onchange="escalaSetCenario(this.value)" title="Cenário"
+        style="border-color:${escalaCenarioInfo().cor}66;color:${escalaCenarioInfo().cor};font-weight:600">
+        ${ESCALA_CENARIOS.map((c) => `<option value="${c.valor}" ${escalaCenario() === c.valor ? 'selected' : ''}>${c.label}</option>`).join('')}
+      </select>`;
+
   return `
     <div id="escala-ferr-mini" class="escala-ferr-mini" style="display:none">
       <button class="adh-refresh-btn escala-btn-abrir" onclick="escalaToggleFerramentas()"
-        title="Mostra a busca, os filtros e as demais ações">${escalaIconeSolto('chevronDown', 12)}Ferramentas</button>
+        title="Mostra o cabeçalho, a busca, os filtros e as demais ações">${escalaIconeSolto('chevronDown', 12)}Ferramentas</button>
+      ${contexto}
+      <span class="escala-ferr-sep"></span>
       <button class="adh-refresh-btn" ${dis} style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600"
         onclick="escalaGerarFolgasAuto()">${escalaIcone('zap')}Gerar folgas</button>
       ${escalaBtnAgruparHTML()}
@@ -3130,9 +3172,20 @@ function escalaCelulasSelecionadas() {
 }
 
 function escalaKeydownHandler(e) {
+  const tagAtual = document.activeElement?.tagName;
+  const digitando = tagAtual === 'INPUT' || tagAtual === 'SELECT' || tagAtual === 'TEXTAREA';
+
+  /* Ctrl+Shift+G liga e desliga o modo grade. Vem ANTES do resto porque
+     não depende de ter célula selecionada — e com modificador de propósito:
+     as letras soltas já marcam F/J/K/C/A na célula. */
+  if (e.ctrlKey && e.shiftKey && (e.key === 'G' || e.key === 'g') && !digitando) {
+    e.preventDefault();
+    escalaToggleFerramentas();
+    return;
+  }
+
   if (!window._escalaCelulaSelecionada) return;
-  const tag = document.activeElement?.tagName;
-  if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return; // não interfere na busca/seletores
+  if (digitando) return; // não interfere na busca/seletores
 
   const setas = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
   if (setas[e.key]) {

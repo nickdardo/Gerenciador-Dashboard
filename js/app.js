@@ -130,6 +130,14 @@ function renderTopbar() {
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
       </button>
       <span class="tb-page-title" id="tb-title">${t(NAV_ITEMS.find(n => n.id === currentPage)?.i18nKey || 'nav.escala')}</span>
+      <!-- Modo grade: some com tudo que está acima da grade. Fica aqui, e
+           não dentro da página, justamente porque o que ele esconde é o
+           cabeçalho da própria página — um botão que some junto com o que
+           ele comanda não serve pra trazer de volta. -->
+      <button class="tb-foco-btn" id="tb-foco" style="display:none"
+        onclick="typeof escalaToggleFerramentas==='function' && escalaToggleFerramentas()"
+        title="Modo grade — esconde o cabeçalho e as ferramentas (Ctrl+Shift+G)"
+        aria-label="Modo grade"></button>
     </div>
     <div class="tb-right">
       <span class="tb-base-badge" id="tb-base" style="display:none"></span>
@@ -160,6 +168,11 @@ function navigateTo(pageId) {
   const item = NAV_ITEMS.find(n => n.id === pageId);
   const titleEl = document.getElementById('tb-title');
   if (titleEl && item) titleEl.textContent = t(item.i18nKey);
+
+  // O modo grade só faz sentido onde existe grade.
+  const foco = document.getElementById('tb-foco');
+  if (foco) foco.style.display = pageId === 'escala' ? '' : 'none';
+  document.body.classList.remove('escala-modo-grade');
 
   // Render page
   const content = document.getElementById('page-content');
