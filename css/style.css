@@ -3748,3 +3748,112 @@ body.escala-modo-grade .escala-fill { margin-top: 0; }
   padding: 5px 8px; font-size: 12px; max-width: 150px;
 }
 .escala-ferr-mini .adh-base-badge { flex: none; }
+
+/* ══════════════════════════════════════════════════════
+   ESCALA ENXUTA — terceiro cenário
+   A grade reduzida ao que se usa para distribuir folga: quem é a pessoa,
+   quanto ela trabalha, os dias, e as duas conferências que antes se faziam
+   no olho. Entrada e saída fecham a linha porque vêm do dimensionamento e
+   servem de referência, não de campo de edição.
+   ══════════════════════════════════════════════════════ */
+#escala-grade-wrap table.escala-enx { font-size: 12.5px; }
+#escala-grade-wrap table.escala-enx th {
+  position: sticky; top: 0; z-index: 3;
+  background: var(--bg-surface); border: 1px solid var(--border);
+  padding: 5px 8px; text-align: left; white-space: nowrap;
+  font: 600 10px var(--f-body, inherit); letter-spacing: .06em;
+  text-transform: uppercase; color: var(--text-muted);
+}
+#escala-grade-wrap table.escala-enx th.n { text-align: center; }
+#escala-grade-wrap table.escala-enx th.escala-enx-fix { z-index: 5; }
+#escala-grade-wrap table.escala-enx th.dia {
+  text-align: center; padding: 3px 0; min-width: 30px; width: 30px;
+}
+#escala-grade-wrap table.escala-enx th.dia .ds { display: block; font-size: 9px; }
+#escala-grade-wrap table.escala-enx th.dia .dn {
+  display: block; font-size: 12px; font-family: var(--f-mono, monospace);
+  color: var(--text-secondary); font-variant-numeric: tabular-nums;
+}
+/* Fim de semana e feriado com a mesma leitura do modelo em papel:
+   domingo em dourado, sábado em azul frio, feriado em vermelho. */
+#escala-grade-wrap table.escala-enx .dom { background: rgba(246,173,85,.12); }
+#escala-grade-wrap table.escala-enx .sab { background: rgba(99,179,237,.10); }
+#escala-grade-wrap table.escala-enx .fer { background: rgba(252,129,129,.12); }
+#escala-grade-wrap table.escala-enx th.dom .ds, #escala-grade-wrap table.escala-enx th.dom .dn { color: var(--amber, #f6ad55); }
+#escala-grade-wrap table.escala-enx th.fer .ds, #escala-grade-wrap table.escala-enx th.fer .dn { color: #fc8181; }
+
+#escala-grade-wrap table.escala-enx tbody tr { --escala-row-bg: var(--bg-surface); }
+#escala-grade-wrap table.escala-enx tbody tr.escala-zebra { --escala-row-bg: color-mix(in srgb, var(--bg-surface) 93%, #fff); }
+[data-theme="light"] #escala-grade-wrap table.escala-enx tbody tr.escala-zebra { --escala-row-bg: #f7f8fa; }
+#escala-grade-wrap table.escala-enx tbody td { background: var(--escala-row-bg); height: var(--escala-row-h, 30px); }
+
+/* As duas primeiras colunas acompanham a rolagem horizontal e pintam
+   sólido: com fundo transparente, o conteúdo dos dias passava por baixo. */
+#escala-grade-wrap table.escala-enx .escala-enx-fix {
+  position: sticky; z-index: 2; background: var(--escala-row-bg);
+}
+#escala-grade-wrap table.escala-enx th.escala-enx-fix { background: var(--bg-surface); }
+#escala-grade-wrap table.escala-enx .mat {
+  width: 96px; padding: 0 8px; font: 600 12px var(--f-mono, monospace);
+  color: var(--blue); font-variant-numeric: tabular-nums;
+}
+#escala-grade-wrap table.escala-enx .nome {
+  width: 230px; max-width: 230px; padding: 0 8px; font-weight: 500;
+  color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  box-shadow: 6px 0 12px -8px rgba(0,0,0,.55);
+}
+#escala-grade-wrap table.escala-enx .fn {
+  max-width: 190px; padding: 0 8px; color: var(--text-secondary); font-size: 11.5px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#escala-grade-wrap table.escala-enx .ch,
+#escala-grade-wrap table.escala-enx .hora,
+#escala-grade-wrap table.escala-enx .cont {
+  font-family: var(--f-mono, monospace); font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+#escala-grade-wrap table.escala-enx td.n { text-align: center; padding: 0 6px; }
+#escala-grade-wrap table.escala-enx .ch { color: var(--text-secondary); font-size: 11.5px; }
+#escala-grade-wrap table.escala-enx .hora { color: var(--text-secondary); font-size: 11.5px; }
+#escala-grade-wrap table.escala-enx .cont { font-weight: 700; font-size: 11.5px; }
+#escala-grade-wrap table.escala-enx .cont.ok { color: #5fa87a; }
+#escala-grade-wrap table.escala-enx .cont.falta { color: #f6ad55; }
+#escala-grade-wrap table.escala-enx .cont.sobra { color: #fc8181; }
+#escala-grade-wrap table.escala-enx .sel { line-height: 0; }
+#escala-grade-wrap table.escala-enx .sel.ok { color: #5fa87a; }
+#escala-grade-wrap table.escala-enx .sel.nao { color: #fc8181; }
+#escala-grade-wrap table.escala-enx td.cel { padding: 2px; cursor: pointer; }
+#escala-grade-wrap table.escala-enx td.cel:hover { box-shadow: inset 0 0 0 1.5px var(--blue); }
+
+#escala-grade-wrap table.escala-enx tr.escala-enx-grupo td {
+  background: var(--bg-hover); border: 1px solid var(--border); padding: 4px 8px;
+}
+#escala-grade-wrap table.escala-enx tr.escala-enx-grupo .rot {
+  position: sticky; left: 8px; display: inline-block;
+  font: 600 10.5px var(--f-body, inherit); letter-spacing: .08em;
+  text-transform: uppercase; color: var(--text-secondary);
+}
+#escala-grade-wrap table.escala-enx tr.escala-enx-grupo .qtd {
+  font-family: var(--f-mono, monospace); letter-spacing: 0; color: var(--text-muted);
+}
+
+/* Tela que substitui a grade quando falta o dimensionamento. */
+.escala-enx-bloq {
+  max-width: 620px; margin: 48px auto; text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  padding: 36px 32px; border: 1px solid var(--border-strong); border-radius: 14px;
+  background: var(--bg-surface);
+}
+.escala-enx-bloq-ico {
+  width: 56px; height: 56px; border-radius: 14px; display: grid; place-items: center;
+  background: var(--bg-hover); color: var(--blue);
+}
+.escala-enx-bloq h2 { margin: 0; font-size: 20px; color: var(--text-primary); }
+.escala-enx-bloq p { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--text-secondary); }
+.escala-enx-bloq p b { color: var(--text-primary); }
+.escala-enx-bloq-sub { font-size: 12.5px !important; color: var(--text-muted) !important; }
+.escala-enx-bloq-acoes { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 8px; }
+
+.escala-enx-vazia { padding: 44px 24px; text-align: center; }
+.escala-enx-vazia p { margin: 0 0 6px; font-size: 14px; color: var(--text-secondary); }
+.escala-enx-vazia .sub { font-size: 12.5px; color: var(--text-muted); }
+.escala-enx-vazia b { color: var(--text-primary); }

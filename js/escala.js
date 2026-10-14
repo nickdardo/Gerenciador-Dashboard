@@ -635,9 +635,17 @@ async function escalaRenderGrade(el) {
   // que a grade abrir, sem exigir um segundo clique num menu.
   escalaAtualizarBotaoComparar();
 
-  if (window._escalaAplicarDimAoAbrir && escalaCenario() === 'dimensionada') {
+  if (window._escalaAplicarDimAoAbrir && escalaCenario() !== 'planejada') {
     window._escalaAplicarDimAoAbrir = false;
     setTimeout(() => escalaAplicarDimensionamento(true), 400);
+  }
+
+  /* Enxuta sem dimensionamento não desenha grade. Não é teimosia: os
+     horários vêm dele, e distribuir folga sobre horário errado é trabalho
+     que se joga fora inteiro quando o arquivo certo chega. */
+  if (escalaEhEnxuta()) {
+    const n = await escalaDimensionamentoContagem(base, mes);
+    if (n === 0 || n === -1) { el.innerHTML = escalaEnxutaBloqueioHTML(base, mes, n); return; }
   }
 
   const [{ data: colabsIniciais }, dias, { data: travaRow }] = await Promise.all([
@@ -819,8 +827,8 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
         <button class="adh-refresh-btn" ${dis} style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600" onclick="escalaGerarFolgasAuto()">${escalaIcone('zap')}Gerar folgas automáticas</button>
         <button class="adh-refresh-btn" ${dis} onclick="escalaPreencherTodoStaff()">${escalaIcone('users')}Preencher com Staff</button>
         <button class="adh-refresh-btn" ${dis} onclick="escalaPreencherHorarioMesAnterior()">${escalaIcone('calclock')}Horário do mês anterior</button>
-        ${escalaCenario() === 'dimensionada' ? `
-        <button class="adh-refresh-btn" ${dis} style="background:rgba(159,122,234,.14);border-color:rgba(159,122,234,.45);color:#b794f4;font-weight:600"
+        ${escalaCenario() !== 'planejada' ? `
+        <button class="adh-refresh-btn" ${dis} style="background:${escalaCenarioInfo().cor}24;border-color:${escalaCenarioInfo().cor}73;color:${escalaCenarioInfo().cor};font-weight:600"
           onclick="escalaAplicarDimensionamento()"
           title="Puxa os horários e as cargas do dimensionamento salvo no Gerador para esta escala">
           ${escalaIcone('zap')}Aplicar horário Dimensionamento
@@ -2012,7 +2020,121 @@ function escalaCorDesvioCobertura(valor, mediana, dia) {
   return { cor: '#8fb8d8', dica };
 }
 
+/* ── a grade da Escala Enxuta ──────────────────────────
+   Dez colunas: matrícula, nome, função, CH, os dias do mês, as duas
+   conferências e a contagem de folgas, com entrada e saída fechando. As
+   conferências não guardam nada — elas recalculam a cada clique, usando o
+   mesmo escalaValidarRegrasFolga que as outras telas usam. */
+function escalaGradeEnxutaHTML(ano, mesNum, diasNoMes) {
+  const colabs = window._escalaColabs || [];
+  const BORDA = '1px solid var(--border)';
+  const travada = !!window._escalaTravada;
+
+  if (!colabs.length) {
+    return `<div class="escala-enx-vazia">
+      <p>Nenhum colaborador nesta escala ainda.</p>
+      <p class="sub">Use <b>Aplicar horário Dimensionamento</b> para montar a partir do que foi planejado,
+         ou <b>Preencher com Staff</b> para trazer a base inteira.</p>
+    </div>`;
+  }
+
+  // Agrupa por função, como no modelo: uma faixa por grupo e as pessoas sob ela.
+  const porGrupo = new Map();
+  for (const c of colabs) {
+    const g = escalaFuncaoGrupoDoColab(c).label || 'Sem função';
+    if (!porGrupo.has(g)) porGrupo.set(g, []);
+    porGrupo.get(g).push(c);
+  }
+
+  const NCOLS = 4 + diasNoMes + 5;
+  let html = `<table class="escala-enx" style="border-collapse:separate;border-spacing:0;width:100%">
+    <thead><tr>
+      <th class="escala-enx-fix" style="left:0">Matrícula</th>
+      <th class="escala-enx-fix" style="left:96px">Nome</th>
+      <th>Função</th>
+      <th class="n">CH</th>`;
+  for (let d = 1; d <= diasNoMes; d++) {
+    const dow = new Date(ano, mesNum - 1, d).getDay();
+    const dataISO = `${ano}-${String(mesNum).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const feriado = window._escalaFeriados?.get(dataISO);
+    const cls = feriado ? ' fer' : dow === 0 ? ' dom' : dow === 6 ? ' sab' : '';
+    html += `<th class="dia${cls}"${feriado ? ` title="${escalaEscapeAttr(feriado.nome)}"` : ''}>
+      <span class="ds">${ESCALA_DIAS_SEMANA[dow].toUpperCase()}</span><span class="dn">${d}</span></th>`;
+  }
+  html += `<th class="n" title="No máximo 6 dias seguidos trabalhados">6 dias</th>
+      <th class="n" title="Exatamente um domingo de folga no mês">Dom.</th>
+      <th class="n">Folgas</th>
+      <th class="n">Entrada</th><th class="n">Saída</th>
+    </tr></thead><tbody>`;
+
+  let i = 0;
+  for (const [grupo, gente] of porGrupo) {
+    /* O rótulo gruda, não a célula: com colspan de 39 colunas, prender o
+       <td> não adianta — o texto mora no começo dele e some da tela assim
+       que se rola para a direita, deixando uma faixa cinza sem nome. */
+    html += `<tr class="escala-enx-grupo"><td colspan="${NCOLS}"><span class="rot">
+      ${escalaEscapeAttr(grupo)} <span class="qtd">· ${gente.length} pessoa${gente.length === 1 ? '' : 's'}</span></span></td></tr>`;
+
+    for (const c of gente) {
+      const info = window.eoColabs?.get(c.matricula);
+      const funcao = info?.funcao || c.funcao_manual || '—';
+      const ch = info?.ch || c.ch_manual || '';
+      const entrada = escalaEntradaEfetivaDoColab(c, ano, mesNum, diasNoMes) || '';
+      const saida = c.saida_manual || escalaSaidaCalculada(entrada, ch) || '';
+      const conteudo = escalaConteudoDoMes(c, ano, mesNum, diasNoMes);
+
+      const folgasDias = escalaFolgasDoColab(c, ano, mesNum, diasNoMes, window._escalaDias);
+      const agrupadas = new Set();
+      for (let d = 1; d <= diasNoMes; d++) {
+        if (window._escalaDias.get(`${c.matricula}|${d}`)?.status === 'FA') agrupadas.add(d);
+      }
+      const r = escalaValidarRegrasFolga(folgasDias, ano, mesNum, diasNoMes, agrupadas);
+      const feitas = conteudo.filter((x) => x.status === 'F' || x.status === 'FA').length;
+      const meta = escalaMetaFolgasDoColab(ch, diasNoMes);
+
+      const seqOk = r.maxSequencia <= 6;
+      const domOk = r.domingos === 1;
+
+      html += `<tr class="${i++ % 2 ? 'escala-zebra' : ''}" data-escala-linha="${c.matricula}">
+        <td class="escala-enx-fix mat" style="left:0;border:${BORDA}">${escalaEscapeAttr(c.matricula)}</td>
+        <td class="escala-enx-fix nome" style="left:96px;border:${BORDA}" title="${escalaEscapeAttr(c.nome || '')}">${escalaEscapeAttr(c.nome || '')}</td>
+        <td class="fn" style="border:${BORDA}" title="${escalaEscapeAttr(funcao)}">${escalaEscapeAttr(funcao)}</td>
+        <td class="n ch" style="border:${BORDA}">${ch ? ch + 'H' : '—'}</td>`;
+
+      for (let d = 1; d <= diasNoMes; d++) {
+        const item = conteudo[d - 1];
+        const dow = new Date(ano, mesNum - 1, d).getDay();
+        const dataISO = `${ano}-${String(mesNum).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+        const feriado = window._escalaFeriados?.get(dataISO);
+        const cls = feriado ? ' fer' : dow === 0 ? ' dom' : dow === 6 ? ' sab' : '';
+        const editavel = item.editavel && !travada;
+        html += `<td class="cel${cls}" data-mat="${c.matricula}" data-dia="${d}" style="border:${BORDA}"
+          ${editavel ? `onclick="escalaSelecionarCelula('${c.matricula}',${d},this)"` : ''}
+          title="${escalaEscapeAttr(feriado ? feriado.nome : (item.detalhe || ''))}">${escalaCelHTML(item)}</td>`;
+      }
+
+      html += `<td class="n sel ${seqOk ? 'ok' : 'nao'}" style="border:${BORDA}" title="${r.maxSequencia} dia(s) seguidos trabalhados">${escalaMarcaRegra(seqOk)}</td>
+        <td class="n sel ${domOk ? 'ok' : 'nao'}" style="border:${BORDA}" title="${r.domingos} domingo(s) de folga">${escalaMarcaRegra(domOk)}</td>
+        <td class="n cont ${feitas === meta ? 'ok' : feitas < meta ? 'falta' : 'sobra'}" style="border:${BORDA}"
+          title="${feitas} de ${meta} folgas">${feitas}/${meta}</td>
+        <td class="n hora" style="border:${BORDA}">${escalaEscapeAttr(entrada || '--:--')}</td>
+        <td class="n hora" style="border:${BORDA}">${escalaEscapeAttr(saida || '--:--')}</td>
+      </tr>`;
+    }
+  }
+  return html + '</tbody></table>';
+}
+
+/* Marca de conferência em SVG, e não em caractere: ✓ e ✕ viram emoji
+   colorido em algumas fontes, e a grade é documento de trabalho. */
+function escalaMarcaRegra(ok) {
+  return ok
+    ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-label="dentro da regra"><polyline points="20 6 9 17 4 12"/></svg>`
+    : `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-label="fora da regra"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+}
+
 function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
+  if (escalaEhEnxuta()) return escalaGradeEnxutaHTML(ano, mesNum, diasNoMes);
   // Coletor das saidas cujo valor no banco difere do calculado. Preenchido
   // linha a linha durante a montagem e lido depois pelo aviso do rodape.
   window._escalaSaidasDivergentes = [];
@@ -4159,7 +4281,89 @@ const ESCALA_CENARIOS = [
     descricao: 'Escala montada a partir do histórico e do mês anterior' },
   { valor: 'dimensionada', label: 'Dimensionada', cor: '#9f7aea',
     descricao: 'Horários vindos do dimensionamento da malha (Gerador)' },
+  { valor: 'enxuta',       label: 'Enxuta',       cor: '#3aa17e',
+    descricao: 'Grade reduzida: matrícula, função e os dias. Parte do dimensionamento da base' },
 ];
+
+/* ══════════════════════════════════════════════════════
+   ESCALA ENXUTA
+   Terceiro cenário. Mesmos dados e mesmas regras dos outros dois — o que
+   muda é a grade: matrícula, nome, função, CH, os dias e, à direita, as
+   duas conferências que antes se faziam no olho (6 dias seguidos e o
+   domingo) mais a contagem de folgas.
+
+   Ela não abre vazia. O dimensionamento da base é o ponto de partida: é
+   dele que saem os horários, e sem ele a tela nem desenha a grade. Montar
+   folga sobre horário chutado é o tipo de trabalho que se refaz inteiro
+   quando o dimensionamento chega.
+   ══════════════════════════════════════════════════════ */
+const escalaEhEnxuta = () => escalaCenario() === 'enxuta';
+
+/* Quantas posições o dimensionamento tem para esta base e mês. Guardado em
+   memória por base|mês: a grade remonta a cada tecla digitada e não dá
+   para ir ao banco toda vez. */
+async function escalaDimensionamentoContagem(base, mes) {
+  if (!window._escalaDimContagem) window._escalaDimContagem = new Map();
+  const k = base + '|' + mes;
+  if (window._escalaDimContagem.has(k)) return window._escalaDimContagem.get(k);
+  let n = 0;
+  try {
+    const { count, error } = await db.from('escala_dimensionamento')
+      .select('*', { count: 'exact', head: true }).eq('base', base).eq('mes', mes);
+    if (error) throw error;
+    n = count || 0;
+  } catch (err) {
+    console.warn('[escala] dimensionamento:', err && err.message);
+    n = -1;                                   // -1 = não deu para saber
+  }
+  window._escalaDimContagem.set(k, n);
+  return n;
+}
+
+function escalaEsquecerContagemDim(base, mes) {
+  if (window._escalaDimContagem) window._escalaDimContagem.delete(base + '|' + mes);
+}
+
+/* A tela que aparece no lugar da grade. Diz o que falta, onde conseguir e
+   oferece a saída — em vez de uma grade vazia que a pessoa tenta preencher
+   antes de descobrir que faltava o arquivo. */
+function escalaEnxutaBloqueioHTML(base, mes, contagem) {
+  const falhou = contagem === -1;
+  const mesLabel = typeof adhMonthLabel === 'function' ? adhMonthLabel(mes) : mes;
+  return `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Escala Online</h1>
+        <p class="page-sub">Escala Enxuta · ${escalaEscapeAttr(base)} · ${escalaEscapeAttr(mesLabel)}</p>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select class="adh-month-select" onchange="escalaSetMes(this.value)">${escalaMesOptionsHTML(mes)}</select>
+        <select class="adh-month-select" onchange="escalaSetCenario(this.value)"
+          style="border-color:${escalaCenarioInfo().cor}66;color:${escalaCenarioInfo().cor};font-weight:600">
+          ${ESCALA_CENARIOS.map(c => `<option value="${c.valor}" ${escalaCenario()===c.valor?'selected':''}>Escala ${c.label}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+
+    <div class="escala-enx-bloq">
+      <div class="escala-enx-bloq-ico">${escalaIconeSolto(falhou ? 'alert' : 'layers', 26)}</div>
+      <h2>${falhou ? 'Não consegui ler o dimensionamento' : 'Falta o dimensionamento desta base'}</h2>
+      <p>${falhou
+        ? `A consulta ao dimensionamento de <b>${escalaEscapeAttr(base)}</b> não respondeu. Tente de novo em instantes; se persistir, avise.`
+        : `A Escala Enxuta começa pelo que foi planejado: os horários de cada posição saem do dimensionamento de
+           <b>${escalaEscapeAttr(base)}</b> em <b>${escalaEscapeAttr(mesLabel)}</b>, e ainda não há nenhum salvo para esse par.`}</p>
+      ${falhou ? '' : `<p class="escala-enx-bloq-sub">Suba o arquivo no <b>Gerador</b>, escolha a base e o mês, e volte aqui. As outras
+         duas escalas continuam funcionando normalmente enquanto isso.</p>`}
+      <div class="escala-enx-bloq-acoes">
+        ${falhou
+          ? `<button class="adh-refresh-btn" onclick="escalaEsquecerContagemDim('${escalaEscapeAttr(base)}','${escalaEscapeAttr(mes)}');escalaRenderGrade(document.getElementById('page-content'))">${escalaIcone('history')}Tentar de novo</button>`
+          : `<button class="adh-refresh-btn" style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600"
+               onclick="navigateTo('gerador')">${escalaIcone('layers')}Ir para o Gerador</button>
+             <button class="adh-refresh-btn" onclick="escalaEsquecerContagemDim('${escalaEscapeAttr(base)}','${escalaEscapeAttr(mes)}');escalaRenderGrade(document.getElementById('page-content'))">${escalaIcone('history')}Já subi, verificar</button>`}
+        <button class="adh-refresh-btn" onclick="escalaSetCenario('planejada')">Abrir a Escala Planejada</button>
+      </div>
+    </div>`;
+}
 
 function escalaCenario() {
   const v = window._escalaCenario;
@@ -4172,6 +4376,8 @@ function escalaCenarioInfo() {
 
 async function escalaSetCenario(valor) {
   if (valor === escalaCenario()) return;
+  // Entrar na Enxuta reconfere o dimensionamento: pode ter subido agora.
+  if (valor === 'enxuta') escalaEsquecerContagemDim(window._escalaBase, window._escalaMes);
   window._escalaCenario = valor;
   try { localStorage.setItem('gde_escala_cenario', valor); } catch (_) {}
   // Cada cenário tem os próprios dados: recarrega do zero em vez de
@@ -5696,8 +5902,8 @@ function escalaJornadaDoColab(matricula, c) {
 }
 
 async function escalaAplicarDimensionamento(silencioso) {
-  if (escalaCenario() !== 'dimensionada') {
-    escalaMsg('O dimensionamento só se aplica à Escala Dimensionada. Troque o cenário no topo.', true);
+  if (escalaCenario() === 'planejada') {
+    escalaMsg('O dimensionamento se aplica à Escala Dimensionada e à Enxuta. Troque o cenário no topo.', true);
     return;
   }
   if (escalaVerificarTravada()) return;

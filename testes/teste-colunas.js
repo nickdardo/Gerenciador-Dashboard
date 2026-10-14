@@ -1093,9 +1093,14 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaColunasSecundarias: fal
   // E toda gravação carrega o campo, senão cai no default e vira planejada.
   const semCampo = [];
   const reObj = /\{[^{}]*\bbase\b\s*[:,][^{}]*\bmes\b[^{}]*\}/g;
+  // `base` dentro de parênteses é argumento de função, não campo de objeto.
+  // Sem isso, qualquer chamada do tipo f(base, mes) dentro de um bloco cai
+  // aqui como se fosse gravação no banco — aconteceu duas vezes.
+  const chamada = /\w+\s*\([^)]*\bbase\b/;
   while ((m = reObj.exec(fonte)) !== null) {
     const t = m[0];
     if (t.includes('cenario') || t.includes('escala_ultima_base') || t.includes('escalaPopularAutomaticamente')) continue;
+    if (chamada.test(t)) continue;
     semCampo.push(t.split('\n')[0].trim().slice(0, 70));
   }
   ok('toda gravação carrega o cenário', semCampo.length === 0, semCampo.slice(0, 3).join(' | '));
