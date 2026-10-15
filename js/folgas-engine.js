@@ -293,9 +293,27 @@
       }
       const sheet = { name: sh.name, path: sh.path, blocks: [], chTable };
       dateRows.forEach((dr, bi) => {
-        const serials = dr.cols.map((x) => x[1]);
-        const last = serialToDate(Math.max(...serials));
-        const Y = last.getUTCFullYear(), M = last.getUTCMonth();
+        /* De que mês é esta escala.
+
+           Era a MAIOR data da linha. A linha, porém, não tem só o mês: ela
+           começa com os últimos dias do mês anterior (que viram o histórico
+           de sequência) e, nos modelos mais novos, termina com o primeiro
+           dia do mês seguinte. Numa escala de novembro que fecha em 1º de
+           dezembro, a maior data é dezembro — e o mês inteiro passava a ser
+           procurado em dezembro, achando um dia só. Nenhuma aba passava.
+
+           O mês da escala é o que tem mais dias na linha. Empate vai para o
+           mais recente: o rabicho do mês anterior nunca é maior que o mês
+           em si, mas se fosse, a escala ainda é a do mês de frente. */
+        const porMes = new Map();
+        for (const [, v] of dr.cols) {
+          const d = serialToDate(v);
+          const k = d.getUTCFullYear() * 12 + d.getUTCMonth();
+          porMes.set(k, (porMes.get(k) || 0) + 1);
+        }
+        let chave = -1, maisDias = -1;
+        for (const [k, n] of porMes) if (n > maisDias || (n === maisDias && k > chave)) { chave = k; maisDias = n; }
+        const Y = Math.floor(chave / 12), M = chave % 12;
         const D = new Date(Date.UTC(Y, M + 1, 0)).getUTCDate();
         if (!out.month) out.month = { year: Y, month: M, days: D, label: MESES[M] + '/' + Y,
           dow: Array.from({ length: D }, (_, i) => new Date(Date.UTC(Y, M, i + 1)).getUTCDay()) };

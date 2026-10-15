@@ -47,6 +47,9 @@ function abaBoa(o = {}) {
   return aba(o.nome || 'OPERAÇÃO', (set) => {
     set(linhaData - 1, 2, 'OPERAÇÃO · EXEMPLO');
     let c = 3;
+    // Rabicho do mês anterior, à esquerda: é dele que sai o histórico de
+    // sequência que atravessa a virada do mês.
+    for (const d of (o.antes || [])) { set(linhaData, c, serial(2026, 8, d)); c++; }
     for (let d = 1; d <= dias; d++) {
       if (pularDia.includes(d)) continue;
       // Dia trocado por uma data de setembro: a coluna continua lá (a
@@ -57,6 +60,9 @@ function abaBoa(o = {}) {
         : o.comoDiaSolto ? d : v);
       c++;
     }
+    // Primeiro dia do mês seguinte, à direita: é o que os modelos novos
+    // trazem e o que derrubava a leitura inteira.
+    for (const d of (o.depois || [])) { set(linhaData, c, serial(2026, 10, d)); c++; }
     set(linhaData + 1, 1, 'Matr.'); set(linhaData + 1, 2, 'Nome');
     const pessoas = o.pessoas || [[170107, 'ANA PAULA MOREIRA'], [170222, 'BRUNO SALES']];
     pessoas.forEach(([mat, nome], i) => {
@@ -85,6 +91,60 @@ sec('0. O arquivo certo continua passando — o diagnóstico não atrapalha');
     ok(Array.isArray(modelo.diag) && modelo.diag.length === 0,
       'e sem nada a relatar — arquivo bom não ganha relatório de erro');
   }
+}
+
+sec('0b. De que mês é a escala — a linha tem três meses');
+{
+  /* A linha de datas não tem só o mês da escala. Começa com os últimos
+     dias do mês anterior (histórico de sequência) e, nos modelos novos,
+     termina com o primeiro dia do mês seguinte. O mês saía da MAIOR data
+     da linha: numa escala de outubro que fecha em 1º de novembro, o mês
+     virava novembro, onde só havia um dia — e TODAS as abas eram
+     descartadas por "mês incompleto". Foi o que recusou a escala de
+     novembro/2026 inteira, nas quinze abas, nas duas versões do arquivo.
+
+     O mês é o que tem mais dias na linha. */
+  const { modelo, erro } = monta([abaBoa({ antes: [25, 26, 27, 28, 29, 30], depois: [1] })]);
+  ok(!erro, 'a aba com rabicho dos dois lados é lida' + (erro ? ': ' + erro.message : ''));
+  if (modelo) {
+    ok(modelo.month.label === 'outubro/2026',
+      'e o mês é o que tem mais dias, não o da última data (' + modelo.month.label + ')');
+    ok(modelo.month.days === 31, 'com os 31 dias de outubro');
+    ok(modelo.empCount === 2, 'e as pessoas abaixo');
+    const p = modelo.sheets[0].blocks[0];
+    ok(p.prevDates.join(',') === '25,26,27,28,29,30',
+      'os dias de setembro viram histórico do mês anterior (' + p.prevDates.join(',') + ')');
+    ok(p.cur.length === 31 && p.cur.every(Boolean),
+      'e os 31 dias de outubro têm coluna — nenhum buraco');
+  }
+}
+{
+  // Só o rabicho da direita, que é o caso dos arquivos reais de novembro.
+  const { modelo, erro } = monta([abaBoa({ depois: [1] })]);
+  ok(!erro, 'só com o dia do mês seguinte no fim, também é lida');
+  ok(modelo && modelo.month.label === 'outubro/2026',
+    'e continua sendo outubro (' + ((modelo || {}).month || {}).label + ')');
+}
+{
+  // Mês seguinte com vários dias: enquanto for minoria, não muda nada.
+  const { modelo } = monta([abaBoa({ depois: [1, 2, 3, 4, 5] })]);
+  ok(modelo && modelo.month.label === 'outubro/2026',
+    'com cinco dias de novembro no fim, o mês ainda é outubro');
+}
+{
+  /* O caso que decide o desempate: a escala é do mês de frente. Trinta
+     dias de novembro contra trinta e um de outubro ainda dá outubro, mas
+     se a linha trouxesse só o mês seguinte, é dele que se trata. */
+  const so = aba('NOV', (set) => {
+    let c = 3;
+    for (let d = 1; d <= 30; d++) { set(4, c, serial(2026, 10, d)); c++; }
+    set(5, 1, 'Matr.'); set(5, 2, 'Nome');
+    set(6, 1, 170107); set(6, 2, 'ANA');
+  });
+  const { modelo } = monta([so]);
+  ok(modelo && modelo.month.label === 'novembro/2026',
+    'uma linha só de novembro é novembro (' + ((modelo || {}).month || {}).label + ')');
+  ok(modelo && modelo.month.days === 30, 'com 30 dias');
 }
 
 sec('1. Datas como texto — o caso mais comum');
