@@ -36,11 +36,13 @@ const I18N = {
     'auth.erroJaCadastrado': 'Este email já está cadastrado.',
 
     'nav.escala': 'Escala Online',
+    'nav.espelho': 'Espelho Escala',
     'nav.aderencia': 'Aderência',
     'nav.staff': 'Staff',
     'nav.gerador': 'Gerador',
     'nav.comparador': 'Comparador',
     'nav.admin': 'Admin',
+    'sb.atualizarDados': 'Atualizar dados',
     'sb.modoClaro': 'Modo claro',
     'sb.modoEscuro': 'Modo escuro',
     'sb.sair': 'Sair',
@@ -72,6 +74,7 @@ const I18N = {
     'auth.erroJaCadastrado': 'This email is already registered.',
 
     'nav.escala': 'Schedule Online',
+    'nav.espelho': 'Schedule Mirror',
     'nav.aderencia': 'Adherence',
     'nav.staff': 'Staff',
     'nav.gerador': 'Generator',

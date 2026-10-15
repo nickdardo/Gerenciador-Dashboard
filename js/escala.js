@@ -50,10 +50,37 @@ function escalaIconeSolto(nome, tamanho) {
     .replace('margin-right:5px', 'margin-right:0');
 }
 
+/* ══════════════════════════════════════════════════════
+   ESPELHO ESCALA — a página do menu lateral
+
+   Mesmos dados da Escala Online, guardados no cenário 'enxuta': por isso
+   trava, histórico e exportação para o DP funcionam sem nada novo. O que
+   muda é a porta — item próprio no menu em vez de um valor escondido num
+   seletor — e a grade, reduzida ao que se usa para distribuir folga.
+
+   As duas páginas coagem o cenário ao entrar. Sem isso, quem saísse do
+   Espelho e voltasse pela Escala Online encontraria a grade enxuta lá,
+   porque o cenário fica guardado no navegador entre sessões.
+   ══════════════════════════════════════════════════════ */
+const ESCALA_TITULO = () => (escalaEhEnxuta() ? 'Espelho Escala' : 'Escala Online');
+
+async function pageEspelho(el) {
+  window._escalaCenario = 'enxuta';
+  try { localStorage.setItem('gde_escala_cenario', 'enxuta'); } catch (_) {}
+  escalaEsquecerContagemDim(window._escalaBase, window._escalaMes);
+  return pageEscala(el);
+}
+
 async function pageEscala(el) {
+  // Chegando pela Escala Online, o cenário enxuto não vale — ele pertence
+  // ao Espelho. Quem vem pelo Espelho já marcou antes de chamar aqui.
+  if (currentPage !== 'espelho' && escalaCenario() === 'enxuta') {
+    window._escalaCenario = 'planejada';
+    try { localStorage.setItem('gde_escala_cenario', 'planejada'); } catch (_) {}
+  }
   el.innerHTML = `
     <div class="page-header"><div>
-      <h1 class="page-title">Escala Online</h1>
+      <h1 class="page-title">${ESCALA_TITULO()}</h1>
       <p class="page-sub">Calendário mensal · preenchimento e folgas</p>
     </div></div>
     <div class="adm-empty-state">
@@ -75,7 +102,7 @@ async function pageEscala(el) {
   if (!bases.length) {
     el.innerHTML = `
       <div class="page-header"><div>
-        <h1 class="page-title">Escala Online</h1>
+        <h1 class="page-title">${ESCALA_TITULO()}</h1>
         <p class="page-sub">Acesso restrito</p>
       </div></div>
       <div class="adh-denied">
@@ -269,7 +296,7 @@ async function escalaRenderDash(el) {
   el.innerHTML = `
     <div class="page-header">
       <div>
-        <h1 class="page-title">Escala Online</h1>
+        <h1 class="page-title">${ESCALA_TITULO()}</h1>
         <p class="page-sub">Calendário mensal · ${base} · ${typeof adhMonthLabel==='function'?adhMonthLabel(mes):mes}${demandaPorDia?' · demanda real (malha de voos)':''}
           · <b style="color:${escalaCenarioInfo().cor}">Escala ${escalaCenarioInfo().label}</b></p>
       </div>
@@ -609,7 +636,7 @@ async function escalaPopularAutomaticamente(base, mes) {
 async function escalaRenderGrade(el) {
   el.innerHTML = `
     <div class="page-header"><div>
-      <h1 class="page-title">Escala Online</h1>
+      <h1 class="page-title">${ESCALA_TITULO()}</h1>
       <p class="page-sub">Montar escala</p>
     </div></div>
     <div class="adm-empty-state">
@@ -771,7 +798,7 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
   el.innerHTML = `
     <div class="page-header">
       <div>
-        <h1 class="page-title">Escala Online</h1>
+        <h1 class="page-title">${ESCALA_TITULO()}</h1>
         <p class="page-sub">Montar escala · ${base} · ${typeof adhMonthLabel==='function'?adhMonthLabel(mes):mes} · <span id="escala-contador-colabs" style="color:var(--text-primary);font-weight:600">${(window._escalaColabs||[]).length} colaborador${(window._escalaColabs||[]).length===1?'':'es'}</span></p>
         <p id="escala-save-indicator" style="font-size:11px;margin:4px 0 0;color:var(--text-muted)">Nenhuma alteração ainda</p>
         <p id="escala-fora-cadastro" style="font-size:11px;margin:4px 0 0;display:none"></p>
@@ -783,11 +810,12 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
           ? `<select class="adh-month-select" onchange="escalaSetBase(this.value)">${bases.map(b=>`<option value="${b}" ${b===base?'selected':''}>${b}</option>`).join('')}</select>`
           : `<span class="adh-base-badge">${base||'—'}</span>`}
         <select class="adh-month-select" onchange="escalaSetMes(this.value)">${escalaMesOptionsHTML(mes)}</select>
+        ${escalaEhEnxuta() ? '' : `
         <select class="adh-month-select" onchange="escalaSetCenario(this.value)"
           title="Duas escalas paralelas pro mesmo mês. A Planejada é a de sempre; a Dimensionada recebe os horários do Gerador."
           style="border-color:${escalaCenarioInfo().cor}66;color:${escalaCenarioInfo().cor};font-weight:600">
-          ${ESCALA_CENARIOS.map(c => `<option value="${c.valor}" ${escalaCenario()===c.valor?'selected':''}>Escala ${c.label}</option>`).join('')}
-        </select>
+          ${ESCALA_CENARIOS.filter(c => c.valor !== 'enxuta').map(c => `<option value="${c.valor}" ${escalaCenario()===c.valor?'selected':''}>Escala ${c.label}</option>`).join('')}
+        </select>`}
         <button class="adh-refresh-btn" id="escala-btn-comparar" style="display:none;border-color:#9f7aea66;color:#b794f4"
           onclick="escalaIrParaComparador()"
           title="Compara a escala Planejada com a Dimensionada — cobertura por dia, distribuição por turno e quem muda de horário">
@@ -4281,7 +4309,10 @@ const ESCALA_CENARIOS = [
     descricao: 'Escala montada a partir do histórico e do mês anterior' },
   { valor: 'dimensionada', label: 'Dimensionada', cor: '#9f7aea',
     descricao: 'Horários vindos do dimensionamento da malha (Gerador)' },
-  { valor: 'enxuta',       label: 'Enxuta',       cor: '#3aa17e',
+  /* O cenário enxuto não aparece no seletor: a porta dele é o item
+     "Espelho Escala" no menu lateral. O registro segue aqui porque é o
+     que grava `cenario` no banco, junto da trava e do histórico. */
+  { valor: 'enxuta',       label: 'Espelho Escala', cor: '#3aa17e',
     descricao: 'Grade reduzida: matrícula, função e os dias. Parte do dimensionamento da base' },
 ];
 
@@ -4333,15 +4364,11 @@ function escalaEnxutaBloqueioHTML(base, mes, contagem) {
   return `
     <div class="page-header">
       <div>
-        <h1 class="page-title">Escala Online</h1>
-        <p class="page-sub">Escala Enxuta · ${escalaEscapeAttr(base)} · ${escalaEscapeAttr(mesLabel)}</p>
+        <h1 class="page-title">${ESCALA_TITULO()}</h1>
+        <p class="page-sub">${escalaEscapeAttr(base)} · ${escalaEscapeAttr(mesLabel)}</p>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
         <select class="adh-month-select" onchange="escalaSetMes(this.value)">${escalaMesOptionsHTML(mes)}</select>
-        <select class="adh-month-select" onchange="escalaSetCenario(this.value)"
-          style="border-color:${escalaCenarioInfo().cor}66;color:${escalaCenarioInfo().cor};font-weight:600">
-          ${ESCALA_CENARIOS.map(c => `<option value="${c.valor}" ${escalaCenario()===c.valor?'selected':''}>Escala ${c.label}</option>`).join('')}
-        </select>
       </div>
     </div>
 
@@ -4350,17 +4377,17 @@ function escalaEnxutaBloqueioHTML(base, mes, contagem) {
       <h2>${falhou ? 'Não consegui ler o dimensionamento' : 'Falta o dimensionamento desta base'}</h2>
       <p>${falhou
         ? `A consulta ao dimensionamento de <b>${escalaEscapeAttr(base)}</b> não respondeu. Tente de novo em instantes; se persistir, avise.`
-        : `A Escala Enxuta começa pelo que foi planejado: os horários de cada posição saem do dimensionamento de
+        : `O Espelho começa pelo que foi planejado: os horários de cada posição saem do dimensionamento de
            <b>${escalaEscapeAttr(base)}</b> em <b>${escalaEscapeAttr(mesLabel)}</b>, e ainda não há nenhum salvo para esse par.`}</p>
-      ${falhou ? '' : `<p class="escala-enx-bloq-sub">Suba o arquivo no <b>Gerador</b>, escolha a base e o mês, e volte aqui. As outras
-         duas escalas continuam funcionando normalmente enquanto isso.</p>`}
+      ${falhou ? '' : `<p class="escala-enx-bloq-sub">Suba o arquivo no <b>Gerador</b>, escolha a base e o mês, e volte aqui. A
+         <b>Escala Online</b> continua funcionando normalmente enquanto isso.</p>`}
       <div class="escala-enx-bloq-acoes">
         ${falhou
           ? `<button class="adh-refresh-btn" onclick="escalaEsquecerContagemDim('${escalaEscapeAttr(base)}','${escalaEscapeAttr(mes)}');escalaRenderGrade(document.getElementById('page-content'))">${escalaIcone('history')}Tentar de novo</button>`
           : `<button class="adh-refresh-btn" style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600"
                onclick="navigateTo('gerador')">${escalaIcone('layers')}Ir para o Gerador</button>
              <button class="adh-refresh-btn" onclick="escalaEsquecerContagemDim('${escalaEscapeAttr(base)}','${escalaEscapeAttr(mes)}');escalaRenderGrade(document.getElementById('page-content'))">${escalaIcone('history')}Já subi, verificar</button>`}
-        <button class="adh-refresh-btn" onclick="escalaSetCenario('planejada')">Abrir a Escala Planejada</button>
+        <button class="adh-refresh-btn" onclick="navigateTo('escala')">Abrir a Escala Online</button>
       </div>
     </div>`;
 }
@@ -5903,7 +5930,7 @@ function escalaJornadaDoColab(matricula, c) {
 
 async function escalaAplicarDimensionamento(silencioso) {
   if (escalaCenario() === 'planejada') {
-    escalaMsg('O dimensionamento se aplica à Escala Dimensionada e à Enxuta. Troque o cenário no topo.', true);
+    escalaMsg('O dimensionamento se aplica à Escala Dimensionada e ao Espelho Escala. Troque o cenário no topo ou abra o Espelho no menu lateral.', true);
     return;
   }
   if (escalaVerificarTravada()) return;

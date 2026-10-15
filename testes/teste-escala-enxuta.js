@@ -91,7 +91,9 @@ function paginaDeTeste() {
       ok(/Falta o dimensionamento/.test(html), 'a tela diz o que falta');
       ok(/Gerador/.test(html), 'e manda para o Gerador, que é onde se sobe');
       ok(/Já subi, verificar/.test(html), 'com um caminho de volta para quem acabou de subir');
-      ok(/Escala Planejada/.test(html), 'e a saída para quem só quer trabalhar em outra escala');
+      ok(/Escala Online/.test(html), 'e a saída leva para a página da Escala Online');
+      ok(/navigateTo\('escala'\)/.test(html),
+        'navegando de verdade, porque o Espelho é página própria no menu lateral');
       ok(!/<table/.test(html), 'nenhuma grade é desenhada — é esse o ponto');
     }
 
@@ -177,7 +179,69 @@ function paginaDeTeste() {
       ok(/escalaEhEnxuta/.test(fonte), 'e existe o atalho que identifica a Enxuta');
     }
 
-    sec('8. Nenhum erro de script');
+    sec('8. O Espelho é porta própria no menu lateral');
+    {
+      const app = fs.readFileSync(path.join(BASE, 'js', 'app.js'), 'utf8');
+      const nav = app.match(/const NAV_ITEMS[\s\S]*?\n\];/);
+      ok(!!nav, 'o menu lateral está declarado em NAV_ITEMS');
+      if (nav) {
+        const linhas = nav[0].split('\n').filter((l) => /\bid:\s*'/.test(l));
+        const ids = linhas.map((l) => l.match(/id:\s*'([^']+)'/)[1]);
+        const iEscala = ids.indexOf('escala');
+        const iEspelho = ids.indexOf('espelho');
+        ok(iEspelho === iEscala + 1,
+          'e o Espelho vem logo abaixo da Escala Online, como foi pedido');
+        ok(/id:\s*'espelho'[^\n]*'Espelho Escala'/.test(nav[0]),
+          'com o nome Espelho Escala no menu');
+      }
+      ok(/case 'espelho':\s*pageEspelho\(/.test(app),
+        'a rota do menu chama pageEspelho');
+      ok(/pageId === 'escala' \|\| pageId === 'espelho'/.test(app),
+        'e o botão de foco total vale para as duas telas');
+      // Recarregar a tela precisa voltar onde o usuário estava.
+      ok(/paginasValidas = NAV_ITEMS\.map/.test(app),
+        'as páginas válidas saem do próprio menu, então F5 no Espelho continua no Espelho');
+
+      const i18n = fs.readFileSync(path.join(BASE, 'js', 'i18n.js'), 'utf8');
+      ok((i18n.match(/'nav\.espelho':/g) || []).length === 2,
+        'o rótulo está traduzido nos dois idiomas');
+
+      /* Chave sem tradução não quebra nada — o t() devolve a própria chave,
+         e o menu passa a exibir "sb.atualizarDados". Foi assim que o rótulo
+         de atualizar dados ficou cru em português. */
+      const dic = i18n.match(/const I18N = (\{[\s\S]*?\n\});/)[1];
+      const I18N = eval('(' + dic + ')');
+      const usadas = new Set();
+      for (const f of fs.readdirSync(path.join(BASE, 'js'))) {
+        const s = fs.readFileSync(path.join(BASE, 'js', f), 'utf8');
+        for (const x of s.matchAll(/\bt\(\s*'([^']+)'\s*\)/g)) usadas.add(x[1]);
+      }
+      const semPt = [...usadas].filter((k) => !I18N.pt[k]);
+      const semEn = [...usadas].filter((k) => !I18N.en[k]);
+      ok(semPt.length === 0, 'toda chave usada tem texto em português' + (semPt.length ? ': ' + semPt.join(', ') : ''));
+      ok(semEn.length === 0, 'e em inglês' + (semEn.length ? ': ' + semEn.join(', ') : ''));
+
+      // A porta entra no cenário enxuto; entrar pela Escala Online sai dele.
+      const fonte = fs.readFileSync(path.join(BASE, 'js', 'escala.js'), 'utf8');
+      ok(/async function pageEspelho/.test(fonte), 'pageEspelho existe');
+      ok(/currentPage !== 'espelho'[\s\S]{0,200}'planejada'/.test(fonte),
+        'e quem abre a Escala Online não cai no cenário do Espelho');
+
+      // O título segue o cenário, e o seletor de cenário não aparece no
+      // Espelho — a porta já diz qual escala é.
+      const tituloEnxuta = await page.evaluate(() => {
+        window._escalaCenario = 'enxuta'; return ESCALA_TITULO();
+      });
+      const tituloNormal = await page.evaluate(() => {
+        window._escalaCenario = 'planejada'; return ESCALA_TITULO();
+      });
+      ok(tituloEnxuta === 'Espelho Escala', 'no cenário enxuto o título é Espelho Escala');
+      ok(tituloNormal === 'Escala Online', 'nos outros, continua Escala Online');
+      ok(!/<h1 class="page-title">Escala Online<\/h1>/.test(fonte),
+        'nenhum título ficou escrito na mão');
+    }
+
+    sec('9. Nenhum erro de script');
     ok(erros.length === 0, 'a página carregou sem exceção' + (erros.length ? ': ' + erros.join(' | ') : ''));
   } finally {
     await browser.close();
