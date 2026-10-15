@@ -606,7 +606,32 @@ function folgasMontar() {
 
   function showError(err) {
     console.error(err);
-    $('#fg-note').innerHTML = `<div class="err-note">Não consegui ler esse arquivo: ${esc(err.message || err)}. Confira se é o .xlsx da escala (não .xls nem .xlsb).</div>`;
+    const diag = err && err.diagnostico;
+    const ocultas = (err && err.ocultas) || [];
+
+    /* Sem diagnóstico (erro de zip, arquivo corrompido), o aviso curto de
+       sempre. Com diagnóstico, a tela diz aba por aba o que encontrou —
+       é o que permite corrigir a planilha sem adivinhar. */
+    if (!diag || !diag.length) {
+      $('#fg-note').innerHTML = `<div class="err-note">Não consegui ler esse arquivo: ${esc(err.message || err)}. `
+        + 'Confira se é o .xlsx da escala (não .xls nem .xlsb).</div>';
+      return;
+    }
+
+    const linhas = diag.map((d) => `
+      <li>
+        <b>${esc(d.aba)}</b> — ${esc(d.motivo)}
+        ${d.dica ? `<span class="fg-diag-dica">${esc(d.dica)}</span>` : ''}
+      </li>`).join('');
+
+    $('#fg-note').innerHTML = `
+      <div class="err-note fg-diag">
+        <p class="fg-diag-tit">${esc(err.message || err)}</p>
+        <p class="fg-diag-sub">O que encontrei em cada aba:</p>
+        <ul class="fg-diag-lista">${linhas}</ul>
+        ${ocultas.length ? `<p class="fg-diag-rodape">Abas ocultas no Excel, que não são lidas: ${esc(ocultas.join(', '))}.</p>` : ''}
+        <p class="fg-diag-rodape">O arquivo precisa ser o <b>.xlsx</b> da escala — não .xls nem .xlsb.</p>
+      </div>`;
   }
 
   async function loadFile(file) {

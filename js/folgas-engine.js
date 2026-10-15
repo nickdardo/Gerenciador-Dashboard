@@ -181,10 +181,90 @@
   const isSerial = (v) => typeof v === 'number' && Number.isInteger(v) && v > 40000 && v < 60000;
   const clean = (v) => (v === null || v === undefined ? '' : String(v).trim().toUpperCase());
 
+  /* Por que uma aba foi descartada.
+
+     A leitura tem quatro peneiras — aba visível, linha com os dias do mês,
+     mês completo, matrículas abaixo — e todas descartavam em silêncio. No
+     fim sobrava "Nenhuma aba de escala encontrada", que diz o que faltou
+     mas não o que havia no lugar. Estas funções olham o arquivo com os
+     olhos de quem vai consertá-lo: dizem a linha, a coluna e o que está lá.
+
+     Só aparece na tela quando nenhuma aba passou — arquivo bom não ganha
+     relatório de erro. */
+
+  const soDigitos = (v) => typeof v === 'string' && /^\d{3,}$/.test(v.trim());
+  // "01/10/2026", "1/10", "01-10-2026" — data escrita como texto.
+  const dataTexto = (v) => typeof v === 'string' && /^\s*\d{1,2}[\/\-.]\d{1,2}([\/\-.]\d{2,4})?\s*$/.test(v);
+  const diaSolto = (v) => typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 31;
+
+  function listarDias(ns) {
+    if (ns.length <= 6) return ns.join(', ');
+    return ns.slice(0, 6).join(', ') + ' e mais ' + (ns.length - 6);
+  }
+  // "1 linha tem" / "14 linhas têm" — a mensagem é lida por gente, e
+  // "14 linha(s) têm" num aviso de erro parece rascunho.
+  const plural = (n, um, varios) => n + ' ' + (n === 1 ? um : varios);
+
+  /* Não achei a linha de datas: procuro o que o arquivo tem no lugar dela. */
+  function pistaDeDatas(get, maxRow, maxCol) {
+    let melhorSerial = { r: 0, n: 0 }, melhorTexto = { r: 0, n: 0 }, melhorSolto = { r: 0, n: 0 };
+    const ate = Math.min(maxCol, 90);
+    for (let r = 1; r <= Math.min(maxRow, 200); r++) {
+      let s = 0, t = 0, d = 0;
+      for (let c = 3; c <= ate; c++) {
+        const v = get(r, c);
+        if (isSerial(v)) s++;
+        else if (dataTexto(v)) t++;
+        else if (diaSolto(v)) d++;
+      }
+      if (s > melhorSerial.n) melhorSerial = { r, n: s };
+      if (t > melhorTexto.n) melhorTexto = { r, n: t };
+      if (d > melhorSolto.n) melhorSolto = { r, n: d };
+    }
+    if (melhorTexto.n >= 20) {
+      return `Na linha ${melhorTexto.r} os dias estão como texto (ex.: "01/10/2026"). `
+        + 'Selecione essa linha no Excel e formate como Data — o painel precisa de datas de verdade, não do texto.';
+    }
+    if (melhorSolto.n >= 20) {
+      return `Na linha ${melhorSolto.r} os dias são números soltos (1, 2, 3…), sem mês nem ano. `
+        + 'A linha precisa ter a data completa de cada dia.';
+    }
+    if (melhorSerial.n > 0) {
+      return `A linha com mais datas é a ${melhorSerial.r}, com ${melhorSerial.n} — preciso de pelo menos 28, `
+        + 'uma por dia do mês, a partir da coluna C.';
+    }
+    return 'Não há nenhuma data da coluna C em diante. É esta a aba da escala do mês?';
+  }
+
+  /* Achei os dias, mas ninguém embaixo deles. */
+  function pistaDeMatriculas(get, de, ate) {
+    let texto = 0, pequena = 0, semNome = 0, exemplo = '';
+    for (let r = de; r <= Math.min(ate, de + 400); r++) {
+      const A = get(r, 1), B = get(r, 2);
+      const temNome = typeof B === 'string' && B.trim();
+      if (soDigitos(A) && temNome) { texto++; if (!exemplo) exemplo = String(A).trim(); }
+      else if (typeof A === 'number' && A > 0 && A < 1000 && temNome) pequena++;
+      else if (typeof A === 'number' && A >= 1000 && !temNome) semNome++;
+    }
+    if (texto) {
+      return `${plural(texto, 'linha tem', 'linhas têm')} a matrícula como texto na coluna A${exemplo ? ` (ex.: "${exemplo}")` : ''}. `
+        + 'Formate a coluna A como Número e suba de novo.';
+    }
+    if (pequena) {
+      return `${plural(pequena, 'linha tem', 'linhas têm')} na coluna A um número menor que 1000, que não parece matrícula.`;
+    }
+    if (semNome) {
+      return `${plural(semNome, 'linha tem', 'linhas têm')} matrícula na coluna A mas a coluna B (nome) está vazia. Preciso das duas.`;
+    }
+    return 'Abaixo da linha de datas, preciso de matrícula na coluna A e nome na coluna B.';
+  }
+
   function buildModel(wb) {
-    const out = { sheets: [], month: null, unknownCodes: new Set(), empCount: 0 };
+    const out = { sheets: [], month: null, unknownCodes: new Set(), empCount: 0, diag: [], ocultas: [] };
     for (const sh of wb.sheets) {
-      if (sh.state !== 'visible' || !sh.cells.size) continue;
+      const anota = (motivo, dica) => out.diag.push({ aba: sh.name, motivo, dica: dica || '' });
+      if (sh.state !== 'visible') { out.ocultas.push(sh.name); continue; }
+      if (!sh.cells.size) { anota('A aba está vazia.'); continue; }
       const get = (r, c) => sh.cells.get(colName(c) + r);
       let maxRow = 0, maxCol = 0;
       for (const k of sh.cells.keys()) { const p = splitRef(k); if (p.r > maxRow) maxRow = p.r; if (p.c > maxCol) maxCol = p.c; }
@@ -195,7 +275,10 @@
         for (let c = 3; c <= Math.min(maxCol, 90); c++) { const v = get(r, c); if (isSerial(v)) cols.push([c, v]); }
         if (cols.length >= 28) dateRows.push({ r, cols });
       }
-      if (!dateRows.length) continue;
+      if (!dateRows.length) {
+        anota('Não achei a linha com os dias do mês.', pistaDeDatas(get, maxRow, maxCol));
+        continue;
+      }
       // tabela CH
       let chTable = [];
       for (let r = 1; r <= 4 && !chTable.length; r++) for (let c = 40; c <= maxCol; c++) {
@@ -225,7 +308,14 @@
         }
         prev.sort((a, b) => a[0] - b[0]);
         const prevCols = prev.map((x) => x[1]); const prevDates = prev.map((x) => serialToDate(x[0]).getUTCDate());
-        if (cur.some((c) => !c)) return;
+        if (cur.some((c) => !c)) {
+          const faltam = [];
+          cur.forEach((c, i) => { if (!c) faltam.push(i + 1); });
+          anota(`Na linha ${dr.r} o mês de ${MESES[M]}/${Y} está incompleto.`,
+            `Não achei coluna para ${faltam.length === 1 ? 'o dia' : 'os dias'} ${listarDias(faltam)}`
+            + ` — o mês tem ${D} dias e preciso de todos.`);
+          return;
+        }
         const hdr = dr.r - 1;
         const lastCur = Math.max(...cur);
         const find = (pred) => { for (let c = lastCur + 1; c <= maxCol; c++) if (pred(norm(get(hdr, c)))) return c; return 0; };
@@ -277,10 +367,19 @@
         }
         closeRun();
         if (block.groups.length) sheet.blocks.push(block);
+        else {
+          anota(`Achei os dias do mês na linha ${dr.r}, mas nenhuma pessoa abaixo deles.`,
+            pistaDeMatriculas(get, dr.r + 1, endRow));
+        }
       });
       if (sheet.blocks.length) out.sheets.push(sheet);
     }
-    if (!out.sheets.length) throw new Error('Nenhuma aba de escala encontrada (procurei linhas com as datas do mês e matrículas na coluna A).');
+    if (!out.sheets.length) {
+      const err = new Error('Nenhuma aba de escala encontrada neste arquivo.');
+      err.diagnostico = out.diag;
+      err.ocultas = out.ocultas;
+      throw err;
+    }
     out.unknownCodes = [...out.unknownCodes].sort();
     return out;
   }
