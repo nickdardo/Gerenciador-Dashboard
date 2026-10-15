@@ -3853,6 +3853,41 @@ body.escala-modo-grade .escala-fill { margin-top: 0; }
 .escala-enx-bloq-sub { font-size: 12.5px !important; color: var(--text-muted) !important; }
 .escala-enx-bloq-acoes { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 8px; }
 
+/* Atalho para as bases que já têm dimensionamento no mês: separado das
+   ações por uma linha, porque é informação ("onde dá para trabalhar"), não
+   mais um botão da mesma fileira. */
+.escala-enx-bloq-bases {
+  width: 100%; margin-top: 14px; padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.escala-enx-bloq-bases-tit {
+  font-size: 11.5px !important; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--text-muted) !important; margin: 0 0 10px !important;
+}
+.escala-enx-bloq-chips { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+/* O --blue da marca (#00a0d2) dá 2.41:1 de texto sobre o próprio fundo
+   claro do chip — ilegível. Como nos códigos F/CH/K, o tom do texto é
+   próprio de cada tema; o fundo e a borda continuam saindo do --blue. */
+/* O hover reforça o fundo, o que no escuro aproxima fundo e texto: por
+   isso o tom do texto também muda no hover. */
+:root { --chip-base-txt: #00678c; --chip-base-txt-hover: #00546f; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --chip-base-txt: var(--blue); --chip-base-txt-hover: #8fdcf5; } }
+:root[data-theme="dark"] { --chip-base-txt: var(--blue); --chip-base-txt-hover: #8fdcf5; }
+
+.escala-enx-chip {
+  font: inherit; font-size: 12.5px; font-weight: 600; letter-spacing: .02em;
+  padding: 6px 14px; border-radius: 999px; cursor: pointer;
+  color: var(--chip-base-txt); background: color-mix(in srgb, var(--blue) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--blue) 38%, transparent);
+  transition: background .12s ease, border-color .12s ease;
+}
+.escala-enx-chip:hover {
+  background: color-mix(in srgb, var(--blue) 20%, transparent);
+  border-color: var(--blue); color: var(--chip-base-txt-hover);
+}
+.escala-enx-chip:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
 .escala-enx-vazia { padding: 44px 24px; text-align: center; }
 .escala-enx-vazia p { margin: 0 0 6px; font-size: 14px; color: var(--text-secondary); }
 .escala-enx-vazia .sub { font-size: 12.5px; color: var(--text-muted); }

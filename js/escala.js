@@ -97,7 +97,7 @@ async function pageEscala(el) {
   await escalaGarantirFerias();
   // O histórico de FA depende de base + mês, que só existem depois que a
   // escala é carregada — a chamada fica no escalaRenderGrade, não aqui.
-  const bases = isAdmin ? (typeof hcAllBases === 'function' ? hcAllBases() : []) : myBases;
+  const bases = escalaBasesDoUsuario();
 
   if (!bases.length) {
     el.innerHTML = `
@@ -245,7 +245,7 @@ async function escalaRenderDash(el) {
   const role = currentUserProfile?.role;
   const myBases = (currentUserProfile?.bases || []).filter(b => b !== '*');
   const isAdmin = role === 'admin';
-  const bases = isAdmin ? (typeof hcAllBases === 'function' ? hcAllBases() : []) : myBases;
+  const bases = escalaBasesDoUsuario();
 
   const [ano, mesNum] = mes.split('-').map(Number);
   const diasNoMes = new Date(ano, mesNum, 0).getDate();
@@ -672,7 +672,14 @@ async function escalaRenderGrade(el) {
      que se joga fora inteiro quando o arquivo certo chega. */
   if (escalaEhEnxuta()) {
     const n = await escalaDimensionamentoContagem(base, mes);
-    if (n === 0 || n === -1) { el.innerHTML = escalaEnxutaBloqueioHTML(base, mes, n); return; }
+    if (n === 0 || n === -1) {
+      // A tela de bloqueio precisa das bases: é por ela que se troca de
+      // base, já que a grade — e o seletor que vive nela — não desenha.
+      const listaBases = escalaBasesDoUsuario();
+      const dim = await escalaBasesComDim(listaBases, mes);
+      el.innerHTML = escalaEnxutaBloqueioHTML(base, mes, n, listaBases, dim);
+      return;
+    }
   }
 
   const [{ data: colabsIniciais }, dias, { data: travaRow }] = await Promise.all([
@@ -784,7 +791,7 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
   const role = currentUserProfile?.role;
   const myBases = (currentUserProfile?.bases || []).filter(b => b !== '*');
   const isAdmin = role === 'admin';
-  const bases = isAdmin ? (typeof hcAllBases === 'function' ? hcAllBases() : []) : myBases;
+  const bases = escalaBasesDoUsuario();
 
   const travada = !!window._escalaTravada;
   const podeTravar = escalaPodeTravar();
@@ -4333,6 +4340,32 @@ const escalaEhEnxuta = () => escalaCenario() === 'enxuta';
 /* Quantas posições o dimensionamento tem para esta base e mês. Guardado em
    memória por base|mês: a grade remonta a cada tecla digitada e não dá
    para ir ao banco toda vez. */
+/* Quais bases esta pessoa pode abrir. Admin vê todas as do cadastro; os
+   demais, só as do próprio perfil. Estava escrito em três telas; virou um
+   lugar só porque a tela de bloqueio do Espelho também precisa da lista —
+   sem ela, quem caísse numa base sem dimensionamento ficava preso nela. */
+function escalaBasesDoUsuario() {
+  const perfil = typeof currentUserProfile !== 'undefined' ? currentUserProfile : null;
+  if (perfil?.role === 'admin') {
+    return typeof hcAllBases === 'function' ? hcAllBases() : [];
+  }
+  return (perfil?.bases || []).filter(b => b !== '*');
+}
+
+/* Das bases que a pessoa pode abrir, quais já têm dimensionamento neste
+   mês. Reaproveita a contagem por base — então, além de responder, deixa o
+   cache quente: trocar de base na tela de bloqueio não consulta de novo. */
+async function escalaBasesComDim(bases, mes) {
+  const lista = bases || [];
+  const ns = await Promise.all(lista.map(b => escalaDimensionamentoContagem(b, mes)));
+  return {
+    com: lista.filter((b, i) => ns[i] > 0),
+    // -1 é "não deu para saber". Separado de zero para a tela não afirmar
+    // ausência de arquivo que pode muito bem existir.
+    indefinidas: lista.filter((b, i) => ns[i] === -1),
+  };
+}
+
 async function escalaDimensionamentoContagem(base, mes) {
   if (!window._escalaDimContagem) window._escalaDimContagem = new Map();
   const k = base + '|' + mes;
@@ -4355,12 +4388,26 @@ function escalaEsquecerContagemDim(base, mes) {
   if (window._escalaDimContagem) window._escalaDimContagem.delete(base + '|' + mes);
 }
 
+/* "Já subi, verificar" esquece o mês inteiro, não só a base aberta: quem
+   acabou de subir costuma subir mais de uma base de uma vez. */
+function escalaEsquecerContagemMes(mes) {
+  if (!window._escalaDimContagem) return;
+  for (const k of [...window._escalaDimContagem.keys()]) {
+    if (k.endsWith('|' + mes)) window._escalaDimContagem.delete(k);
+  }
+}
+
 /* A tela que aparece no lugar da grade. Diz o que falta, onde conseguir e
    oferece a saída — em vez de uma grade vazia que a pessoa tenta preencher
    antes de descobrir que faltava o arquivo. */
-function escalaEnxutaBloqueioHTML(base, mes, contagem) {
+function escalaEnxutaBloqueioHTML(base, mes, contagem, bases, dim) {
   const falhou = contagem === -1;
   const mesLabel = typeof adhMonthLabel === 'function' ? adhMonthLabel(mes) : mes;
+  const lista = bases && bases.length ? bases : (base ? [base] : []);
+  const comDim = (dim && dim.com) || [];
+  // As outras bases que já têm dimensionamento neste mês. É o atalho: sem
+  // ele, achar onde dá para trabalhar é abrir uma base de cada vez.
+  const atalhos = comDim.filter(b => b !== base);
   return `
     <div class="page-header">
       <div>
@@ -4368,6 +4415,11 @@ function escalaEnxutaBloqueioHTML(base, mes, contagem) {
         <p class="page-sub">${escalaEscapeAttr(base)} · ${escalaEscapeAttr(mesLabel)}</p>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
+        ${lista.length > 1
+          ? `<select class="adh-month-select" onchange="escalaSetBase(this.value)" title="Base">${
+              lista.map(b => `<option value="${escalaEscapeAttr(b)}" ${b === base ? 'selected' : ''}>${escalaEscapeAttr(b)}${comDim.includes(b) ? ' · dimensionada' : ''}</option>`).join('')
+            }</select>`
+          : `<span class="adh-base-badge">${escalaEscapeAttr(base || '—')}</span>`}
         <select class="adh-month-select" onchange="escalaSetMes(this.value)">${escalaMesOptionsHTML(mes)}</select>
       </div>
     </div>
@@ -4381,12 +4433,23 @@ function escalaEnxutaBloqueioHTML(base, mes, contagem) {
            <b>${escalaEscapeAttr(base)}</b> em <b>${escalaEscapeAttr(mesLabel)}</b>, e ainda não há nenhum salvo para esse par.`}</p>
       ${falhou ? '' : `<p class="escala-enx-bloq-sub">Suba o arquivo no <b>Gerador</b>, escolha a base e o mês, e volte aqui. A
          <b>Escala Online</b> continua funcionando normalmente enquanto isso.</p>`}
+
+      ${atalhos.length ? `
+        <div class="escala-enx-bloq-bases">
+          <p class="escala-enx-bloq-bases-tit">Com dimensionamento em ${escalaEscapeAttr(mesLabel)}</p>
+          <div class="escala-enx-bloq-chips">
+            ${atalhos.map(b => `<button class="escala-enx-chip" onclick="escalaSetBase('${escalaEscapeAttr(b)}')">${escalaEscapeAttr(b)}</button>`).join('')}
+          </div>
+        </div>`
+        : (falhou || lista.length < 2 ? '' : `
+        <p class="escala-enx-bloq-bases-tit" style="margin-top:18px">Nenhuma outra base tem dimensionamento em ${escalaEscapeAttr(mesLabel)}.</p>`)}
+
       <div class="escala-enx-bloq-acoes">
         ${falhou
-          ? `<button class="adh-refresh-btn" onclick="escalaEsquecerContagemDim('${escalaEscapeAttr(base)}','${escalaEscapeAttr(mes)}');escalaRenderGrade(document.getElementById('page-content'))">${escalaIcone('history')}Tentar de novo</button>`
+          ? `<button class="adh-refresh-btn" onclick="escalaEsquecerContagemMes('${escalaEscapeAttr(mes)}');escalaRenderGrade(document.getElementById('page-content'))">${escalaIcone('history')}Tentar de novo</button>`
           : `<button class="adh-refresh-btn" style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600"
                onclick="navigateTo('gerador')">${escalaIcone('layers')}Ir para o Gerador</button>
-             <button class="adh-refresh-btn" onclick="escalaEsquecerContagemDim('${escalaEscapeAttr(base)}','${escalaEscapeAttr(mes)}');escalaRenderGrade(document.getElementById('page-content'))">${escalaIcone('history')}Já subi, verificar</button>`}
+             <button class="adh-refresh-btn" onclick="escalaEsquecerContagemMes('${escalaEscapeAttr(mes)}');escalaRenderGrade(document.getElementById('page-content'))">${escalaIcone('history')}Já subi, verificar</button>`}
         <button class="adh-refresh-btn" onclick="navigateTo('escala')">Abrir a Escala Online</button>
       </div>
     </div>`;

@@ -35,6 +35,9 @@ function paginaDeTeste() {
 <div id="topbar"></div>
 <div id="page-content" class="pc-flex"></div>
 <script>
+  // No app, estes dois vivem no app.js. Aqui só o escala.js é carregado.
+  var currentUserProfile = null;
+  var currentPage = 'espelho';
   window.__dim = { count: 0, error: null };
   window.db = { from(tabela) {
     const resp = { data: [], error: null, count: 0 };
@@ -95,6 +98,88 @@ function paginaDeTeste() {
       ok(/navigateTo\('escala'\)/.test(html),
         'navegando de verdade, porque o Espelho é página própria no menu lateral');
       ok(!/<table/.test(html), 'nenhuma grade é desenhada — é esse o ponto');
+    }
+
+    sec('2b. Travado numa base não é ficar preso nela');
+    {
+      /* O seletor de base mora no cabeçalho da grade. Quando a grade não
+         desenha, ele ia junto — e quem caísse numa base sem dimensionamento
+         não tinha como sair dela. Foi o que travou o admin em CGH. */
+      const bases = ['BEL', 'CGH', 'GIG', 'SSA'];
+      const comDim = { com: ['GIG', 'SSA'], indefinidas: [] };
+
+      const html = await page.evaluate(([b, d]) =>
+        escalaEnxutaBloqueioHTML('CGH', '2026-11', 0, b, d), [bases, comDim]);
+
+      ok(/onchange="escalaSetBase\(this\.value\)"/.test(html),
+        'a tela travada tem seletor de base');
+      bases.forEach((b) => ok(new RegExp('value="' + b + '"').test(html),
+        'com a base ' + b + ' na lista'));
+      ok(/value="CGH"\s+selected/.test(html), 'e a base aberta vem marcada');
+      ok(/value="GIG"[^>]*>GIG · dimensionada/.test(html),
+        'as que já têm dimensionamento vêm marcadas na própria opção');
+      ok(!/value="BEL"[^>]*>BEL · dimensionada/.test(html),
+        'e as que não têm, não');
+
+      // Os atalhos: só as outras bases, nunca a que já está aberta.
+      const chips = [...html.matchAll(/class="escala-enx-chip"[^>]*>([^<]+)</g)].map((m) => m[1]);
+      ok(chips.join(',') === 'GIG,SSA',
+        'os atalhos listam só as bases com dimensionamento (' + chips.join(', ') + ')');
+      ok(!chips.includes('CGH'), 'sem oferecer atalho para a base onde já se está');
+
+      // Uma base só: nada de seletor com uma opção.
+      const sozinha = await page.evaluate(() =>
+        escalaEnxutaBloqueioHTML('CGH', '2026-11', 0, ['CGH'], { com: [], indefinidas: [] }));
+      ok(!/escalaSetBase/.test(sozinha), 'com uma base só, não há seletor');
+      ok(/adh-base-badge/.test(sozinha), 'só o nome da base');
+      ok(!/escala-enx-chip/.test(sozinha), 'nem atalho para lugar nenhum');
+
+      // Sem nenhuma outra base dimensionada, a tela diz isso em vez de
+      // deixar um espaço vazio que parece carregamento travado.
+      const nenhuma = await page.evaluate(() =>
+        escalaEnxutaBloqueioHTML('CGH', '2026-11', 0, ['BEL', 'CGH'], { com: [], indefinidas: [] }));
+      ok(/Nenhuma outra base tem dimensionamento/.test(nenhuma),
+        'sem nenhuma dimensionada, a tela diz isso');
+
+      // Chamada antiga, com três argumentos, não pode quebrar.
+      const antiga = await page.evaluate(() => escalaEnxutaBloqueioHTML('CGH', '2026-11', 0));
+      ok(/adh-base-badge/.test(antiga) && !/escalaSetBase/.test(antiga),
+        'sem lista de bases, a tela ainda monta');
+
+      // "Já subi, verificar" limpa o mês inteiro: quem sobe, sobe em lote.
+      ok(/escalaEsquecerContagemMes\('2026-11'\)/.test(html),
+        'e reconferir esquece o mês todo, não só a base aberta');
+      const limpou = await page.evaluate(() => {
+        window._escalaDimContagem = new Map([
+          ['BEL|2026-11', 0], ['CGH|2026-11', 0], ['BEL|2026-12', 9],
+        ]);
+        escalaEsquecerContagemMes('2026-11');
+        return [...window._escalaDimContagem.keys()];
+      });
+      ok(limpou.join(',') === 'BEL|2026-12',
+        'o cache do mês sai inteiro e os outros meses ficam (' + limpou.join(', ') + ')');
+    }
+
+    sec('2c. Quem pode abrir qual base');
+    {
+      const r = await page.evaluate(() => {
+        window.hcAllBases = () => ['BEL', 'CGH', 'GIG'];
+        const antes = currentUserProfile;
+        currentUserProfile = { role: 'admin', bases: ['CGH'] };
+        const adm = escalaBasesDoUsuario();
+        currentUserProfile = { role: 'coordenador', bases: ['BEL', '*'] };
+        const coord = escalaBasesDoUsuario();
+        currentUserProfile = null;
+        const semPerfil = escalaBasesDoUsuario();
+        currentUserProfile = antes;
+        return { adm, coord, semPerfil };
+      });
+      ok(r.adm.join(',') === 'BEL,CGH,GIG',
+        'admin vê todas as bases do cadastro, não só a do próprio perfil');
+      ok(r.coord.join(',') === 'BEL', 'os demais veem só as suas');
+      ok(!r.coord.includes('*'), 'e o curinga "*" não vira base');
+      ok(Array.isArray(r.semPerfil) && r.semPerfil.length === 0,
+        'sem perfil carregado, devolve lista vazia em vez de quebrar');
     }
 
     sec('3. Falha de consulta não vira "não existe"');

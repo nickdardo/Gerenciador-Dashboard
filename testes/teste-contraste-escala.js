@@ -138,7 +138,47 @@ sec('4. O tema claro é escuro e o escuro é claro — não trocaram de lugar');
   ok(media('escuro') > 0.5, `as do tema escuro são claras (luminância média ${media('escuro').toFixed(3)})`);
 }
 
-sec('5. A legenda lê os mesmos tokens que a grade');
+sec('5. O chip de base do Espelho');
+{
+  /* O chip carrega o nome da base e é alvo de clique — é a saída de quem
+     caiu numa base sem dimensionamento. O --blue da marca (#00a0d2) dava
+     2,41 sobre o fundo claro do próprio chip, então o texto tem tom por
+     tema, como os códigos. O fundo é o --blue a 10% (20% no hover) sobre
+     o painel. */
+  const bChip = blocoCom('--chip-base-txt:');
+  const raiz  = bChip.find((b) => b.sel === ':root');
+  const esc   = bChip.find((b) => b.sel.includes('data-theme="dark"'));
+  ok(!!raiz, 'o tema claro define --chip-base-txt em :root');
+  ok(!!esc,  'e o escuro redefine em [data-theme="dark"]');
+  ok(/@media \(prefers-color-scheme: dark\)[\s\S]{0,200}--chip-base-txt:/.test(css),
+    'com a preferência do sistema coberta também');
+
+  if (raiz && esc) {
+    const AZUL = hex('#00a0d2');
+    const corDe = (corpo, nome) => {
+      const m = corpo.match(new RegExp('--' + nome + '\\s*:\\s*(#[0-9a-fA-F]{3,6}|var\\(--blue\\))'));
+      if (!m) return null;
+      return m[1] === 'var(--blue)' ? AZUL : hex(m[1]);
+    };
+    const PAINEL = { claro: hex('#ffffff'), escuro: hex('#1a2235') };
+    const casos = [
+      ['claro',  raiz.corpo, PAINEL.claro],
+      ['escuro', esc.corpo,  PAINEL.escuro],
+    ];
+    for (const [tema, corpo, painel] of casos) {
+      for (const [estado, nome, op] of [['normal', 'chip-base-txt', 0.10],
+                                        ['hover', 'chip-base-txt-hover', 0.20]]) {
+        const txt = corDe(corpo, nome);
+        ok(!!txt, `${tema}: o tom de texto do chip em ${estado} está definido`);
+        if (!txt) continue;
+        const r = contraste(txt, sobre(AZUL, op, painel));
+        ok(r >= ALVO, `${tema}/${estado}: ${r.toFixed(2)} contra o fundo do chip (mínimo ${ALVO})`);
+      }
+    }
+  }
+}
+
+sec('6. A legenda lê os mesmos tokens que a grade');
 {
   ok(/\.escala-cod\.st-FA\s*,\s*\.escala-leg-cor\.st-FA/.test(css.replace(/\s+/g, ' ')),
     'pastilha e bolinha da legenda compartilham a regra de cor — não têm como divergir');
