@@ -350,6 +350,13 @@
       if (l.data) {                                       // data já fechada na planilha
         if (l.data.getUTCFullYear() === model.month.year && l.data.getUTCMonth() === model.month.month) {
           item.dia = l.data.getUTCDate() - 1; item.travado = true;
+          /* Data travada é decisão de gente e o painel não a move. Mas se
+             cair em fim de semana, avisa: a regra é curso só em dia útil, e
+             quem digitou a data pode não ter reparado no dia da semana. */
+          if (dow[item.dia] === 0 || dow[item.dia] === 6) {
+            avisos.push({ lv: 'aviso', t: `${l.mat} ${l.nome} · ${l.curso}: a data ${item.dia + 1} cai num `
+              + `${dow[item.dia] === 0 ? 'domingo' : 'sábado'} e veio travada na planilha — mantive, mas curso não deveria ser em fim de semana` });
+          }
         } else {
           avisos.push({ lv: 'aviso', t: `${l.mat} · ${l.curso}: data ${l.data.toLocaleDateString('pt-BR', { timeZone: 'UTC' })} é de outro mês — ignorada` });
         }
@@ -368,23 +375,31 @@
           for (let d = 0; d < D; d++) if (E.eff(e, d) !== 'L' && filtro(d)) out.push(d);
           return out;
         };
+        /* Sábado e domingo saíram dos degraus. Antes eram o último recurso:
+           quando a janela do curso não tinha dia útil livre, o curso caía no
+           fim de semana e o painel avisava que havia cedido. A regra agora é
+           que não cede — curso em fim de semana é dia de operação cheia, e
+           tirar alguém da escala ali custa mais do que remarcar o curso.
+           Sem dia útil, o item volta sem data e diz o porquê. */
         const degraus = [
           { c: (d) => util(d) && naJanela(d) && E.eff(e, d) !== 'K', cedeu: '' },
           { c: (d) => util(d) && naJanela(d), cedeu: 'ficou no mesmo dia de outro curso' },
-          { c: (d) => naJanela(d), cedeu: 'caiu em fim de semana — a janela do curso não tem dia útil livre' },
-          { c: (d) => util(d) && E.eff(e, d) !== 'K', cedeu: 'saiu da janela do curso, que não tinha dia livre para esta pessoa' },
+          { c: (d) => util(d) && E.eff(e, d) !== 'K', cedeu: 'saiu da janela do curso, que não tinha dia útil livre para esta pessoa' },
           { c: (d) => util(d), cedeu: 'saiu da janela e ficou junto de outro curso' },
-          { c: () => true, cedeu: 'saiu da janela e caiu em fim de semana' },
         ];
         for (const g of degraus) {
           item.cands = monta(g.c);
           if (item.cands.length) { item.cedeu = g.cedeu; break; }
         }
         if (!item.cands.length) {
-          // só chega aqui quem está de férias o mês inteiro
           item.semSaida = true;
-          avisos.push({ lv: 'erro', t: `${l.mat} ${l.nome} · ${l.curso}: sem data — está de férias em todos os dias do mês. `
-            + 'Tire esta pessoa da lista ou reveja as férias dela.' });
+          // Duas causas, duas saídas diferentes — e a pessoa precisa saber qual é.
+          const soFimDeSemana = monta(() => true).length > 0;
+          avisos.push(soFimDeSemana
+            ? { lv: 'erro', t: `${l.mat} ${l.nome} · ${l.curso}: sem data — os únicos dias livres desta pessoa no mês `
+                + 'caem em sábado ou domingo, e curso não é marcado em fim de semana. Remarque o curso ou reveja as férias dela.' }
+            : { lv: 'erro', t: `${l.mat} ${l.nome} · ${l.curso}: sem data — está de férias em todos os dias do mês. `
+                + 'Tire esta pessoa da lista ou reveja as férias dela.' });
         }
       }
       item._mes = model.month;

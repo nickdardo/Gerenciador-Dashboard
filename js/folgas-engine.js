@@ -404,7 +404,24 @@
 
   /* ---------- Regras ---------- */
   const KNOWN = new Set(['F', 'FA', 'L', 'K', 'AF', 'CH']);
-  function defaultSettings() { return { maxRun: 6, afCounts: false, offCodes: [] }; }
+  /* O regime decide de onde sai a quantidade de folgas do mês.
+
+     No 6x1 quem manda é o TETO DE HORAS da CH: 150h de teto com jornada de
+     6h dão 25 dias trabalhados, e a folga é o resto do mês — 5 num mês de
+     30 dias, 6 num de 31.
+
+     No 5x2 a lógica inverte: a folga passa a mandar e o teto de horas deixa
+     de ser o limite. São 8 folgas no mês, fechadas, o que derruba os dias
+     trabalhados para 22 e exige jornada maior para manter a mesma CH. Essa
+     conta é de contrato, não de escala, e por isso não entra aqui. */
+  const REGIMES = {
+    '6x1': { rotulo: '6x1', desc: 'Folgas saem do teto de horas da CH', folgasMes: null },
+    '5x2': { rotulo: '5x2', desc: '8 folgas no mês, independente do teto de horas', folgasMes: 8 },
+  };
+  const REGIME_PADRAO = '6x1';
+  const regimeDe = (st) => (st && REGIMES[st.regime] ? st.regime : REGIME_PADRAO);
+
+  function defaultSettings() { return { maxRun: 6, afCounts: false, offCodes: [], regime: REGIME_PADRAO }; }
   // tipo de um código: 'free' | 'offC' (folga que conta) | 'offX' (folga que não conta) | 'work'
   function kind(code, st) {
     if (!code) return 'free';
@@ -415,13 +432,21 @@
     return st.offCodes.includes(code) ? 'offX' : 'work';
   }
 
-  function requirement(emp, sheet, D) {
-    let row = emp.ch != null ? sheet.chTable.find((t) => t.ch === emp.ch) : null;
+  function requirement(emp, sheet, D, st) {
+    const row = emp.ch != null ? sheet.chTable.find((t) => t.ch === emp.ch) : null;
+    const jorn = row ? row.jorn : (emp.ch ? Math.round(emp.ch / D) : 6);
+    const folgasFixas = REGIMES[regimeDe(st)].folgasMes;
+
+    /* 5x2: a quantidade de folgas é a mesma para todo mundo, venha ou não a
+       CH na tabela. O teto de horas segue reportado (a tela usa para mostrar
+       o saldo), mas não decide mais quantas folgas são. */
+    if (folgasFixas != null) {
+      return { required: Math.min(folgasFixas, D), maxH: row ? row.maxH : null, jorn, known: !!row };
+    }
     if (row) {
       const maxWork = Math.floor(row.maxH / row.jorn + 1e-9);
-      return { required: Math.max(0, D - maxWork), maxH: row.maxH, jorn: row.jorn, known: true };
+      return { required: Math.max(0, D - maxWork), maxH: row.maxH, jorn, known: true };
     }
-    const jorn = emp.ch ? Math.round(emp.ch / D) : 6;
     return { required: D === 31 ? 6 : 5, maxH: null, jorn, known: false };
   }
 
@@ -480,6 +505,16 @@
     const isOff = (d) => d >= 0 && d < D && (fx[d].k === 'offC' || fx[d].k === 'offX');
     const adjFixed = (d) => (isOff(d - 1) || isOff(d + 1) || (d === 0 && prevOff) ? ADJ : 0);
 
+    /* Folgas seguidas que o mês anterior já deixou abertas. Sem isso, um mês
+       que termina em duas folgas ganharia uma terceira no dia 1º. */
+    let fr0 = 0;
+    if (!pr.unknown) {
+      for (let i = emp.prev.length - 1; i >= 0 && fr0 < 2; i--) {
+        const k = kind(emp.prev[i], st);
+        if (k === 'offC' || k === 'offX') fr0++; else break;
+      }
+    }
+
     function dp(forced) {
       const Kc = need + 8;
       const R = maxRun + 1;
@@ -488,39 +523,52 @@
       // Contar "0, 1, 2+" no estado não servia — o 2 virava absorvente e o
       // terceiro domingo saía de graça, então a planilha que já vinha com
       // dois ganhava um terceiro do gerador.
-      const S = R * (Kc + 1) * 4;
-      const idx = (run, k, s, pg) => ((run * (Kc + 1) + k) * 2 + s) * 2 + pg;
+      /* `fr` = folgas seguidas que vêm de trás, travado em 2. Era um bit só
+         ("ontem foi folga"), o que permitia a terceira folga sair por 120
+         pontos de penalidade — barato demais perto do resto. Com três
+         estados o solver enxerga o bloco inteiro e a terceira custa BIG.
+         Trava em 2 porque é só isso que a regra precisa saber: a partir
+         daí qualquer folga nova já é a proibida. */
+      const S = R * (Kc + 1) * 2 * 3;
+      const idx = (run, k, s, fr) => ((run * (Kc + 1) + k) * 2 + s) * 3 + fr;
       const domExtra = (s, ehDom) => (ehDom && s ? SUN2PEN : 0);
+      // Dia de folga que já vem travado na planilha não é recusado — o
+      // solver não pode mudá-lo. Ele só conta, para não encostar outra.
+      const maisUma = (fr) => Math.min(fr + 1, 2);
+      const tresSeguidas = (fr) => (fr >= 2 ? BIG : 0);
       let cur = new Float64Array(S).fill(Infinity);
-      cur[idx(r0, 0, 0, 0)] = 0;
+      cur[idx(r0, 0, 0, Math.min(fr0, 2))] = 0;
       const back = [];
       for (let d = 0; d < D; d++) {
         const nxt = new Float64Array(S).fill(Infinity);
         const bp = new Int32Array(S).fill(-1); const bc = new Int8Array(S);
         const f = fx[d];
-        for (let run = 0; run < R; run++) for (let k = 0; k <= Kc; k++) for (let s = 0; s < 2; s++) for (let pg = 0; pg < 2; pg++) {
-          const i = idx(run, k, s, pg); const c0 = cur[i]; if (c0 === Infinity) continue;
+        for (let run = 0; run < R; run++) for (let k = 0; k <= Kc; k++) for (let s = 0; s < 2; s++) for (let fr = 0; fr < 3; fr++) {
+          const i = idx(run, k, s, fr); const c0 = cur[i]; if (c0 === Infinity) continue;
           const relax = (j, c, ch) => { if (c < nxt[j]) { nxt[j] = c; bp[j] = i; bc[j] = ch; } };
           if (f.k !== 'free') {
             if (f.k === 'work') {
               const over = run + 1 > maxRun;
               relax(idx(Math.min(run + 1, maxRun), k, s, 0), c0 + (over ? BIG : 0), 0);
             } else if (!f.quebra) {
-              // FA já lançado na planilha: não trabalha, mas a sequência segue.
+              // FA já lançado na planilha: não trabalha, mas a sequência de
+              // trabalho segue. Para folgas seguidas ele conta como folga.
               const over = run + 1 > maxRun;
-              relax(idx(Math.min(run + 1, maxRun), k, s, 0), c0 + (over ? BIG : 0), 0);
-            } else relax(idx(0, k, s || (f.sun ? 1 : 0), 0), c0 + domExtra(s, f.sun), 0);
+              relax(idx(Math.min(run + 1, maxRun), k, s, maisUma(fr)), c0 + (over ? BIG : 0), 0);
+            } else relax(idx(0, k, s || (f.sun ? 1 : 0), maisUma(fr)), c0 + domExtra(s, f.sun), 0);
             continue;
           }
           const fd = forced && forced[d];
           if (fd) {
-            // O F do domingo zera a sequência; o FA colado nele, não.
+            // O F do domingo zera a sequência de trabalho; o FA colado nele, não.
             if (k + 1 <= Kc) {
               if (fd === 'FA') {
                 const over = run + 1 > maxRun;
-                relax(idx(Math.min(run + 1, maxRun), k + 1, s, 1), c0 + costDay[d] + adjFixed(d) * 0.5 + (over ? BIG : 0), 2);
+                relax(idx(Math.min(run + 1, maxRun), k + 1, s, maisUma(fr)),
+                  c0 + costDay[d] + adjFixed(d) * 0.5 + (over ? BIG : 0) + tresSeguidas(fr), 2);
               } else {
-                relax(idx(0, k + 1, s || (dow[d] === 0 ? 1 : 0), 1), c0 + costDay[d] + adjFixed(d) * 0.5 + domExtra(s, dow[d] === 0), 1);
+                relax(idx(0, k + 1, s || (dow[d] === 0 ? 1 : 0), maisUma(fr)),
+                  c0 + costDay[d] + adjFixed(d) * 0.5 + domExtra(s, dow[d] === 0) + tresSeguidas(fr), 1);
               }
             }
             continue;
@@ -530,16 +578,17 @@
           relax(idx(Math.min(run + 1, maxRun), k, s, 0), c0 + (over ? BIG : 0), 0);
           // folgar
           if (k + 1 <= Kc) {
-            const pen = costDay[d] + (pg ? ADJ : 0) + adjFixed(d) + (run === 1 && !(pr.unknown && d - 2 < 0) ? GAP1 : 0);
-            relax(idx(0, k + 1, s || (dow[d] === 0 ? 1 : 0), 1), c0 + pen + domExtra(s, dow[d] === 0), 1);
+            const pen = costDay[d] + (fr ? ADJ : 0) + adjFixed(d) + (run === 1 && !(pr.unknown && d - 2 < 0) ? GAP1 : 0);
+            relax(idx(0, k + 1, s || (dow[d] === 0 ? 1 : 0), maisUma(fr)),
+              c0 + pen + domExtra(s, dow[d] === 0) + tresSeguidas(fr), 1);
           }
         }
         back.push({ bp, bc });
         cur = nxt;
       }
       let best = Infinity, bi = -1;
-      for (let run = 0; run < R; run++) for (let k = 0; k <= Kc; k++) for (let s = 0; s < 2; s++) for (let pg = 0; pg < 2; pg++) {
-        const i = idx(run, k, s, pg); if (cur[i] === Infinity) continue;
+      for (let run = 0; run < R; run++) for (let k = 0; k <= Kc; k++) for (let s = 0; s < 2; s++) for (let fr = 0; fr < 3; fr++) {
+        const i = idx(run, k, s, fr); if (cur[i] === Infinity) continue;
         // Exatamente 1 domingo: a falta é punida aqui, o excedente já foi
         // cobrado dia a dia por domExtra().
         let c = cur[i] + (k < need ? (need - k) * SHORT : (k - need) * EXTRA) + (!s && sunAvail ? SUNPEN : 0);
@@ -582,7 +631,7 @@
     for (const sheet of model.sheets) for (const block of sheet.blocks) {
       const all = block.groups.flatMap((g) => g.emps);
       for (const g of block.groups) for (const e of g.emps) {
-        e.req = requirement(e, sheet, D);
+        e.req = requirement(e, sheet, D, st);
         if (!opts.keep) e.gen = new Array(D).fill('');
         e._g = g;
       }
@@ -625,7 +674,7 @@
     let issues = 0;
     for (const sheet of model.sheets) for (const block of sheet.blocks) for (const g of block.groups) {
       for (const e of g.emps) {
-        if (!e.req) e.req = requirement(e, sheet, D);
+        if (!e.req) e.req = requirement(e, sheet, D, st);
         const codes = Array.from({ length: D }, (_, d) => eff(e, d));
         const list = [];
         const allL = codes.every((c) => c === 'L');
@@ -650,6 +699,25 @@
           list.push({ lv: 'erro', t: `${maxSeen} dias seguidos sem folga (${a} até o dia ${worst[1] + 1})${porFA}` });
         }
         if (!allL && counted < e.req.required) list.push({ lv: 'erro', t: `Faltam ${e.req.required - counted} folga(s): tem ${counted} de ${e.req.required}` });
+
+        /* Folgas seguidas. Duas são aceitas (é o fim de semana da folga
+           agrupada); três não, em nenhum regime. Férias não entram: um mês
+           de férias é um bloco de 30 folgas e acusar isso seria ruído. */
+        if (!allL) {
+          let fseq = 0, fini = 0, piorF = 0, ondeF = null;
+          for (let d = 0; d < D; d++) {
+            const c = codes[d];
+            const k = kind(c, st);
+            const folga = (k === 'offC' || k === 'offX') && c !== 'L';
+            if (folga) { if (!fseq) fini = d; fseq++; if (fseq > piorF) { piorF = fseq; ondeF = [fini, d]; } }
+            else fseq = 0;
+          }
+          if (piorF >= 3) {
+            const quais = [];
+            for (let d = ondeF[0]; d <= ondeF[1]; d++) quais.push(`${d + 1} (${DOW[dow[d]]}, ${codes[d]})`);
+            list.push({ lv: 'erro', t: `${piorF} folgas seguidas — dias ${quais.join(', ')}. O limite é 2` });
+          }
+        }
         // Domingo de folga: exatamente um por mês. Férias (L) não entram —
         // quem está de férias no domingo não "gastou" o domingo dele.
         const sunDays = codes.map((c, d) => (dow[d] === 0 && (c === 'F' || c === 'AF' || c === 'CH') ? d : -1)).filter((d) => d >= 0);
@@ -926,6 +994,7 @@
   }
 
   const api = { loadWorkbook, buildModel, generate, validate, groupTSV, buildXlsx, defaultSettings, kind, quebraSequencia, eff, colName, DOW, MESES,
-    loadCursos, indexarCursos, aplicarCursos, limparCursos, matNum, dataCurso, patchWorkbook };
+    loadCursos, indexarCursos, aplicarCursos, limparCursos, matNum, dataCurso, patchWorkbook,
+    REGIMES, REGIME_PADRAO, regimeDe, requirement };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.FolgaEngine = api;
 })(typeof window !== 'undefined' ? window : globalThis);

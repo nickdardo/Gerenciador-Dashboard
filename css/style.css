@@ -3186,6 +3186,20 @@ body.fg-locked { overflow: hidden; }
 .fg-ov .fg-bar .fg-eyebrow { margin: 0; }
 .fg-ov .fg-bar h2 { margin: 0; font: 700 28px/1.1 var(--f-display); letter-spacing: .01em; color: var(--petrol-2, var(--petrol)); }
 .fg-ov .fg-bar .fg-barmeta { font-size: 13px; color: var(--ink-2); }
+
+/* Seletor de regime: dois botões colados, o escolhido em sólido. É a
+   escolha que mais muda o resultado, então fica ao lado do título e não
+   dentro de "Regras aplicadas". */
+.fg-scope .fg-regime { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.fg-scope .fg-regime-op {
+  font: 700 13px/1 var(--f-body); letter-spacing: .04em; padding: 9px 18px;
+  border: 0; background: var(--surface); color: var(--ink-2); cursor: pointer;
+  transition: background .12s ease, color .12s ease;
+}
+.fg-scope .fg-regime-op + .fg-regime-op { border-left: 1px solid var(--line); }
+.fg-scope .fg-regime-op:hover:not(.on) { background: var(--line-soft, rgba(0,0,0,.05)); color: var(--ink); }
+.fg-scope .fg-regime-op.on { background: var(--petrol, #00a0d2); color: #fff; }
+.fg-scope .fg-regime-op:focus-visible { outline: 2px solid var(--petrol, #00a0d2); outline-offset: -2px; }
 .fg-ov .fg-bar .fg-actions { margin-left: auto; display: flex; flex-wrap: wrap; gap: 8px; }
 .fg-close { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px;
   border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); font-size: 18px; line-height: 1; }

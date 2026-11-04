@@ -200,8 +200,16 @@ function folgasOverlayHTML() {
   <div class="fg-scope">
     <header class="fg-bar">
       <div>
-        <div class="fg-eyebrow">Escala 6x1 · distribuição automática</div>
+        <div class="fg-eyebrow" id="fg-eyebrow">Escala 6x1 · distribuição automática</div>
         <h2>Gerador de Folgas</h2>
+      </div>
+      <!-- O regime decide quantas folgas o mês tem, então é a primeira
+           escolha da tela, não um item escondido em "Regras aplicadas". -->
+      <div class="fg-regime" role="group" aria-label="Regime de folga">
+        <button class="fg-regime-op" type="button" data-regime="6x1" aria-pressed="true"
+          title="Folgas saem do teto de horas da CH — 5 ou 6 no mês">6x1</button>
+        <button class="fg-regime-op" type="button" data-regime="5x2" aria-pressed="false"
+          title="8 folgas no mês, independente do teto de horas">5x2</button>
       </div>
       <span class="fg-barmeta" id="fg-file-name"></span>
       <div class="fg-actions">
@@ -318,7 +326,14 @@ function folgasMontar() {
   // e sem isso a planilha lida e as edições manuais se perderiam a cada ida
   // e volta. Só o DOM é recriado; o modelo continua de pé.
   if (!window._fgState) {
-    window._fgState = { wb: null, model: null, st: E.defaultSettings(), tab: 0, file: '', sample: false, open: new Set(), busy: false, cursos: null, cursosFile: '', prog: null, progFile: '', plano: null };
+    /* O regime escolhido sobrevive ao fechar a camada e ao F5: quem passou
+       a base para 5x2 não quer reescolher a cada abertura. */
+    const st0 = E.defaultSettings();
+    try {
+      const salvo = localStorage.getItem('gde_folgas_regime');
+      if (salvo && E.REGIMES[salvo]) st0.regime = salvo;
+    } catch (_) {}
+    window._fgState = { wb: null, model: null, st: st0, tab: 0, file: '', sample: false, open: new Set(), busy: false, cursos: null, cursosFile: '', prog: null, progFile: '', plano: null };
   }
   const S = window._fgState;
 
@@ -378,7 +393,33 @@ function folgasMontar() {
       <div class="stat"><span class="k">Folgas lançadas</span><span class="v">${gen}<small>sendo ${fa} FA</small></span></div>
       <div class="stat ${err ? 'bad' : 'good'}"><span class="k">Regras quebradas</span><span class="v">${err}<small>${warn} aviso${warn === 1 ? '' : 's'}</small></span></div>
       <div class="stat"><span class="k">Maior variação/dia</span><span class="v">${spreadMax}<small>pessoa${spreadMax === 1 ? '' : 's'} no grupo</small></span></div>`;
-    $('#fg-rules-hint').textContent = `· máx. ${S.st.maxRun} dias seguidos · exatamente 1 domingo · FA para dourados (não quebra a sequência)`;
+    const reg = E.REGIMES[E.regimeDe(S.st)];
+    const quantas = reg.folgasMes != null ? `${reg.folgasMes} folgas no mês` : 'folgas pelo teto de horas da CH';
+    $('#fg-rules-hint').textContent = `· ${quantas} · máx. ${S.st.maxRun} dias seguidos · máx. 2 folgas seguidas · exatamente 1 domingo · FA para dourados (não quebra a sequência)`;
+  }
+
+  /* O seletor de regime e o subtítulo andam juntos — se divergirem, a tela
+     passa a mentir sobre qual regra acabou de rodar. */
+  function sincronizarRegime() {
+    const atual = E.regimeDe(S.st);
+    document.querySelectorAll('.fg-regime-op').forEach((b) => {
+      const meu = b.dataset.regime === atual;
+      b.classList.toggle('on', meu);
+      b.setAttribute('aria-pressed', meu ? 'true' : 'false');
+    });
+    const olho = $('#fg-eyebrow');
+    if (olho) olho.textContent = `Escala ${atual} · distribuição automática`;
+  }
+
+  function trocarRegime(regime) {
+    if (!E.REGIMES[regime] || regime === E.regimeDe(S.st)) return;
+    S.st.regime = regime;
+    try { localStorage.setItem('gde_folgas_regime', regime); } catch (_) {}
+    sincronizarRegime();
+    // Trocar o regime muda quantas folgas cada pessoa tem: sem regerar, a
+    // tela ficaria mostrando a distribuição do regime antigo.
+    if (S.model) regenerate();
+    else toast(`Regime ${regime}: ${E.REGIMES[regime].desc}. Solte a escala do mês para gerar.`, 5000);
   }
 
   function renderTabs() {
@@ -948,6 +989,9 @@ function folgasMontar() {
     else if (ev.target.closest('#fg-pl-aplicar')) aplicarPlano();
     else if (ev.target.closest('#fg-pl-refazer')) planejar();
   });
+  document.querySelectorAll('.fg-regime-op').forEach((b) =>
+    b.addEventListener('click', () => trocarRegime(b.dataset.regime)));
+  sincronizarRegime();
   $('#fg-opt-run').addEventListener('change', (ev) => { S.st.maxRun = +ev.target.value; regenerate(); });
   $('#fg-opt-af').addEventListener('change', (ev) => { S.st.afCounts = ev.target.checked; regenerate(); });
   $('#fg-unknown-list').addEventListener('change', (ev) => {

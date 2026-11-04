@@ -585,10 +585,34 @@ sec('28. Sem dia livre, as regras cedem uma a uma — ninguém volta em branco')
     const janela = new Set([sab, dom]);
     const rel = P.planejar(model, mkProg([{ mat: 2200, curso: 'Y' }],
       [{ curso: 'Y', tipo: 'EXTERNO', dias: janela }]), { tentativas: 3 });
+    /* Antes o curso caía no sábado e ficava dentro da janela. Agora a
+       janela é que cede: curso em fim de semana virou proibido, porque
+       sábado e domingo são dias de operação cheia e tirar alguém da escala
+       ali custa mais do que remarcar o curso. */
     const it = rel.itens[0];
     ok(it && it.dia !== null, 'recebe data mesmo quando a janela só tem sábado e domingo');
-    ok(it && janela.has(it.dia), 'e fica dentro da janela (dia ' + (it ? it.dia + 1 : '?') + ')');
-    ok(it && /fim de semana/.test(it.cedeu || ''), 'avisando que o fim de semana foi a regra que cedeu');
+    ok(it && st0.dow[it.dia] !== 0 && st0.dow[it.dia] !== 6,
+      'e NÃO cai em fim de semana (dia ' + (it ? it.dia + 1 : '?') + ', ' + (it ? ['DOM','SEG','TER','QUA','QUI','SEX','SAB'][st0.dow[it.dia]] : '?') + ')');
+    ok(it && !janela.has(it.dia), 'saiu da janela, que agora cede antes do fim de semana');
+    ok(it && /janela/.test(it.cedeu || ''), 'e o painel diz que foi a janela que cedeu: "' + (it ? it.cedeu : '') + '"');
+  }
+
+  // (b2) sem NENHUM dia útil livre no mês: volta sem data, dizendo o porquê
+  {
+    const fixed = new Array(st0.days).fill('');
+    for (const d of uteis) fixed[d] = 'L';          // férias em todo dia útil
+    const e = mkEmp(st0.days, 2250, { fixed, nome: 'SO FDS LIVRE' });
+    const model = mkModel(2026, 9, [e]);
+    const rel = P.planejar(model, mkProg([{ mat: 2250, curso: 'Z' }],
+      [{ curso: 'Z', tipo: 'INTERNO', dias: null }]), { tentativas: 3 });
+    const it = rel.itens[0];
+    ok(it && it.dia === null, 'sem dia útil livre, o curso volta sem data em vez de cair no sábado');
+    ok(it && it.semSaida, 'marcado como sem saída');
+    const aviso = (rel.avisos || []).find((a) => /2250/.test(a.t));
+    ok(!!aviso, 'com aviso nomeando a pessoa');
+    ok(aviso && /s[áa]bado ou domingo/.test(aviso.t),
+      'que explica que os dias livres dela caem em fim de semana: "' + (aviso ? aviso.t.slice(0, 90) : '') + '"');
+    ok(aviso && aviso.lv === 'erro', 'e é erro, não aviso — alguém precisa remarcar');
   }
 
   // (c) janela sem nenhum dia livre para aquela pessoa
@@ -643,6 +667,30 @@ sec('29. Nenhuma linha volta em branco num lote grande e apertado');
   eq(semData.length, 0, 'nenhuma volta em branco');
   const emFerias = rel.itens.filter((i) => E.eff(i.e, i.dia) === 'L');
   eq(emFerias.length, 0, 'e nenhuma caiu em cima de férias');
+
+  /* A varredura que fecha a regra: num lote grande e com janelas
+     estreitas é onde um fim de semana escaparia sem ninguém ver. */
+  const noFDS = rel.itens.filter((i) => i.dia !== null && (mm.dow[i.dia] === 0 || mm.dow[i.dia] === 6));
+  eq(noFDS.length, 0, 'e nenhuma das 75 caiu em sábado ou domingo'
+    + (noFDS.length ? ' — ex.: dia ' + (noFDS[0].dia + 1) : ''));
+}
+
+sec('30. Data travada em fim de semana é mantida, mas acusada');
+{
+  // A data veio digitada na planilha: é decisão de gente e o painel não a
+  // move. Mas também não finge que está tudo certo.
+  const mm = mkMonth(2026, 9);
+  const sab = mm.dow.findIndex((d) => d === 6);
+  const e = mkEmp(mm.days, 2700, { nome: 'TRAVADO NO SABADO' });
+  const model = mkModel(2026, 9, [e]);
+  const rel = P.planejar(model, mkProg(
+    [{ mat: 2700, curso: 'W', data: new Date(Date.UTC(2026, 9, sab + 1)) }],
+    [{ curso: 'W', tipo: 'EXTERNO', dias: null }]), { tentativas: 3 });
+  const it = rel.itens[0];
+  ok(it && it.dia === sab, 'a data travada é mantida onde estava (dia ' + (sab + 1) + ')');
+  ok(it && it.travado, 'e segue marcada como travada');
+  const aviso = (rel.avisos || []).find((a) => /2700/.test(a.t) && /s[áa]bado/.test(a.t));
+  ok(!!aviso, 'com aviso de que caiu em sábado: "' + (aviso ? aviso.t.slice(0, 80) : 'nenhum') + '"');
 }
 
 /* ============================================== resumo */
