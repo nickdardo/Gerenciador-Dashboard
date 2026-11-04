@@ -23,6 +23,7 @@ const E = require(path.join(__dirname, '..', 'js', 'folgas-engine.js'));
 let pass = 0, fail = 0;
 const falhas = [];
 const ok = (c, m) => { if (c) pass++; else { fail++; falhas.push(m); console.log('   \x1b[31m✗\x1b[0m ' + m); } };
+const eq = (a, b, m) => ok(a === b, m + '  (esperado ' + JSON.stringify(b) + ', veio ' + JSON.stringify(a) + ')');
 const sec = (t) => console.log('\n\x1b[36m── ' + t + '\x1b[0m');
 
 /* ------------------------------------------------- fabricação de abas */
@@ -147,7 +148,38 @@ sec('0b. De que mês é a escala — a linha tem três meses');
   ok(modelo && modelo.month.days === 30, 'com 30 dias');
 }
 
-sec('1. Datas como texto — o caso mais comum');
+sec('0c. Linhas de vaga são lidas como pessoa, não como rótulo de grupo');
+{
+  /* "C16 · CONTRATAR" e "A1 · REPOSIÇÃO": a matrícula é um código curto.
+     O motor só aceitava número >= 1000, então a linha caía no ramo de
+     rótulo e o código virava NOME DE GRUPO — a vaga não recebia folga e,
+     pior, o grupo se quebrava num pedaço por vaga. */
+  const { modelo, erro } = monta([abaBoa({
+    pessoas: [[170107, 'ANA PAULA MOREIRA'], ['C16', 'CONTRATAR'], ['C17', 'CONTRATAR'],
+      ['A1', 'REPOSIÇÃO'], [170222, 'BRUNO SALES']],
+  })]);
+  ok(!erro, 'a aba é lida' + (erro ? ': ' + erro.message : ''));
+  if (modelo) {
+    eq(modelo.empCount, 5, 'as cinco linhas viram pessoa — três delas vagas');
+    const grupos = modelo.sheets[0].blocks[0].groups;
+    eq(grupos.length, 1, 'e continuam num grupo só, não um por vaga');
+    const vagas = grupos[0].emps.filter((e) => e.vaga);
+    eq(vagas.length, 3, 'três marcadas como vaga');
+    eq(vagas.map((e) => e.mat).join(','), 'C16,C17,A1', 'com o código guardado como matrícula');
+    eq(vagas[0].name, 'CONTRATAR', 'e o nome preservado');
+    const reais = grupos[0].emps.filter((e) => !e.vaga);
+    eq(reais.length, 2, 'e as duas pessoas de verdade não viram vaga');
+    eq(typeof reais[0].mat, 'number', 'cuja matrícula segue numérica');
+  }
+}
+{
+  // O que NÃO pode virar vaga: rótulo de seção continua sendo rótulo.
+  const { modelo } = monta([abaBoa({
+    pessoas: [[170107, 'ANA PAULA MOREIRA'], [170222, 'BRUNO SALES']],
+  })]);
+  const emps = modelo.sheets[0].blocks[0].groups[0].emps;
+  ok(emps.every((e) => !e.vaga), 'numa aba sem vaga, ninguém é marcado como vaga');
+}
 {
   const { erro } = monta([abaBoa({ comoTexto: true })]);
   ok(!!erro, 'o arquivo é recusado');

@@ -274,6 +274,47 @@ sec('8. Férias não são confundidas com folgas seguidas');
   ok(!erro, 'vinte dias de férias não viram "20 folgas seguidas"');
 }
 
+sec('8b. Vaga aberta recebe folga como qualquer um');
+{
+  /* "CONTRATAR" e "REPOSIÇÃO" são linhas de escala sem gente ainda: a
+     matrícula é um código curto no lugar do número. Antes elas não eram
+     lidas como pessoa — o código caía no ramo de rótulo e virava NOME DE
+     GRUPO, quebrando o grupo em pedaços de uma linha. Ninguém recebia
+     folga, e a cobertura do mês saía errada justamente onde falta gente. */
+  for (const regime of ['6x1', '5x2']) {
+    const st = cfg(regime);
+    const D = 30;
+    const vagas = [
+      { ...mkEmp(D, { ch: 90, name: 'CONTRATAR' }), mat: 'C16', vaga: true },
+      { ...mkEmp(D, { ch: 90, name: 'CONTRATAR' }), mat: 'C17', vaga: true },
+      { ...mkEmp(D, { ch: 180, name: 'REPOSIÇÃO' }), mat: 'A1', vaga: true },
+    ];
+    const gente = [mkEmp(D, { ch: 180, name: 'PESSOA REAL' }), mkEmp(D, { ch: 90, name: 'OUTRA REAL' })];
+    const m = mkModel(2026, 10, [...vagas, ...gente]);
+    E.generate(m, st, { passes: 4 });
+    E.validate(m, st);
+    for (const e of vagas) {
+      const n = codigos(m, e).filter((c) => { const k = E.kind(c, st); return k === 'offC' || k === 'offX'; }).length;
+      ok(n === e.req.required && n > 0, `${regime}: a vaga ${e.mat} recebeu ${n} folga(s), o mesmo que a regra pede`);
+    }
+    eq(m.errorCount, 0, `${regime}: e a aba fecha sem regra quebrada`);
+    // A vaga não pode virar grupo: todo mundo tem que ficar no mesmo.
+    const grupos = m.sheets[0].blocks[0].groups;
+    eq(grupos.length, 1, `${regime}: as vagas não quebram o grupo em pedaços`);
+    eq(grupos[0].emps.length, 5, `${regime}: as 5 linhas ficam juntas`);
+  }
+}
+
+sec('8c. Vaga não recebe curso, e isso é de propósito');
+{
+  // O arquivo de cursos é indexado por matrícula numérica. Uma vaga não
+  // tem matrícula, então nunca casa — e não deve mesmo: não há quem vá.
+  eq(E.matNum('C16'), 0, 'o código de vaga não vira número de matrícula');
+  eq(E.matNum('A1'), 0, 'nem o de reposição');
+  eq(E.matNum('161153'), 161153, 'e a matrícula de verdade continua passando');
+  eq(E.matNum(161153), 161153, 'venha ela como texto ou como número');
+}
+
 sec('9. O que a mudança NÃO podia mexer');
 {
   // O 6x1 tem que sair idêntico ao de antes do regime existir: mesma conta,

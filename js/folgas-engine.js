@@ -357,7 +357,18 @@
         };
         for (let r = dr.r + 1; r <= endRow; r++) {
           const A = get(r, 1), B = get(r, 2);
-          const isEmp = typeof A === 'number' && A >= 1000 && typeof B === 'string' && B.trim();
+          const temNome = typeof B === 'string' && B.trim();
+          /* Vaga aberta: a linha existe na escala, tem carga horária e
+             horário, mas ainda não tem gente — a matrícula é um código
+             curto ("C16", "A3") no lugar do número. Antes essas linhas não
+             eram lidas como pessoa, então não recebiam folga nenhuma: o
+             código caía no ramo de rótulo e virava NOME DE GRUPO, que é
+             pior ainda, porque quebrava o grupo em pedaços de uma linha.
+             A vaga precisa de folga como qualquer um — é ela que vai ser
+             ocupada, e a escala do mês já tem que prever a cobertura. */
+          const codigoVaga = typeof A === 'string' && /^[A-Za-z]{1,3}[-_ ]?\d{1,4}$/.test(A.trim());
+          const vaga = !!(codigoVaga && temNome);
+          const isEmp = (typeof A === 'number' && A >= 1000 && temNome) || vaga;
           if (!isEmp) {
             closeRun();
             const a = typeof A === 'string' ? A.trim() : '', b = typeof B === 'string' ? B.trim() : '';
@@ -373,7 +384,7 @@
           const gv = goldCol ? get(r, goldCol) : null;
           const fmtTime = (v) => { if (typeof v !== 'number') return ''; const m = Math.round((v % 1) * 1440); return String(Math.floor(m / 60) % 24).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
           const emp = {
-            id: sh.name + '!' + r, row: r, mat: A, name: B.trim(), fixed, prev: prevCodes,
+            id: sh.name + '!' + r, row: r, mat: vaga ? String(A).trim() : A, name: B.trim(), vaga, fixed, prev: prevCodes,
             ch: typeof chv === 'number' ? Math.round(chv) : null,
             gold: gv === 1 || gv === true || gv === '1',
             team: teamCol ? String(get(r, teamCol) ?? '') : '',
