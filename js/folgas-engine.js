@@ -171,13 +171,28 @@
       if (s.state !== 'visible' || !byName.has(s.path)) { s.cells = new Map(); continue; }
       s.cells = parseSheet(await txt(s.path), sst);
     }
-    return { entries, byName, sheets, wbXml };
+    // `date1904` muda o significado de toda data do arquivo (ver serialToDate).
+    const date1904 = /<workbookPr[^>]*date1904="(1|true)"/.test(wbXml);
+    return { entries, byName, sheets, wbXml, date1904 };
   }
 
   /* ---------- Modelo ---------- */
   const DOW = ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB'];
   const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
-  function serialToDate(n) { return new Date(Math.round((n - 25569) * 86400000)); }
+  /* O Excel tem DOIS calendários, e a diferença entre eles é de 1462 dias.
+
+     O comum conta a partir de 30/12/1899. O outro, herdado do Excel de Mac,
+     conta a partir de 01/01/1904 e fica marcado no arquivo com
+     `date1904="1"` em workbook.xml. O mesmo número quer dizer datas com
+     quatro anos de diferença: o serial 44895 é 30/11/2022 num calendário e
+     01/12/2026 no outro.
+
+     Ler tudo como 1900 fazia uma escala de dezembro/2026 aparecer como
+     dezembro/2022 — e, pior, com o dia 31 caindo fora do mês, porque o
+     dezembro de 2022 começa num dia da semana diferente. O arquivo estava
+     certo; a leitura é que ignorava o calendário dele. */
+  const DESLOC_1904 = 1462;
+  function serialToDate(n, d1904) { return new Date(Math.round((n + (d1904 ? DESLOC_1904 : 0) - 25569) * 86400000)); }
   const isSerial = (v) => typeof v === 'number' && Number.isInteger(v) && v > 40000 && v < 60000;
   const clean = (v) => (v === null || v === undefined ? '' : String(v).trim().toUpperCase());
 
@@ -260,6 +275,8 @@
   }
 
   function buildModel(wb) {
+    // O calendário do arquivo vale para todas as datas dele.
+    const d1904 = !!(wb && wb.date1904);
     const out = { sheets: [], month: null, unknownCodes: new Set(), empCount: 0, diag: [], ocultas: [] };
     for (const sh of wb.sheets) {
       const anota = (motivo, dica) => out.diag.push({ aba: sh.name, motivo, dica: dica || '' });
@@ -307,7 +324,7 @@
            em si, mas se fosse, a escala ainda é a do mês de frente. */
         const porMes = new Map();
         for (const [, v] of dr.cols) {
-          const d = serialToDate(v);
+          const d = serialToDate(v, d1904);
           const k = d.getUTCFullYear() * 12 + d.getUTCMonth();
           porMes.set(k, (porMes.get(k) || 0) + 1);
         }
@@ -320,12 +337,12 @@
         const cur = new Array(D).fill(0); const prev = [];
         const first = Date.UTC(Y, M, 1);
         for (const [c, v] of dr.cols) {
-          const d = serialToDate(v);
+          const d = serialToDate(v, d1904);
           if (d.getUTCFullYear() === Y && d.getUTCMonth() === M) cur[d.getUTCDate() - 1] = c;
           else if (d.getTime() < first) prev.push([v, c]);
         }
         prev.sort((a, b) => a[0] - b[0]);
-        const prevCols = prev.map((x) => x[1]); const prevDates = prev.map((x) => serialToDate(x[0]).getUTCDate());
+        const prevCols = prev.map((x) => x[1]); const prevDates = prev.map((x) => serialToDate(x[0], d1904).getUTCDate());
         if (cur.some((c) => !c)) {
           const faltam = [];
           cur.forEach((c, i) => { if (!c) faltam.push(i + 1); });
@@ -920,11 +937,12 @@
        · data escrita como texto, dd/mm/aaaa, com ano de 4 dígitos.
      Rejeita o resto, inclusive ano truncado ("29/10/202") e dia impossível
      ("31/02/2026") — esses viram relatório, não chute. */
-  function dataCurso(v) {
+  function dataCurso(v, d1904) {
     if (v instanceof Date && !isNaN(v)) return new Date(Date.UTC(v.getUTCFullYear(), v.getUTCMonth(), v.getUTCDate()));
     if (typeof v === 'number') {
       if (!(v > 40000 && v < 60000)) return null;
-      const d = serialToDate(Math.floor(v));
+      // O arquivo de cursos é outra pasta de trabalho: tem calendário próprio.
+      const d = serialToDate(Math.floor(v), d1904);
       return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
     }
     const s = String(v ?? '').trim();
@@ -986,7 +1004,7 @@
         const func = cFunc ? String(get(r, cFunc) ?? '').trim() : '';
         const dv = get(r, cData);
         const base = { mat, nome, func, curso, aba: sh.name, linha: r };
-        const data = dataCurso(dv);
+        const data = dataCurso(dv, wb.date1904);
         if (data) regs.push(Object.assign({ data }, base));
         else semData.push(Object.assign({ texto: dv === null || dv === undefined ? '' : String(dv).trim() }, base));
       }
@@ -1137,6 +1155,6 @@
 
   const api = { loadWorkbook, buildModel, generate, validate, groupTSV, buildXlsx, defaultSettings, kind, quebraSequencia, eff, colName, DOW, MESES,
     loadCursos, indexarCursos, aplicarCursos, limparCursos, matNum, dataCurso, patchWorkbook,
-    REGIMES, REGIME_PADRAO, regimeDe, requirement };
+    REGIMES, REGIME_PADRAO, regimeDe, requirement, serialToDate };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.FolgaEngine = api;
 })(typeof window !== 'undefined' ? window : globalThis);

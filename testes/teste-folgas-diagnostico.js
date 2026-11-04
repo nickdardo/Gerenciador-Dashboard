@@ -193,6 +193,26 @@ sec('0c. Linhas de vaga são lidas como pessoa, não como rótulo de grupo');
     'sem repetir a frase genérica dentro do item');
 }
 
+sec('1b. O calendário do arquivo: 1900 ou 1904');
+{
+  /* O Excel tem dois calendários, 1462 dias um do outro. O comum conta a
+     partir de 30/12/1899; o herdado do Excel de Mac, a partir de
+     01/01/1904, e o arquivo marca isso com date1904="1" em workbook.xml.
+
+     Ler tudo como 1900 fazia uma escala de dezembro/2026 virar
+     dezembro/2022 — e o dia 31 sumir junto, porque os dois dezembros
+     comecam em dias da semana diferentes. O arquivo estava certo; a
+     leitura é que ignorava o calendário dele. */
+  const N = 44895;                   // 01/12/2026 no calendário de 1904
+  const d1900 = E.serialToDate(N, false);
+  const d1904 = E.serialToDate(N, true);
+  eq(d1900.toISOString().slice(0, 10), '2022-11-30', 'no calendário comum, 44895 é 30/11/2022');
+  eq(d1904.toISOString().slice(0, 10), '2026-12-01', 'e no de 1904 o mesmo número é 01/12/2026');
+  eq(Math.round((d1904 - d1900) / 86400000), 1462, 'a diferença entre os dois é de 1462 dias');
+  eq(E.serialToDate(N).toISOString().slice(0, 10), '2022-11-30',
+    'sem dizer o calendário vale o comum — nada muda para quem já funcionava');
+}
+
 sec('2. Dias como números soltos, sem mês nem ano');
 {
   const { erro } = monta([abaBoa({ comoDiaSolto: true })]);

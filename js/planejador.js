@@ -182,7 +182,7 @@
             mat, curso, linha: r, aba: sh.name,
             nome: String(get(r, col.nome) ?? '').trim(),
             func: col.func ? String(get(r, col.func) ?? '').trim() : '',
-            data: col.data ? E.dataCurso(get(r, col.data)) : null,
+            data: col.data ? E.dataCurso(get(r, col.data), wb.date1904) : null,
             horaIni: col.hi ? String(get(r, col.hi) ?? '') : '',
             horaFim: col.hf ? String(get(r, col.hf) ?? '') : '',
           });
