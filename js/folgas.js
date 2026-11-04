@@ -209,7 +209,7 @@ function folgasOverlayHTML() {
         <button class="fg-regime-op" type="button" data-regime="6x1" aria-pressed="true"
           title="Folgas saem do teto de horas da CH — 5 ou 6 no mês">6x1</button>
         <button class="fg-regime-op" type="button" data-regime="5x2" aria-pressed="false"
-          title="8 folgas no mês, independente do teto de horas">5x2</button>
+          title="2 folgas em cada semana, de segunda a domingo">5x2</button>
       </div>
       <span class="fg-barmeta" id="fg-file-name"></span>
       <div class="fg-actions">
@@ -394,7 +394,7 @@ function folgasMontar() {
       <div class="stat ${err ? 'bad' : 'good'}"><span class="k">Regras quebradas</span><span class="v">${err}<small>${warn} aviso${warn === 1 ? '' : 's'}</small></span></div>
       <div class="stat"><span class="k">Maior variação/dia</span><span class="v">${spreadMax}<small>pessoa${spreadMax === 1 ? '' : 's'} no grupo</small></span></div>`;
     const reg = E.REGIMES[E.regimeDe(S.st)];
-    const quantas = reg.folgasMes != null ? `${reg.folgasMes} folgas no mês` : 'folgas pelo teto de horas da CH';
+    const quantas = reg.folgasSemana != null ? `${reg.folgasSemana} folgas por semana (segunda a domingo)` : "folgas pelo teto de horas da CH";
     $('#fg-rules-hint').textContent = `· ${quantas} · máx. ${S.st.maxRun} dias seguidos · máx. 2 folgas seguidas · exatamente 1 domingo · FA para dourados (não quebra a sequência)`;
   }
 

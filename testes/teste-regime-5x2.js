@@ -90,8 +90,42 @@ sec('1. O regime existe e o 6x1 continua sendo o padrão');
   eq(E.defaultSettings().regime, '6x1', 'e as configurações de fábrica trazem o padrão');
   eq(E.regimeDe({}), '6x1', 'sem regime definido, cai no padrão');
   eq(E.regimeDe({ regime: '7x0' }), '6x1', 'regime desconhecido também cai no padrão, em vez de quebrar');
-  eq(E.REGIMES['6x1'].folgasMes, null, 'no 6x1 a quantidade de folgas não é fixa — sai do teto de horas');
-  eq(E.REGIMES['5x2'].folgasMes, 8, 'no 5x2 são 8, fechadas');
+  eq(E.REGIMES['6x1'].folgasSemana, null, 'no 6x1 não há cota semanal — as folgas saem do teto de horas');
+  eq(E.REGIMES['5x2'].folgasSemana, 2, 'no 5x2 são 2 por semana');
+}
+
+sec('1b. As semanas de segunda a domingo que o mês atravessa');
+{
+  const sheet = { chTable: CH_TABLE };
+  const st = cfg('5x2');
+  const semPrev = { ch: 180, prev: ['', '', '', '', '', '', ''] };
+
+  // Novembro/2026 começa num DOMINGO: a semana do dia 1º começou em 26/10.
+  const nov = E.requirement(semPrev, sheet, 30, st, mkMonth(2026, 10).dow);
+  eq(nov.semanas.length, 6, 'novembro/2026 atravessa 6 semanas');
+  eq(nov.semanas[0].antes, 6, 'a primeira tem 6 dias no mês anterior');
+  eq(nov.semanas[0].ini, 0, 'e um dia só aqui: o próprio dia 1º');
+  ok(nov.semanas[5].aberta, 'a última fica aberta — fecha em dezembro');
+  eq(nov.alvos[0], 1, 'a semana da virada não pode pedir 2 folgas em 1 dia: pede 1');
+  eq(nov.alvos[1], 2, 'as semanas inteiras pedem 2');
+  eq(nov.alvos[5], 0, 'e a aberta de um dia não pede nenhuma');
+  eq(nov.required, 9, 'o total do mês é a soma das semanas, não um número escolhido');
+
+  // Fevereiro/2027 começa numa SEGUNDA: quatro semanas exatas, sem pontas.
+  const fev = E.requirement(semPrev, sheet, 28, st, mkMonth(2027, 1).dow);
+  eq(fev.semanas.length, 4, 'fevereiro/2027 cabe em 4 semanas exatas');
+  eq(fev.semanas[0].antes, 0, 'sem rabicho do mês anterior');
+  ok(!fev.semanas[3].aberta, 'e sem semana aberta no fim');
+  eq(fev.required, 8, 'oito folgas, 2 em cada semana');
+
+  // O que o mês anterior já entregou na semana da virada desconta aqui.
+  const comFolga = { ch: 180, prev: ['', '', '', '', 'F', '', ''] };
+  const nov2 = E.requirement(comFolga, sheet, 30, st, mkMonth(2026, 10).dow);
+  eq(nov2.alvos[0], 1, 'uma folga no rabicho de outubro deixa 1 para novembro');
+  const comDuas = { ch: 180, prev: ['', '', '', 'F', '', 'F', ''] };
+  const nov3 = E.requirement(comDuas, sheet, 30, st, mkMonth(2026, 10).dow);
+  eq(nov3.alvos[0], 0, 'duas no rabicho e a semana já está paga');
+  eq(nov3.required, 8, 'e o total do mês cai junto');
 }
 
 sec('2. Quantas folgas cada regime pede');
@@ -102,36 +136,63 @@ sec('2. Quantas folgas cada regime pede');
     eq(E.requirement({ ch }, sheet, D, cfg('6x1')).required, esperado,
       `6x1, CH ${ch}, mês de ${D} dias`);
   }
-  // 5x2: 8 para todo mundo, venha ou não a CH na tabela.
+  // 5x2: a cota é a mesma para todo mundo, venha ou não a CH na tabela.
+  const novDow = mkMonth(2026, 10).dow;
+  const vazio = ['', '', '', '', '', '', ''];
   for (const ch of [210, 180, 120, 90, null, 999]) {
-    eq(E.requirement({ ch }, sheet, 30, cfg('5x2')).required, 8,
-      `5x2, CH ${ch === null ? 'ausente' : ch}: 8 folgas`);
+    eq(E.requirement({ ch, prev: vazio }, sheet, 30, cfg('5x2'), novDow).required, 9,
+      `5x2, CH ${ch === null ? 'ausente' : ch}: a CH não muda a cota`);
   }
-  // Fevereiro não pode pedir mais folgas do que tem dia.
-  ok(E.requirement({ ch: 180 }, sheet, 28, cfg('5x2')).required <= 28, 'nunca pede mais folgas do que o mês tem dias');
   // O teto de horas segue reportado: a tela usa para mostrar o saldo.
-  eq(E.requirement({ ch: 180 }, sheet, 30, cfg('5x2')).maxH, 150, 'o teto de horas continua disponível para a tela');
-  eq(E.requirement({ ch: 180 }, sheet, 30, cfg('5x2')).jorn, 6, 'e a jornada também');
+  eq(E.requirement({ ch: 180, prev: vazio }, sheet, 30, cfg('5x2'), novDow).maxH, 150, 'o teto de horas continua disponível para a tela');
+  eq(E.requirement({ ch: 180, prev: vazio }, sheet, 30, cfg('5x2'), novDow).jorn, 6, 'e a jornada também');
 }
 
-sec('3. O 5x2 gerando um mês inteiro');
+sec('3. Duas folgas em CADA semana — não oito no mês');
 {
-  const m = mkModel(2026, 10, Array.from({ length: 12 }, () => mkEmp(30)));
+  /* É aqui que a regra velha passava e a nova não: um total mensal de 8
+     fecha igual com 2+2+2+2 e com 4+4+0+0. A conta é semana a semana. */
+  for (const [Y, M, rot] of [[2026, 10, 'novembro/2026, que começa num domingo'],
+                             [2027, 1, 'fevereiro/2027, que começa numa segunda'],
+                             [2026, 11, 'dezembro/2026, que começa numa terça']]) {
+    const D = diasDoMes(Y, M);
+    const m = mkModel(Y, M, Array.from({ length: 12 }, () => mkEmp(D)));
+    const st = cfg('5x2');
+    E.generate(m, st, { passes: 4 });
+    E.validate(m, st);
+    let fora = 0, piorSemana = null;
+    for (const e of todos(m)) {
+      const c = codigos(m, e);
+      e.req.semanas.forEach((sm, i) => {
+        if (sm.aberta) return;
+        let n = 0;
+        for (let d = sm.ini; d <= sm.fim; d++) { const k = E.kind(c[d], st); if (k === 'offC' || k === 'offX') n++; }
+        if (n !== e.req.alvos[i]) { fora++; if (!piorSemana) piorSemana = `semana ${i + 1} com ${n} de ${e.req.alvos[i]}`; }
+      });
+    }
+    eq(fora, 0, `${rot}: toda semana fechada bate o alvo${piorSemana ? ' — ' + piorSemana : ''}`);
+    eq(m.errorCount, 0, `${rot}: e nenhuma regra quebrada`);
+  }
+}
+
+sec('3b. Quatro numa semana e zero na outra não passa mais');
+{
+  /* O teste que separa a regra semanal da mensal: uma planilha que traz 4
+     folgas travadas numa semana e nada na seguinte soma o total certo e
+     ainda assim está errada. */
+  const D = diasDoMes(2027, 1);                 // fevereiro/2027, começa numa segunda
+  const fixed = new Array(D).fill('');
+  for (const d of [0, 1, 2, 3]) fixed[d] = 'F'; // 4 folgas na primeira semana
+  const e = mkEmp(D, { fixed, name: 'SEMANA DESEQUILIBRADA' });
+  const m = mkModel(2027, 1, [e]);
   const st = cfg('5x2');
   E.generate(m, st, { passes: 4 });
   E.validate(m, st);
-  const D = m.month.days;
-  let min = 99, max = 0;
-  for (const e of todos(m)) {
-    const n = codigos(m, e).filter((c) => E.kind(c, st) === 'offC').length;
-    if (n < min) min = n; if (n > max) max = n;
-  }
-  eq(min, 8, 'todo mundo recebe 8 folgas');
-  eq(max, 8, 'e ninguém recebe mais que 8');
-  eq(m.errorCount, 0, 'sem nenhuma regra quebrada');
-  // Dias trabalhados: 30 − 8 = 22, que é a conta do estudo.
-  const trab = codigos(m, todos(m)[0]).filter((c) => E.kind(c, st) === 'work' || !c).length;
-  eq(trab, D - 8, 'sobram ' + (D - 8) + ' dias trabalhados');
+  const erro = (e.issues || []).find((x) => /Semana 1/.test(x.t));
+  ok(!!erro, 'o validador acusa a semana cheia: "' + (erro ? erro.t : 'nada') + '"');
+  ok(erro && erro.lv === 'erro', 'como erro');
+  ok(erro && /4 folga/.test(erro.t), 'dizendo quantas achou');
+  ok(erro && /pede 2/.test(erro.t), 'e quantas a regra pede');
 }
 
 sec('4. Nunca 3 folgas seguidas — nos dois regimes');

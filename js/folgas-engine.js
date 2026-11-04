@@ -415,11 +415,79 @@
      trabalhados para 22 e exige jornada maior para manter a mesma CH. Essa
      conta é de contrato, não de escala, e por isso não entra aqui. */
   const REGIMES = {
-    '6x1': { rotulo: '6x1', desc: 'Folgas saem do teto de horas da CH', folgasMes: null },
-    '5x2': { rotulo: '5x2', desc: '8 folgas no mês, independente do teto de horas', folgasMes: 8 },
+    '6x1': { rotulo: '6x1', desc: 'Folgas saem do teto de horas da CH', folgasSemana: null },
+    '5x2': { rotulo: '5x2', desc: '2 folgas em cada semana, de segunda a domingo', folgasSemana: 2 },
   };
   const REGIME_PADRAO = '6x1';
   const regimeDe = (st) => (st && REGIMES[st.regime] ? st.regime : REGIME_PADRAO);
+
+  /* As semanas de segunda a domingo que o mês atravessa.
+
+     A regra do 5x2 é por semana, não por mês: um total mensal de 8 fecha
+     igual com 4 semanas de 2 ou com 2 semanas de 4 e 2 semanas de zero, e
+     só a primeira serve. Por isso a conta passa a ser semana a semana.
+
+     Duas semanas são especiais, e são as duas pontas:
+
+     - A PRIMEIRA quase nunca começa no dia 1º. Em novembro/2026, que
+       começa num domingo, a semana do dia 1º começou em 26 de outubro. Os
+       dias que faltam vêm do rabicho do mês anterior (`prev`), que o motor
+       já carrega — então a semana é fechada contando as folgas de lá.
+     - A ÚLTIMA quase nunca termina no último dia. Essa fica aberta: quem
+       completa é o mês seguinte, pelo mesmo mecanismo, quando aquele mês
+       enxergar este como `prev`. Forçar 2 folgas num toco de três dias
+       seria apertar a escala por um acidente de calendário.
+
+     `antes` = quantos dias dessa semana ficaram no mês anterior. Só a
+     primeira tem valor > 0. `aberta` marca a última quando ela não fecha
+     dentro do mês. */
+  function semanasDoMes(D, dow) {
+    const semanas = [];
+    let ini = 0;
+    const antes = (dow[0] + 6) % 7;          // domingo=0 -> 6 dias atrás na segunda
+    for (let d = 0; d < D; d++) {
+      if (dow[d] === 0) {                     // domingo fecha a semana
+        semanas.push({ ini, fim: d, antes: semanas.length === 0 ? antes : 0, aberta: false });
+        ini = d + 1;
+      }
+    }
+    if (ini < D) semanas.push({ ini, fim: D - 1, antes: semanas.length === 0 ? antes : 0, aberta: true });
+    return semanas;
+  }
+
+  /* Quantas folgas cada semana precisa receber DENTRO deste mês.
+
+     Semana fechada pede 2, menos o que o mês anterior já entregou nela.
+     Semana aberta no fim do mês recebe a parte proporcional — o resto é
+     problema (e direito) do mês seguinte. */
+  function alvosDaSemana(semanas, porSemana, folgasNoPrev) {
+    return semanas.map((s) => {
+      const dias = s.fim - s.ini + 1;
+      let alvo;
+      if (s.aberta) alvo = Math.round(porSemana * dias / 7);
+      else if (s.antes) alvo = porSemana - (folgasNoPrev || 0);
+      else alvo = porSemana;
+      /* Nunca mais folgas do que a semana tem dia DENTRO deste mês.
+         Novembro/2026 começa num domingo: a semana do dia 1º tem um dia só
+         aqui e seis no mês anterior. Se lá não houve folga nenhuma, a
+         semana ficaria devendo duas e cabendo uma — pedir as duas tornaria
+         o mês insolúvel por um acidente de calendário. O que não coube é
+         dívida do mês anterior, e o validador diz isso. */
+      return Math.max(0, Math.min(alvo, porSemana, dias));
+    });
+  }
+
+  /* Folgas que o mês anterior já lançou na semana da virada. `prev` são os
+     últimos 7 dias do mês anterior, com prev[6] colado no dia 1º. */
+  function folgasNoRabicho(prev, antes, st) {
+    if (!antes || !prev || !prev.length) return 0;
+    let n = 0;
+    for (let i = Math.max(0, prev.length - antes); i < prev.length; i++) {
+      const k = kind(prev[i], st);
+      if (k === 'offC' || k === 'offX') n++;
+    }
+    return n;
+  }
 
   function defaultSettings() { return { maxRun: 6, afCounts: false, offCodes: [], regime: REGIME_PADRAO }; }
   // tipo de um código: 'free' | 'offC' (folga que conta) | 'offX' (folga que não conta) | 'work'
@@ -432,16 +500,23 @@
     return st.offCodes.includes(code) ? 'offX' : 'work';
   }
 
-  function requirement(emp, sheet, D, st) {
+  function requirement(emp, sheet, D, st, dow) {
     const row = emp.ch != null ? sheet.chTable.find((t) => t.ch === emp.ch) : null;
     const jorn = row ? row.jorn : (emp.ch ? Math.round(emp.ch / D) : 6);
-    const folgasFixas = REGIMES[regimeDe(st)].folgasMes;
+    const porSemana = REGIMES[regimeDe(st)].folgasSemana;
 
-    /* 5x2: a quantidade de folgas é a mesma para todo mundo, venha ou não a
-       CH na tabela. O teto de horas segue reportado (a tela usa para mostrar
-       o saldo), mas não decide mais quantas folgas são. */
-    if (folgasFixas != null) {
-      return { required: Math.min(folgasFixas, D), maxH: row ? row.maxH : null, jorn, known: !!row };
+    /* 5x2: o total do mês deixa de ser um número escolhido e passa a ser a
+       soma do que cada semana pede — o que varia com o calendário e com o
+       que o mês anterior deixou aberto na semana da virada. A mesma conta
+       vale para todo mundo, venha ou não a CH na tabela; o teto de horas
+       segue reportado porque a tela usa para mostrar o saldo. */
+    if (porSemana != null && dow) {
+      const semanas = semanasDoMes(D, dow);
+      const noPrev = folgasNoRabicho(emp.prev, semanas[0] ? semanas[0].antes : 0, st);
+      const alvos = alvosDaSemana(semanas, porSemana, noPrev);
+      const required = alvos.reduce((a, b) => a + b, 0);
+      return { required: Math.min(required, D), maxH: row ? row.maxH : null, jorn, known: !!row,
+        semanas, alvos, porSemana };
     }
     if (row) {
       const maxWork = Math.floor(row.maxH / row.jorn + 1e-9);
@@ -505,6 +580,24 @@
     const isOff = (d) => d >= 0 && d < D && (fx[d].k === 'offC' || fx[d].k === 'offX');
     const adjFixed = (d) => (isOff(d - 1) || isOff(d + 1) || (d === 0 && prevOff) ? ADJ : 0);
 
+    /* Cota semanal. No 5x2 cada semana de segunda a domingo tem a sua, e o
+       domingo é onde ela é cobrada. `semIdx[d]` diz de que semana é o dia e
+       `semAlvo[s]` quanto ela pede; `semFecha[d]` marca o dia em que a
+       conta é conferida — o domingo, ou o último dia do mês na semana que
+       fica aberta. Fora do 5x2 nada disso existe e o laço nem olha. */
+    const temCota = !!(emp.req.semanas && emp.req.alvos);
+    const semIdx = new Int8Array(D), semFecha = new Int8Array(D);
+    const semAlvo = temCota ? emp.req.alvos : [];
+    if (temCota) {
+      emp.req.semanas.forEach((s, i) => {
+        for (let d = s.ini; d <= s.fim; d++) semIdx[d] = i;
+        // A semana aberta não é cobrada: quem fecha é o mês seguinte.
+        semFecha[s.fim] = s.aberta ? 0 : 1;
+      });
+    }
+    const COTA = temCota ? 3 : 1;             // 0, 1, 2 folgas na semana
+    const teto = (w) => Math.min(w, COTA - 1);
+
     /* Folgas seguidas que o mês anterior já deixou abertas. Sem isso, um mês
        que termina em duas folgas ganharia uma terceira no dia 1º. */
     let fr0 = 0;
@@ -529,33 +622,46 @@
          estados o solver enxerga o bloco inteiro e a terceira custa BIG.
          Trava em 2 porque é só isso que a regra precisa saber: a partir
          daí qualquer folga nova já é a proibida. */
-      const S = R * (Kc + 1) * 2 * 3;
-      const idx = (run, k, s, fr) => ((run * (Kc + 1) + k) * 2 + s) * 3 + fr;
+      const S = R * (Kc + 1) * 2 * 3 * COTA;
+      const idx = (run, k, s, fr, w) => ((((run * (Kc + 1) + k) * 2 + s) * 3 + fr) * COTA) + (w || 0);
       const domExtra = (s, ehDom) => (ehDom && s ? SUN2PEN : 0);
       // Dia de folga que já vem travado na planilha não é recusado — o
       // solver não pode mudá-lo. Ele só conta, para não encostar outra.
       const maisUma = (fr) => Math.min(fr + 1, 2);
       const tresSeguidas = (fr) => (fr >= 2 ? BIG : 0);
       let cur = new Float64Array(S).fill(Infinity);
-      cur[idx(r0, 0, 0, Math.min(fr0, 2))] = 0;
+      cur[idx(r0, 0, 0, Math.min(fr0, 2), 0)] = 0;
       const back = [];
       for (let d = 0; d < D; d++) {
         const nxt = new Float64Array(S).fill(Infinity);
         const bp = new Int32Array(S).fill(-1); const bc = new Int8Array(S);
         const f = fx[d];
-        for (let run = 0; run < R; run++) for (let k = 0; k <= Kc; k++) for (let s = 0; s < 2; s++) for (let fr = 0; fr < 3; fr++) {
-          const i = idx(run, k, s, fr); const c0 = cur[i]; if (c0 === Infinity) continue;
+        const fecha = temCota && semFecha[d];
+        const alvoSem = temCota ? semAlvo[semIdx[d]] : 0;
+        for (let run = 0; run < R; run++) for (let k = 0; k <= Kc; k++) for (let s = 0; s < 2; s++) for (let fr = 0; fr < 3; fr++) for (let w = 0; w < COTA; w++) {
+          const i = idx(run, k, s, fr, w); const c0 = cur[i]; if (c0 === Infinity) continue;
+          /* No dia que fecha a semana, a cota é conferida: o estado segue
+             para o dia seguinte zerado, e quem não bateu o alvo paga BIG.
+             Cobrar aqui, e não no fim do mês, é o que torna a regra
+             semanal — no total mensal, 4+0 fecha igual a 2+2. */
           const relax = (j, c, ch) => { if (c < nxt[j]) { nxt[j] = c; bp[j] = i; bc[j] = ch; } };
+          // Cota da semana: `folgou` diz se o dia gastou uma. No dia que
+          // fecha, o estado sai zerado e a diferença para o alvo custa BIG.
+          const proxW = (folgou) => (fecha ? 0 : (folgou ? Math.min(w + 1, COTA - 1) : w));
+          const fechaCota = (folgou) => (fecha && ((folgou ? w + 1 : w) !== alvoSem) ? BIG : 0);
+          // Folga gerada não passa do alvo da semana. Dia travado na
+          // planilha passa — o solver não pode mudá-lo, e o validador acusa.
+          const cotaCheia = temCota && w >= alvoSem;
           if (f.k !== 'free') {
             if (f.k === 'work') {
               const over = run + 1 > maxRun;
-              relax(idx(Math.min(run + 1, maxRun), k, s, 0), c0 + (over ? BIG : 0), 0);
+              relax(idx(Math.min(run + 1, maxRun), k, s, 0, proxW(false)), c0 + (over ? BIG : 0) + fechaCota(false), 0);
             } else if (!f.quebra) {
               // FA já lançado na planilha: não trabalha, mas a sequência de
               // trabalho segue. Para folgas seguidas ele conta como folga.
               const over = run + 1 > maxRun;
-              relax(idx(Math.min(run + 1, maxRun), k, s, maisUma(fr)), c0 + (over ? BIG : 0), 0);
-            } else relax(idx(0, k, s || (f.sun ? 1 : 0), maisUma(fr)), c0 + domExtra(s, f.sun), 0);
+              relax(idx(Math.min(run + 1, maxRun), k, s, maisUma(fr), proxW(true)), c0 + (over ? BIG : 0) + fechaCota(true), 0);
+            } else relax(idx(0, k, s || (f.sun ? 1 : 0), maisUma(fr), proxW(true)), c0 + domExtra(s, f.sun) + fechaCota(true), 0);
             continue;
           }
           const fd = forced && forced[d];
@@ -564,31 +670,31 @@
             if (k + 1 <= Kc) {
               if (fd === 'FA') {
                 const over = run + 1 > maxRun;
-                relax(idx(Math.min(run + 1, maxRun), k + 1, s, maisUma(fr)),
-                  c0 + costDay[d] + adjFixed(d) * 0.5 + (over ? BIG : 0) + tresSeguidas(fr), 2);
+                relax(idx(Math.min(run + 1, maxRun), k + 1, s, maisUma(fr), proxW(true)),
+                  c0 + costDay[d] + adjFixed(d) * 0.5 + (over ? BIG : 0) + tresSeguidas(fr) + fechaCota(true), 2);
               } else {
-                relax(idx(0, k + 1, s || (dow[d] === 0 ? 1 : 0), maisUma(fr)),
-                  c0 + costDay[d] + adjFixed(d) * 0.5 + domExtra(s, dow[d] === 0) + tresSeguidas(fr), 1);
+                relax(idx(0, k + 1, s || (dow[d] === 0 ? 1 : 0), maisUma(fr), proxW(true)),
+                  c0 + costDay[d] + adjFixed(d) * 0.5 + domExtra(s, dow[d] === 0) + tresSeguidas(fr) + fechaCota(true), 1);
               }
             }
             continue;
           }
           // trabalhar
           const over = run + 1 > maxRun;
-          relax(idx(Math.min(run + 1, maxRun), k, s, 0), c0 + (over ? BIG : 0), 0);
+          relax(idx(Math.min(run + 1, maxRun), k, s, 0, proxW(false)), c0 + (over ? BIG : 0) + fechaCota(false), 0);
           // folgar
-          if (k + 1 <= Kc) {
+          if (k + 1 <= Kc && !cotaCheia) {
             const pen = costDay[d] + (fr ? ADJ : 0) + adjFixed(d) + (run === 1 && !(pr.unknown && d - 2 < 0) ? GAP1 : 0);
-            relax(idx(0, k + 1, s || (dow[d] === 0 ? 1 : 0), maisUma(fr)),
-              c0 + pen + domExtra(s, dow[d] === 0) + tresSeguidas(fr), 1);
+            relax(idx(0, k + 1, s || (dow[d] === 0 ? 1 : 0), maisUma(fr), proxW(true)),
+              c0 + pen + domExtra(s, dow[d] === 0) + tresSeguidas(fr) + fechaCota(true), 1);
           }
         }
         back.push({ bp, bc });
         cur = nxt;
       }
       let best = Infinity, bi = -1;
-      for (let run = 0; run < R; run++) for (let k = 0; k <= Kc; k++) for (let s = 0; s < 2; s++) for (let fr = 0; fr < 3; fr++) {
-        const i = idx(run, k, s, fr); if (cur[i] === Infinity) continue;
+      for (let run = 0; run < R; run++) for (let k = 0; k <= Kc; k++) for (let s = 0; s < 2; s++) for (let fr = 0; fr < 3; fr++) for (let w = 0; w < COTA; w++) {
+        const i = idx(run, k, s, fr, w); if (cur[i] === Infinity) continue;
         // Exatamente 1 domingo: a falta é punida aqui, o excedente já foi
         // cobrado dia a dia por domExtra().
         let c = cur[i] + (k < need ? (need - k) * SHORT : (k - need) * EXTRA) + (!s && sunAvail ? SUNPEN : 0);
@@ -631,7 +737,7 @@
     for (const sheet of model.sheets) for (const block of sheet.blocks) {
       const all = block.groups.flatMap((g) => g.emps);
       for (const g of block.groups) for (const e of g.emps) {
-        e.req = requirement(e, sheet, D, st);
+        e.req = requirement(e, sheet, D, st, dow);
         if (!opts.keep) e.gen = new Array(D).fill('');
         e._g = g;
       }
@@ -674,7 +780,7 @@
     let issues = 0;
     for (const sheet of model.sheets) for (const block of sheet.blocks) for (const g of block.groups) {
       for (const e of g.emps) {
-        if (!e.req) e.req = requirement(e, sheet, D, st);
+        if (!e.req) e.req = requirement(e, sheet, D, st, dow);
         const codes = Array.from({ length: D }, (_, d) => eff(e, d));
         const list = [];
         const allL = codes.every((c) => c === 'L');
@@ -699,6 +805,31 @@
           list.push({ lv: 'erro', t: `${maxSeen} dias seguidos sem folga (${a} até o dia ${worst[1] + 1})${porFA}` });
         }
         if (!allL && counted < e.req.required) list.push({ lv: 'erro', t: `Faltam ${e.req.required - counted} folga(s): tem ${counted} de ${e.req.required}` });
+
+        /* Cota semanal do 5x2: 2 folgas em cada semana de segunda a
+           domingo. O total do mês não diz nada sobre isso — 4 numa semana e
+           0 na seguinte somam os mesmos 8 de 2+2+2+2. */
+        if (!allL && e.req.semanas && e.req.alvos) {
+          e.req.semanas.forEach((sm, i) => {
+            if (sm.aberta) return;            // fecha no mês seguinte
+            let n = 0;
+            for (let d = sm.ini; d <= sm.fim; d++) {
+              const k = kind(codes[d], st);
+              if (k === 'offC' || k === 'offX') n++;
+            }
+            const alvo = e.req.alvos[i];
+            if (n === alvo) return;
+            const faixa = `dias ${sm.ini + 1} a ${sm.fim + 1}`;
+            if (sm.antes && alvo < e.req.porSemana) {
+              // A semana da virada já entrou devendo: o mês anterior é que
+              // não entregou a parte dele, e aqui não cabe mais.
+              list.push({ lv: 'aviso', t: `Semana da virada (${faixa}) com ${n} folga(s) de ${alvo} — `
+                + `${sm.antes} dia(s) dessa semana ficaram no mês anterior; confira lá` });
+            } else {
+              list.push({ lv: 'erro', t: `Semana ${i + 1} (${faixa}) com ${n} folga(s) — o 5x2 pede ${alvo}` });
+            }
+          });
+        }
 
         /* Folgas seguidas. Duas são aceitas (é o fim de semana da folga
            agrupada); três não, em nenhum regime. Férias não entram: um mês
