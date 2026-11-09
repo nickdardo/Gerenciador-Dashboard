@@ -187,6 +187,38 @@ sec('6. A legenda lê os mesmos tokens que a grade');
   ok(/class="escala-cod st-\$\{cod\}"/.test(js), 'a célula sai com classe, e a cor vem do tema');
 }
 
+sec('7. As ações abertas da escala');
+{
+  /* As 12 ações saíram do dropdown e viraram seção visível. Duas cores
+     novas entraram com elas: o vermelho de "Limpar folgas" e "Limpar
+     colaboradores", que avisa antes do clique de algo irreversível, e o
+     rótulo de cada bloco.
+
+     O rótulo nasceu em --text-muted, que dá 2,11:1 no tema escuro: some
+     justamente onde organiza a seção. 9,5px em caixa alta é texto
+     pequeno — cobra 4,5:1, não os 3:1 do texto grande. */
+  const PAINEL = { claro: hex('#ffffff'), escuro: hex('#1a2235') };
+  const VERM = { claro: hex('#c02a2a'), escuro: hex('#fc8181') };
+
+  ok(/\.escala-acao-item\.perigo\s*\{[^}]*color:\s*#c02a2a/.test(css),
+    'o vermelho do tema claro é um tom próprio, não o do escuro');
+  ok(/\[data-theme="dark"\]\s*\.escala-acao-item\.perigo\s*\{[^}]*color:\s*#fc8181/.test(css),
+    'e o escuro redefine o seu');
+  ok(/@media \(prefers-color-scheme: dark\)[\s\S]{0,400}\.escala-acao-item\.perigo/.test(css),
+    'com a preferência do sistema coberta também');
+
+  for (const [tema, cor, fundo] of [['claro', VERM.claro, PAINEL.claro],
+                                    ['escuro', VERM.escuro, PAINEL.escuro]]) {
+    const r = contraste(cor, fundo);
+    ok(r >= ALVO, `${tema}: a ação destrutiva dá ${r.toFixed(2)} sobre o painel (mínimo ${ALVO})`);
+  }
+
+  ok(!/\.escala-acoes-tit\s*\{[^}]*color:\s*var\(--text-muted\)/.test(css),
+    'o rótulo de bloco não usa o tom apagado, que não passa em texto pequeno');
+  ok(/\.escala-acoes-tit\s*\{[^}]*color:\s*var\(--text-secondary\)/.test(css),
+    'ele usa o tom secundário, que passa nos dois temas');
+}
+
 function resumo() {
   console.log('\n' + '─'.repeat(58));
   if (!fail) console.log('\x1b[32m✓ ' + pass + ' verificações passaram\x1b[0m');

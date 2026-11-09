@@ -374,6 +374,97 @@ function paginaDeTeste() {
         'nenhum título ficou escrito na mão');
     }
 
+    sec('8b. A grade enxuta obedece a ordenação e os filtros');
+    {
+      /* Ela lia window._escalaColabs CRU: a ordem do banco, sem ordenação
+         e sem filtro. Era isso que fazia os horários parecerem
+         embaralhados dentro de cada bloco — não havia critério nenhum, e
+         o "Organizar por" nunca chegava até aqui. */
+      const montar = (estado) => page.evaluate((st) => {
+        window._escalaFeriados = new Map(); window._escalaDias = new Map();
+        window._escalaColabs = [
+          { matricula: '300', nome: 'CARLA', funcao_manual: 'ASG LIMPEZA', ch_manual: 180, entrada_manual: '22:00', saida_manual: '' },
+          { matricula: '100', nome: 'ANA',   funcao_manual: 'ASG LIMPEZA', ch_manual: 90,  entrada_manual: '06:00', saida_manual: '' },
+          { matricula: '200', nome: 'BRUNO', funcao_manual: 'ASG LIMPEZA', ch_manual: 180, entrada_manual: '14:00', saida_manual: '' },
+          { matricula: '400', nome: 'DIEGO', funcao_manual: 'SUPERVISOR',  ch_manual: 210, entrada_manual: '08:00', saida_manual: '' },
+        ];
+        window.eoColabs = new Map(window._escalaColabs.map((c) =>
+          [c.matricula, { funcao: c.funcao_manual, ch: c.ch_manual }]));
+        window.escalaFuncaoGrupoDoColab = (c) => ({ label: c.funcao_manual });
+        window.escalaEntradaEfetivaDoColab = (c) => c.entrada_manual;
+        window.escalaAplicarFiltroSituacao = (l) => l;
+        window._escalaOrdemColuna = st.coluna || null;
+        window._escalaOrdemDirecao = st.direcao || 'asc';
+        window._escalaGruposVisiveis = st.grupos ? new Set(st.grupos) : null;
+        return escalaGradeEnxutaHTML(2026, 11, 30);
+      }, estado);
+
+      // A ordem em que os nomes aparecem no HTML é a ordem na tela.
+      const nomes = (html) => ['ANA', 'BRUNO', 'CARLA', 'DIEGO']
+        .map((n) => [n, html.indexOf(n)])
+        .filter(([, i]) => i >= 0)
+        .sort((a, b) => a[1] - b[1])
+        .map(([n]) => n);
+
+      /* A ordenação vale DENTRO de cada faixa de grupo: DIEGO é
+         Supervisor e sai no bloco dele, não entre as ASG, por mais cedo
+         que entre. Comparar a lista inteira cobraria o contrário disso. */
+      const soLimpeza = (l) => l.filter((n) => n !== 'DIEGO');
+      const porHorario = soLimpeza(nomes(await montar({ coluna: 'entrada' })));
+      ok(porHorario.join() === 'ANA,BRUNO,CARLA',
+        'por horário, quem entra 06:00 vem antes de quem entra 22:00 · ' + porHorario.join(' '));
+
+      const desc = nomes(await montar({ coluna: 'entrada', direcao: 'desc' }));
+      const limpezaDesc = desc.filter((n) => n !== 'DIEGO');
+      ok(limpezaDesc.join() === 'CARLA,BRUNO,ANA',
+        'do maior para o menor inverte de verdade · ' + desc.join(' '));
+
+      const porNome = nomes(await montar({ coluna: 'nome' })).filter((n) => n !== 'DIEGO');
+      ok(porNome.join() === 'ANA,BRUNO,CARLA', 'por nome sai em ordem alfabética · ' + porNome.join(' '));
+
+      /* CH comparada como texto puro colocaria 180 antes de 90. O zero à
+         esquerda existe só por causa disso. */
+      const porCh = nomes(await montar({ coluna: 'ch' })).filter((n) => n !== 'DIEGO');
+      ok(porCh[0] === 'ANA', 'CH 90 vem antes de CH 180, não depois · ' + porCh.join(' '));
+
+      // Filtro de grupo: existia no controle e não valia nesta grade.
+      const soSup = await montar({ grupos: ['SUPERVISOR'] });
+      ok(/DIEGO/.test(soSup) && !/CARLA/.test(soSup),
+        'escolher um grupo esconde os outros — o controle passou a valer aqui');
+      const vazio = await montar({ grupos: ['NÃO EXISTE'] });
+      ok(/Nenhum colaborador no filtro atual/.test(vazio),
+        'e filtro que não casa com ninguém explica o vazio em vez de mostrar tabela oca');
+
+      // A ordem dos BLOCOS não pode dançar junto com a ordem de dentro.
+      const blocoA = await montar({ coluna: 'nome' });
+      const blocoB = await montar({ coluna: 'entrada', direcao: 'desc' });
+      const ordemBloco = (h) => [h.indexOf('ASG LIMPEZA'), h.indexOf('SUPERVISOR')];
+      const [a1, s1] = ordemBloco(blocoA), [a2, s2] = ordemBloco(blocoB);
+      ok((a1 < s1) === (a2 < s2),
+        'as faixas de grupo ficam no mesmo lugar, mude o critério que mudar');
+    }
+
+    sec('8c. As ações saíram do dropdown recortado');
+    {
+      /* O "Mais ações" era absoluto dentro de um painel com overflow, que
+         o recortava e ainda somava altura rolável. Sumiu a camada, sumiu
+         o recorte. */
+      const fonte = fs.readFileSync(path.join(BASE, 'js', 'escala.js'), 'utf8');
+      ok(!/id="escala-menu-acoes"/.test(fonte), 'o dropdown absoluto não existe mais no HTML');
+      ok(!/escalaToggleMenuAcoes\(event\)/.test(fonte), 'nem o botão que o abria');
+      ok(/escalaBlocoAcoes\(/.test(fonte) && /escala-ferr-acoes/.test(fonte),
+        'as ações viraram seção aberta, em blocos');
+      ok(!/position:absolute;top:calc\(100% \+ 4px\)/.test(fonte),
+        'nenhuma camada absoluta sobrou dentro do painel que rola');
+      ok(/class="escala-busca-resultados"/.test(fonte),
+        'a lista da busca de matrícula também saiu do absoluto');
+      for (const alvo of ['Baixar Excel da escala', 'Imprimir / PDF',
+                          'Recalcular saídas pela CH', 'Importar cursos (.xlsx)',
+                          'Limpar colaboradores']) {
+        ok(fonte.includes(alvo), `"${alvo}" continua acessível depois da mudança`);
+      }
+    }
+
     sec('9. Nenhum erro de script');
     ok(erros.length === 0, 'a página carregou sem exceção' + (erros.length ? ': ' + erros.join(' | ') : ''));
   } finally {

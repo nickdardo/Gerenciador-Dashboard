@@ -4069,3 +4069,81 @@ body.escala-modo-grade .escala-fill { margin-top: 0; }
 /* O Aplicar acende quando há escolha esperando. Botão que parece sempre
    igual deixa a pessoa em dúvida se o clique fez algo. */
 .escala-ferr-aplicar-ativo { box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue, #00a0d2) 28%, transparent); }
+
+/* ── Ações da escala: seção aberta, não dropdown ──────────────────────
+   Eram 12 itens num <div> absoluto dentro do menu flutuante, que rola.
+   Container com overflow recorta filho absoluto — o menu abria cortado e
+   somava altura rolável ao painel. Em quatro colunas, à vista, não há
+   camada nenhuma para ser recortada. */
+.escala-ferr-acoes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(226px, 1fr));
+  gap: 10px 18px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.escala-acoes-bloco { min-width: 0; }
+.escala-acoes-tit {
+  /* 9.5px em caixa alta é texto pequeno: precisa de 4.5:1, e não dos 3:1
+     que valem para texto grande. Com --text-muted dava 2.11:1 no tema
+     escuro — o rótulo some justamente onde ele organiza a seção. */
+  font-size: 10px;
+  color: var(--text-secondary);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  padding: 0 0 5px 2px;
+}
+.escala-acao-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  line-height: 1.3;
+}
+.escala-acao-item:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-primary); }
+.escala-acao-item:disabled { opacity: .4; cursor: not-allowed; }
+/* Apagar folgas ou colaboradores é irreversível: a cor avisa antes do
+   clique, e o vermelho tem de passar no contraste nos dois temas. */
+.escala-acao-item.perigo { color: #c02a2a; }
+.escala-acao-item.perigo:hover:not(:disabled) { background: rgba(192, 42, 42, .12); color: #a01f1f; }
+[data-theme="dark"] .escala-acao-item.perigo { color: #fc8181; }
+[data-theme="dark"] .escala-acao-item.perigo:hover:not(:disabled) { background: rgba(252, 129, 129, .14); color: #ffa0a0; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .escala-acao-item.perigo { color: #fc8181; }
+  :root:not([data-theme="light"]) .escala-acao-item.perigo:hover:not(:disabled) { background: rgba(252, 129, 129, .14); color: #ffa0a0; }
+}
+
+/* As caixas de grupo também eram absolutas, com o mesmo recorte. No
+   fluxo, empurram o conteúdo — o que num painel desta largura é aceitável
+   e mostra tudo sem camada. */
+.escala-grupos-painel {
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  max-height: 190px;
+  overflow-y: auto;
+}
+
+/* A lista de resultados da busca de matrícula era a terceira camada
+   absoluta dentro do painel que rola — mesmo recorte das outras duas.
+   No fluxo, ela empurra o conteúdo enquanto se digita e desaparece ao
+   escolher, que é o tempo de vida dela de qualquer modo. */
+.escala-busca-resultados {
+  margin-top: 4px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}

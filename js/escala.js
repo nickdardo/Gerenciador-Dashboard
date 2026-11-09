@@ -899,7 +899,7 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
         <div style="position:relative;flex:1 1 240px;min-width:200px;max-width:320px">
           <input id="escala-busca" class="adh-search-input" ${dis} style="width:100%;box-sizing:border-box;padding:9px 12px;background:var(--bg-hover);border:1px solid var(--border-strong);border-radius:8px;color:var(--text-primary)"
             oninput="escalaBuscarColab(this.value)" placeholder="Buscar por matrícula ou nome pra adicionar...">
-          <div id="escala-busca-resultados" style="position:absolute;top:calc(100% + 4px);left:0;right:0;background:var(--bg-surface);border:1px solid var(--border-strong);border-radius:8px;z-index:20;display:none;max-height:220px;overflow-y:auto;box-shadow:var(--adh-shadow-card)"></div>
+          <div id="escala-busca-resultados" class="escala-busca-resultados" style="display:none"></div>
         </div>
 
         <button class="adh-refresh-btn" ${dis} style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600" onclick="escalaGerarFolgasAuto()">${escalaIcone('zap')}Gerar folgas automáticas</button>
@@ -923,38 +923,16 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
         <button class="adh-refresh-btn escala-btn-recolher" onclick="escalaToggleFerramentas()"
           title="Recolhe este painel e a legenda — sobra espaço pra grade em monitor pequeno">${escalaIconeSolto('chevronDown', 12)}Recolher</button>
 
-        <!-- Ações que se usa uma vez por mês vão pro menu: antes eram 12
-             botões numa linha só, que quebrava em duas ou três em qualquer
-             tela e empurrava a grade pra baixo. -->
-        <div style="position:relative">
-          <button class="adh-refresh-btn" onclick="escalaToggleMenuAcoes(event)" title="Exportar, cursos, feriados e limpeza">${escalaIcone('moreHorizontal')}Mais ações${escalaIconeSolto('chevronDown', 11)}</button>
-          <div id="escala-menu-acoes" style="display:none;position:absolute;top:calc(100% + 6px);right:0;background:var(--bg-surface);border:1px solid var(--border-strong);border-radius:9px;padding:5px;min-width:238px;z-index:60;box-shadow:var(--adh-shadow-card)">
-            ${escalaMenuSecao('Exportar')}
-            ${escalaMenuItem('sheet', 'Baixar Excel da escala', 'escalaExportarExcel()')}
-            ${escalaMenuItem('upload', 'Importar escala do Excel', `document.getElementById('escala-import-input').click()`, travada)}
-            ${escalaMenuItem('printer', 'Imprimir / PDF', 'escalaImprimir()')}
-            ${escalaMenuItem('fileExport', 'Exportar para o sistema do DP', 'escalaExportarDP()')}
-            ${escalaMenuDivisor()}
-            ${escalaMenuSecao('Horários e férias')}
-            ${escalaMenuItem('clock', 'Recalcular saídas pela CH', 'escalaRecalcularSaidas()', travada)}
-            ${escalaMenuItem('history', 'Recarregar férias do sistema', 'escalaRecarregarFerias()')}
-            ${escalaMenuItem('alert', 'Diagnosticar férias do mês', 'escalaDiagnosticoFerias()')}
-            ${escalaMenuDivisor()}
-            ${escalaMenuSecao('Cursos e feriados')}
-            ${escalaMenuItem('download', 'Baixar modelo de cursos', 'escalaBaixarModeloCursos()')}
-            ${escalaMenuItem('upload', 'Importar cursos (.xlsx)', `document.getElementById('escala-cursos-input').click()`, travada)}
-            ${escalaMenuItem('calendarPlus', 'Adicionar feriado dessa base', 'escalaAdicionarFeriado()', travada)}
-            ${escalaMenuDivisor()}
-            ${escalaMenuSecao('Organização e limpeza')}
-            ${escalaMenuItem('sort', 'Ordenar automático', 'escalaLimparOrdemManual()', travada)}
-            ${escalaMenuItem('trash', 'Limpar folgas e status', 'escalaLimparStatus()', travada, '#fc8181')}
-            ${escalaMenuItem('trash', 'Limpar colaboradores', 'escalaLimparColaboradores()', travada, '#fc8181')}
-          </div>
-        </div>
+        <!-- O "Mais ações" era um <div> absoluto dentro deste painel, que
+             rola. Container com overflow RECORTA filho absoluto: o menu
+             abria cortado na borda de baixo e ainda somava altura rolável,
+             que era o painel "bugando". Com a largura inteira disponível,
+             esconder 12 ações atrás de um botão deixou de fazer sentido —
+             elas descem como seção, todas à vista de uma vez. -->
         <input type="file" id="escala-cursos-input" ${dis} accept=".xlsx,.xls" style="display:none" onchange="escalaImportarCursos(this)">
         <input type="file" id="escala-import-input" ${dis} accept=".xlsx,.xls" style="display:none" onchange="escalaImportarEscalaExcel(this)">
       </div>
-      <div id="escala-grupo-organizacao" style="display:flex;gap:16px;align-items:flex-end;flex-wrap:nowrap;overflow-x:auto;margin-top:10px;padding-bottom:2px">
+      <div id="escala-grupo-organizacao" style="display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;margin-top:10px;padding-bottom:2px">
         <div style="position:relative">
           <label style="font-size:10.5px;color:var(--text-muted);display:block;margin-bottom:3px">Mostrar grupos</label>
           <select class="adh-month-select" onchange="escalaSetMostrarGrupos(this.value)">
@@ -962,9 +940,29 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
             <option value="__sup_lider__">Só Supervisores e Líderes</option>
             <option value="__escolher__">Escolher grupos...</option>
           </select>
-          <div id="escala-grupos-painel" style="display:none;position:absolute;top:calc(100% + 4px);left:0;background:var(--bg-surface);border:1px solid var(--border-strong);border-radius:8px;padding:8px 10px;z-index:30;min-width:190px;box-shadow:var(--adh-shadow-card)">
+          <div id="escala-grupos-painel" class="escala-grupos-painel" style="display:none">
             ${ESCALA_GRUPOS.map(g => `<label style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:11.5px;color:var(--text-secondary);white-space:nowrap"><input type="checkbox" value="${g}" onchange="escalaAtualizarGruposEscolhidos()" ${(!window._escalaGruposVisiveis||window._escalaGruposVisiveis.has(g))?'checked':''}>${g}</label>`).join('')}
           </div>
+        </div>
+        <!-- Ordenar já existia, mas só clicando no cabeçalho da grade
+             completa — e a grade enxuta, que é a que se usa, não tem esses
+             cabeçalhos clicáveis. Daí os horários parecerem embaralhados
+             dentro de cada bloco: ninguém tinha onde pedir outra ordem.
+             Aqui está o mesmo mecanismo, acessível de onde se olha. -->
+        <div>
+          <label style="font-size:10.5px;color:var(--text-muted);display:block;margin-bottom:3px">Organizar por</label>
+          <select class="adh-month-select" onchange="escalaSetOrdemColuna(this.value)"
+            title="Ordena a lista dentro de cada bloco. 'Automático' volta ao padrão: função, depois horário, depois nome.">
+            ${ESCALA_ORDENACOES.map(o => `<option value="${o.valor}" ${escalaOrdemColunaAtual()===o.valor?'selected':''}>${o.label}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label style="font-size:10.5px;color:var(--text-muted);display:block;margin-bottom:3px">Ordem</label>
+          <select class="adh-month-select" id="escala-ordem-direcao" onchange="escalaSetOrdemDirecao(this.value)"
+            ${escalaOrdemColunaAtual() ? '' : 'disabled title="Escolha um critério em Organizar por"'}>
+            <option value="asc" ${window._escalaOrdemDirecao!=='desc'?'selected':''}>Do menor para o maior</option>
+            <option value="desc" ${window._escalaOrdemDirecao==='desc'?'selected':''}>Do maior para o menor</option>
+          </select>
         </div>
         <div>
           <label style="font-size:10.5px;color:var(--text-muted);display:block;margin-bottom:3px">Dividir grupo por</label>
@@ -1015,6 +1013,29 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
             <option value="compacto" ${window._escalaDensidade==='compacto'?'selected':''}>Compacto (cabe mais na tela)</option>
           </select>
         </div>
+      </div>
+      <div class="escala-ferr-acoes">
+        ${escalaBlocoAcoes('Exportar', [
+          escalaAcaoItem('sheet', 'Baixar Excel da escala', 'escalaExportarExcel()'),
+          escalaAcaoItem('upload', 'Importar escala do Excel', `document.getElementById('escala-import-input').click()`, travada),
+          escalaAcaoItem('printer', 'Imprimir / PDF', 'escalaImprimir()'),
+          escalaAcaoItem('fileExport', 'Exportar para o sistema do DP', 'escalaExportarDP()'),
+        ])}
+        ${escalaBlocoAcoes('Horários e férias', [
+          escalaAcaoItem('clock', 'Recalcular saídas pela CH', 'escalaRecalcularSaidas()', travada),
+          escalaAcaoItem('history', 'Recarregar férias do sistema', 'escalaRecarregarFerias()'),
+          escalaAcaoItem('alert', 'Diagnosticar férias do mês', 'escalaDiagnosticoFerias()'),
+        ])}
+        ${escalaBlocoAcoes('Cursos e feriados', [
+          escalaAcaoItem('download', 'Baixar modelo de cursos', 'escalaBaixarModeloCursos()'),
+          escalaAcaoItem('upload', 'Importar cursos (.xlsx)', `document.getElementById('escala-cursos-input').click()`, travada),
+          escalaAcaoItem('calendarPlus', 'Adicionar feriado dessa base', 'escalaAdicionarFeriado()', travada),
+        ])}
+        ${escalaBlocoAcoes('Organização e limpeza', [
+          escalaAcaoItem('sort', 'Ordenar automático', 'escalaLimparOrdemManual()', travada),
+          escalaAcaoItem('trash', 'Limpar folgas e status', 'escalaLimparStatus()', travada, true),
+          escalaAcaoItem('trash', 'Limpar colaboradores', 'escalaLimparColaboradores()', travada, true),
+        ])}
       </div>
       <div id="escala-status-msg" style="font-size:11px;color:var(--text-muted);margin-top:8px;min-height:14px"></div>
 
@@ -1749,6 +1770,34 @@ function escalaToggleAgruparTurno() {
 // dois modos (lista simples e agrupada por grupo/setor). Clicar nesse
 // cabeçalho vale mais que a ordem manual de arrastar (é uma escolha
 // explícita); "Ordenar automático" limpa e volta pro padrão de novo.
+/* Os critérios que a lista aceita. São os mesmos do clique no cabeçalho
+   da grade completa — um catálogo só, para não existirem dois jeitos
+   "quase iguais" de ordenar discordando entre si. */
+const ESCALA_ORDENACOES = [
+  { valor: '',          label: 'Automático (função, horário, nome)' },
+  { valor: 'entrada',   label: 'Horário de entrada' },
+  { valor: 'nome',      label: 'Nome' },
+  { valor: 'matricula', label: 'Matrícula' },
+  { valor: 'funcao',    label: 'Função' },
+  { valor: 'ch',        label: 'Carga horária' },
+  { valor: 'turno',     label: 'Turno (pelo horário)' },
+];
+const escalaOrdemColunaAtual = () => window._escalaOrdemColuna || '';
+
+function escalaSetOrdemColuna(valor) {
+  /* Trocar de critério volta para crescente. Herdar o decrescente do
+     critério anterior faria "Nome" abrir em Z–A sem ninguém pedir. */
+  escalaPendente('ordem', { coluna: valor || null, direcao: 'asc' });
+  const dir = document.getElementById('escala-ordem-direcao');
+  if (dir) { dir.value = 'asc'; dir.disabled = !valor; }
+}
+
+function escalaSetOrdemDirecao(valor) {
+  const pend = (window._escalaPendentes || {}).ordem;
+  const coluna = pend ? pend.coluna : (window._escalaOrdemColuna || null);
+  escalaPendente('ordem', { coluna, direcao: valor === 'desc' ? 'desc' : 'asc' });
+}
+
 function escalaOrdenarPorColuna(coluna) {
   if (window._escalaOrdemColuna === coluna) {
     window._escalaOrdemDirecao = window._escalaOrdemDirecao === 'desc' ? 'asc' : 'desc';
@@ -1796,6 +1845,21 @@ const ESCALA_PENDENTES = {
                               try { localStorage.setItem('gde_escala_criterio_subbloco', v); } catch (_) {} },
               compara: (v) => String(v == null ? '' : v),
               rotulo: () => 'sub-blocos' },
+  ordem:    { lê: () => ({ coluna: window._escalaOrdemColuna || null,
+                           direcao: window._escalaOrdemDirecao === 'desc' ? 'desc' : 'asc' }),
+              grava: (v) => {
+                window._escalaOrdemColuna = v.coluna || null;
+                window._escalaOrdemDirecao = v.direcao === 'desc' ? 'desc' : 'asc';
+                try {
+                  localStorage.setItem('gde_escala_ordem_coluna', window._escalaOrdemColuna || '');
+                  localStorage.setItem('gde_escala_ordem_direcao', window._escalaOrdemDirecao);
+                } catch (_) {}
+              },
+              compara: (v) => `${(v && v.coluna) || ''}|${(v && v.direcao) || 'asc'}`,
+              rotulo: (v) => {
+                const c = ESCALA_ORDENACOES.find((o) => o.valor === ((v && v.coluna) || ''));
+                return `ordenar por ${(c ? c.label : 'automático').toLowerCase()}`;
+              } },
   blocos:   { lê: () => !!window._escalaBlocosRecolhidos,
               grava: (v) => { window._escalaBlocosRecolhidos = !!v;
                               try { localStorage.setItem('gde_escala_blocos_recolhidos', v ? '1' : '0'); } catch (_) {} },
@@ -1878,6 +1942,12 @@ function escalaSincronizarControlesMenu() {
       .find((s) => (s.getAttribute('onchange') || '').includes(fn));
     if (el) el.value = valor;
   };
+  sel('escalaSetOrdemColuna', escalaOrdemColunaAtual());
+  const dir = document.getElementById('escala-ordem-direcao');
+  if (dir) {
+    dir.value = window._escalaOrdemDirecao === 'desc' ? 'desc' : 'asc';
+    dir.disabled = !escalaOrdemColunaAtual();
+  }
   sel('escalaSetCriterioSubBloco', escalaCriterioSubBloco());
   sel('escalaSetBlocosRecolhidos', window._escalaBlocosRecolhidos ? '__recolhido__' : '__expandido__');
 }
@@ -2291,8 +2361,68 @@ function escalaCorDesvioCobertura(valor, mediana, dia) {
    conferências e a contagem de folgas, com entrada e saída fechando. As
    conferências não guardam nada — elas recalculam a cada clique, usando o
    mesmo escalaValidarRegrasFolga que as outras telas usam. */
+/* ══════════════════════════════════════════════════════
+   A lista, ordenada e filtrada — uma só, para as duas grades
+
+   A grade enxuta lia window._escalaColabs cru: a ordem do banco, sem
+   ordenação e sem o filtro de Situação. Era isso que fazia os horários
+   parecerem embaralhados dentro de cada bloco — não havia critério
+   nenhum, e o "Organizar por" da grade completa nunca chegava aqui.
+
+   Agora as duas grades pedem a lista no mesmo lugar, então ordenar passa
+   a valer onde se olha.
+   ══════════════════════════════════════════════════════ */
+function escalaValorDaColuna(c, coluna, ano, mesNum, diasNoMes) {
+  const entradaDoColab = (x) => escalaEntradaEfetivaDoColab(x, ano, mesNum, diasNoMes);
+  {
+    switch (coluna) {
+      case 'matricula': return String(c.matricula || '');
+      case 'nome': return String(c.nome || '');
+      case 'turno': return escalaSetorDoTurno(entradaDoColab(c));
+      case 'setor': return String(c.turno || '');
+      case 'bloco': return String(c.bloco_horario || '');
+      case 'funcao': return escalaFuncaoGrupoDoColab(c).label || '';
+      // CH com zero à esquerda: a comparação é de texto, e sem isso "90H"
+      // viria depois de "180H", que é o contrário do que se espera.
+      case 'ch': return String(window.eoColabs?.get(c.matricula)?.ch || c.ch_manual || '')
+        .replace(/\D/g, '').padStart(4, '0');
+      case 'entrada': default: return entradaDoColab(c);
+    }
+  }
+}
+
+function escalaColabsOrdenados(ano, mesNum, diasNoMes) {
+  const entradaDoColab = (c) => escalaEntradaEfetivaDoColab(c, ano, mesNum, diasNoMes);
+  const valorColuna = (c, col) => escalaValorDaColuna(c, col, ano, mesNum, diasNoMes);
+
+  const coluna = window._escalaOrdemColuna || null;
+  const direcao = window._escalaOrdemDirecao === 'desc' ? -1 : 1;
+  const lista = [...(window._escalaColabs || [])];
+
+  if (coluna) {
+    lista.sort((a, b) => direcao * String(valorColuna(a, coluna))
+      .localeCompare(String(valorColuna(b, coluna)), 'pt-BR', { numeric: true }));
+  } else {
+    /* Automático. A ordem manual de arrastar vence, quando existe; fora
+       isso, função, depois horário, depois nome — que é como a escala é
+       lida em papel. */
+    lista.sort((a, b) => {
+      const oa = a.ordem_manual, ob = b.ordem_manual;
+      if (oa != null && ob != null) return oa - ob;
+      if (oa != null) return -1;
+      if (ob != null) return 1;
+      const fa = window.eoColabs?.get(a.matricula)?.funcao || '';
+      const fb = window.eoColabs?.get(b.matricula)?.funcao || '';
+      return fa.localeCompare(fb, 'pt-BR')
+        || entradaDoColab(a).localeCompare(entradaDoColab(b))
+        || String(a.nome || '').localeCompare(String(b.nome || ''), 'pt-BR');
+    });
+  }
+  return escalaAplicarFiltroSituacao(lista, ano, mesNum, diasNoMes);
+}
+
 function escalaGradeEnxutaHTML(ano, mesNum, diasNoMes) {
-  const colabs = window._escalaColabs || [];
+  const colabs = escalaColabsOrdenados(ano, mesNum, diasNoMes);
   const BORDA = '1px solid var(--border)';
   const travada = !!window._escalaTravada;
 
@@ -2304,12 +2434,40 @@ function escalaGradeEnxutaHTML(ano, mesNum, diasNoMes) {
     </div>`;
   }
 
-  // Agrupa por função, como no modelo: uma faixa por grupo e as pessoas sob ela.
+  /* Agrupa por função: uma faixa por grupo e as pessoas sob ela.
+
+     Duas coisas que faltavam aqui e existiam só na grade completa:
+
+     — "Mostrar grupos" não filtrava nada nesta grade. Escolher "Só
+       Supervisores e Líderes" não mudava a tela, e o controle parecia
+       quebrado porque estava: a enxuta nunca leu _escalaGruposVisiveis.
+
+     — A ordem das faixas vinha de quem aparecesse primeiro na lista. Com
+       a ordenação por nome ou horário, os blocos trocavam de lugar a cada
+       critério. A ordem canônica de ESCALA_GRUPOS mantém a escala
+       reconhecível: muda o que está DENTRO do bloco, não onde ele está. */
+  const visiveis = window._escalaGruposVisiveis;
   const porGrupo = new Map();
   for (const c of colabs) {
     const g = escalaFuncaoGrupoDoColab(c).label || 'Sem função';
+    if (visiveis && visiveis.size && !visiveis.has(g)) continue;
     if (!porGrupo.has(g)) porGrupo.set(g, []);
     porGrupo.get(g).push(c);
+  }
+
+  const posGrupo = (g) => {
+    const i = ESCALA_GRUPOS.indexOf(g);
+    return i < 0 ? ESCALA_GRUPOS.length : i; // "Sem função" vai para o fim
+  };
+  const ordenados = [...porGrupo.entries()].sort((a, b) => posGrupo(a[0]) - posGrupo(b[0]));
+  porGrupo.clear();
+  ordenados.forEach(([g, lista]) => porGrupo.set(g, lista));
+
+  if (!porGrupo.size) {
+    return `<div class="escala-enx-vazia">
+      <p>Nenhum colaborador no filtro atual.</p>
+      <p class="sub">Ajuste <b>Mostrar grupos</b> ou <b>Situação</b> nas ferramentas da escala.</p>
+    </div>`;
   }
 
   const NCOLS = 4 + diasNoMes + 5;
@@ -2428,49 +2586,10 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   window._escalaDiasIgnorados = [];
   const entradaDoColab = (c) => escalaEntradaEfetivaDoColab(c, ano, mesNum, diasNoMes);
 
-  // Valor de cada colaborador pra uma coluna clicável específica — mesmo
-  // catálogo usado tanto pro clique no cabeçalho (lista simples) quanto pra
-  // ordenação dentro de cada setor (lista agrupada), pra não ter dois
-  // critérios "quase iguais" competindo.
-  const valorColuna = (c, coluna) => {
-    switch (coluna) {
-      case 'matricula': return String(c.matricula || '');
-      case 'nome': return String(c.nome || '');
-      case 'turno': return escalaSetorDoTurno(entradaDoColab(c)); // coluna "Turno" (automático, por horário)
-      case 'setor': return String(c.turno || ''); // coluna "Setor" (manual)
-      case 'bloco': return String(c.bloco_horario || ''); // coluna "Bloco" (manual, agrupa horários "iguais na prática")
-      case 'entrada': default: return entradaDoColab(c);
-    }
-  };
-
-  const colunaAtiva = window._escalaOrdemColuna || null;
-  const direcao = window._escalaOrdemDirecao === 'desc' ? -1 : 1;
-
-  let colabs;
-  if (colunaAtiva) {
-    // Clicou num cabeçalho — essa escolha explícita vale mais que a ordem
-    // manual de arrastar. "Ordenar automático" (ou arrastar de novo) volta
-    // a valer quando limpar a coluna ativa.
-    colabs = [...(window._escalaColabs || [])].sort((a, b) =>
-      direcao * String(valorColuna(a, colunaAtiva)).localeCompare(String(valorColuna(b, colunaAtiva)), 'pt-BR', { numeric: true }));
-  } else {
-    // Se o responsável já arrastou algum colaborador antes, a lista toda
-    // passa a respeitar essa ordem manual (ordem_manual) em vez de reordenar
-    // sozinha por função/horário — só volta a ordenar automático se ninguém
-    // tiver ordem_manual definida ainda, ou se clicar em "Ordenar automático".
-    colabs = [...(window._escalaColabs || [])].sort((a, b) => {
-      const oa = a.ordem_manual, ob = b.ordem_manual;
-      if (oa != null && ob != null) return oa - ob;
-      if (oa != null) return -1;
-      if (ob != null) return 1;
-      const fa = window.eoColabs?.get(a.matricula)?.funcao || '';
-      const fb = window.eoColabs?.get(b.matricula)?.funcao || '';
-      return fa.localeCompare(fb) || entradaDoColab(a).localeCompare(entradaDoColab(b)) || String(a.nome||'').localeCompare(String(b.nome||''));
-    });
-  }
-  // Filtro por situação — roda antes de tudo, então as contagens por
-  // sub-bloco e o total do grupo refletem só quem ficou na tela.
-  colabs = escalaAplicarFiltroSituacao(colabs, ano, mesNum, diasNoMes);
+  // A ordenação e o filtro de Situação vivem em escalaColabsOrdenados,
+  // compartilhado com a grade enxuta. Eram duas cópias quase iguais, e a
+  // da enxuta simplesmente não existia — ela lia a lista crua do banco.
+  let colabs = escalaColabsOrdenados(ano, mesNum, diasNoMes);
 
   const temOrdemManual = colabs.some(c => c.ordem_manual != null);
   const secOn = escalaModoColunas() === 'completo'; // Turno/Intervalos — só no modo completo
@@ -2727,7 +2846,12 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
     // mais de um Setor ou mais de um Bloco (campos manuais, quase sempre
     // vazios), então na prática nunca aparecia.
     const criterio = escalaCriterioSubBloco();
-    const colunaOrdemGrupo = colunaAtiva || 'entrada';
+    /* Estas três saíram do escopo quando a ordenação virou função
+       compartilhada. Sem redeclarar aqui, a grade agrupada estourava em
+       ReferenceError na primeira montagem. */
+    const colunaOrdemGrupo = window._escalaOrdemColuna || 'entrada';
+    const direcaoGrupo = window._escalaOrdemDirecao === 'desc' ? -1 : 1;
+    const valorColuna = (c, col) => escalaValorDaColuna(c, col, ano, mesNum, diasNoMes);
 
     const gruposFuncao = new Map(); // codigo -> { label, subBlocos: Map(label -> colabs[]) }
     colabs.forEach(c => {
@@ -2763,7 +2887,7 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
         });
       }
       return [...lista].sort((a, b) =>
-        direcao * String(valorColuna(a, colunaOrdemGrupo)).localeCompare(String(valorColuna(b, colunaOrdemGrupo)), 'pt-BR', { numeric: true }));
+        direcaoGrupo * String(valorColuna(a, colunaOrdemGrupo)).localeCompare(String(valorColuna(b, colunaOrdemGrupo)), 'pt-BR', { numeric: true }));
     };
 
     funcoesOrdenadas.forEach(([, grupo]) => {
@@ -4498,42 +4622,35 @@ function escalaVoosLeave() {
 // fixo "✓ Salvo" no cabeçalho, sem precisar mexer em cada função que
 // salva individualmente (menos risco de esquecer alguma).
 // ══════════════════════════════════════════════════════
-// MENU "MAIS AÇÕES" + EXPORTAR / IMPRIMIR
+// AÇÕES DA ESCALA — seção aberta, não mais dropdown
+//
+// Eram 12 itens dentro de um <div> absoluto. Quando o cartão de
+// ferramentas virou menu flutuante com rolagem própria, esse dropdown
+// passou a ser recortado pelo container: abria cortado embaixo e somava
+// altura rolável ao painel. Container com overflow sempre faz isso com
+// filho absoluto — a saída não era ajustar z-index, era não precisar de
+// camada nenhuma. Com a largura inteira, as ações cabem à vista em
+// quatro colunas, que é o que se queria do "ver tudo de uma vez".
 // ══════════════════════════════════════════════════════
 
-function escalaMenuSecao(texto) {
-  return `<div style="font-size:9.5px;color:var(--text-muted);letter-spacing:.08em;padding:8px 10px 4px;text-transform:uppercase">${texto}</div>`;
+function escalaBlocoAcoes(titulo, itens) {
+  return `<div class="escala-acoes-bloco">
+    <div class="escala-acoes-tit">${titulo}</div>
+    ${itens.join('')}
+  </div>`;
 }
-function escalaMenuDivisor() {
-  return `<div style="border-top:1px solid var(--border);margin:4px 0"></div>`;
+
+function escalaAcaoItem(icone, texto, acao, desabilitado, perigo) {
+  const cls = `escala-acao-item${perigo ? ' perigo' : ''}`;
+  const onclick = desabilitado ? '' : ` onclick="${acao}"`;
+  return `<button type="button" class="${cls}"${desabilitado ? ' disabled' : ''}${onclick}>${escalaIcone(icone)}${texto}</button>`;
 }
-function escalaMenuItem(icone, texto, acao, desabilitado, cor) {
-  const style = `display:flex;align-items:center;gap:9px;width:100%;padding:7px 10px;border-radius:6px;font-size:12px;text-align:left;background:none;border:none;color:${cor || 'var(--text-secondary)'};${desabilitado ? 'opacity:.4;cursor:not-allowed' : 'cursor:pointer'}`;
-  const onclick = desabilitado ? '' : ` onclick="escalaFecharMenuAcoes();${acao}"`;
-  return `<button style="${style}"${desabilitado ? ' disabled' : ''}${onclick}
-    onmouseover="if(!this.disabled)this.style.background='var(--bg-hover)'"
-    onmouseout="this.style.background='none'">${escalaIcone(icone)}${texto}</button>`;
-}
-function escalaFecharMenuAcoes() {
-  const m = document.getElementById('escala-menu-acoes');
-  if (m) m.style.display = 'none';
-}
-function escalaToggleMenuAcoes(e) {
-  if (e) e.stopPropagation();
-  const m = document.getElementById('escala-menu-acoes');
-  if (!m) return;
-  m.style.display = m.style.display === 'none' ? 'block' : 'none';
-}
-// Fecha ao clicar fora — registra uma vez só, igual o handler de teclado.
-if (!window._escalaMenuFechaRegistrado) {
-  window._escalaMenuFechaRegistrado = true;
-  document.addEventListener('click', (e) => {
-    const menu = document.getElementById('escala-menu-acoes');
-    if (menu && menu.style.display === 'block' && !menu.parentElement.contains(e.target)) {
-      menu.style.display = 'none';
-    }
-  });
-}
+
+/* Os nomes antigos continuam existindo porque há chamadas espalhadas que
+   fechavam o dropdown depois de agir. Sem dropdown, não há o que fechar —
+   mas quebrar essas chamadas derrubaria a ação junto. */
+function escalaFecharMenuAcoes() {}
+function escalaToggleMenuAcoes() {}
 
 // Exporta a escala montada pro Excel, uma linha por colaborador e uma
 // coluna por dia — mesmo conteúdo da tela (F/FA/L/J/K/CH ou o horário do
