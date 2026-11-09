@@ -792,10 +792,6 @@ async function escalaRenderGrade(el) {
   // que a grade abrir, sem exigir um segundo clique num menu.
   escalaAtualizarBotaoComparar();
 
-  if (window._escalaAplicarDimAoAbrir && escalaCenario() !== 'planejada') {
-    window._escalaAplicarDimAoAbrir = false;
-    setTimeout(() => escalaAplicarDimensionamento(true), 400);
-  }
 
   /* A Capacity sem dimensionamento não desenha grade. Não é teimosia: os
      horários vêm dele, e distribuir folga sobre horário errado é trabalho
@@ -848,6 +844,21 @@ async function escalaRenderGrade(el) {
   }
   window._escalaColabs = colabs;
   window._escalaAutoPopulado = autoPopulado;
+
+  /* Vindo do Gerador, a Capacity abre já com a malha desenhada.
+
+     Esta decisão ficava lá em cima, antes de os colaboradores serem
+     carregados — lia _escalaColabs da PÁGINA ANTERIOR e dependia de um
+     setTimeout de 400ms chegar depois do carregamento, que é torcer,
+     não programar. Aqui a lista já é a deste mês.
+
+     Aplicar os horários só faz sentido havendo gente para casar; sem
+     ninguém, a tela mostra as posições vazias, que é a informação certa
+     naquele momento, em vez de um erro pedindo "Preencher com Staff". */
+  if (window._escalaAplicarDimAoAbrir && escalaEhCapacity()) {
+    window._escalaAplicarDimAoAbrir = false;
+    if (colabs.length) setTimeout(() => escalaAplicarDimensionamento(true), 0);
+  }
   window._escalaDias = new Map((dias||[]).map(d => [`${d.matricula}|${d.dia}`, d]));
 
   const [ano0] = mes.split('-').map(Number);
@@ -2702,7 +2713,20 @@ function escalaMalhaDoDimensionamento() {
   const mapa = escalaCarregarMapaDim(window._escalaBase) || {};
   const porGrupo = new Map();
   for (const p of posicoes) {
-    const grupo = mapa[p.funcao];
+    /* Sem mapeamento confirmado, cai na dedução automática em vez de
+       descartar a posição.
+
+       O mapa só é gravado depois que a pessoa passa pela tela de
+       mapeamento, e essa tela só aparece ao APLICAR. Até lá, mapa[funcao]
+       era undefined e toda posição sumia — a Capacity abria em branco
+       logo depois de subir o dimensionamento, que é justamente quando
+       ela deveria estar mais cheia.
+
+       A dedução erra em algumas funções (é por isso que o mapeamento
+       existe), mas errar o grupo de uma posição é muito menos grave do
+       que não mostrar posição nenhuma: o erro aparece na tela e se
+       corrige ao aplicar; a ausência não aparece. */
+    const grupo = mapa[p.funcao] || escalaGrupoDaFuncaoDim(p.funcao);
     if (!grupo || grupo === '__ignorar__') continue;
     const chave = `${p.entrada || '?'}–${p.saida || '?'}`;
     if (!porGrupo.has(grupo)) porGrupo.set(grupo, new Map());

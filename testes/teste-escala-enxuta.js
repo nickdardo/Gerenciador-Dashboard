@@ -784,6 +784,57 @@ function paginaDeTeste() {
         'explicando que ela não vai voltar sozinha');
     }
 
+    sec('8l. Capacity abre cheia logo depois de subir o dimensionamento');
+    {
+      /* O caminho do Gerador: sobe o arquivo, clica em "Escala Capacity"
+         e a tela abria EM BRANCO, pedindo "Preencher com Staff".
+
+         A causa não era falta de gente — era o mapa de funções. O
+         mapeamento "função do dimensionamento → grupo da escala" só é
+         gravado quando a pessoa passa pela tela de mapeamento, e essa
+         tela só aparece ao APLICAR. Até lá, mapa[funcao] era undefined e
+         TODA posição era descartada em silêncio. A Capacity abria vazia
+         exatamente no momento em que deveria estar mais cheia. */
+      const r = await page.evaluate(() => {
+        window._escalaBase = 'GRU'; window._escalaMes = '2026-11';
+        window._escalaCenario = 'dimensionada';
+        window._escalaDias = new Map(); window._escalaFeriados = new Map();
+        window._escalaGruposVisiveis = null; window._escalaOrdemColuna = null;
+        window._escalaColabs = []; window.eoColabs = new Map();
+        window.escalaAplicarFiltroSituacao = (l) => l;
+        window.escalaEntradaEfetivaDoColab = (c) => c.entrada_manual || '';
+        window._escalaPosicoesDim = [
+          { funcao: 'ASG LIMPEZA I', entrada: '07:00', saida: '13:00', carga: 180, qtd: 3 },
+          { funcao: 'ASA', entrada: '05:00', saida: '11:00', carga: 180, qtd: 2 },
+        ];
+        // Nenhum mapeamento salvo — é o estado logo após subir o arquivo.
+        window.escalaCarregarMapaDim = () => ({});
+        try { localStorage.removeItem(escalaChaveEsvaziada('GRU', '2026-11')); } catch (_) {}
+        const semMapa = escalaGradeEnxutaHTML(2026, 11, 30);
+
+        // Com o mapeamento confirmado, a escolha da pessoa prevalece.
+        window.escalaCarregarMapaDim = () => ({ 'ASG LIMPEZA I': 'Administração' });
+        const comMapa = escalaGradeEnxutaHTML(2026, 11, 30);
+        return { semMapa, comMapa };
+      });
+
+      ok(!/Nenhum colaborador nesta escala ainda/.test(r.semMapa),
+        'a tela não abre mais em branco pedindo "Preencher com Staff"');
+      ok((r.semMapa.match(/escala-enx-vaga/g) || []).length === 5,
+        'as 5 posições do dimensionamento aparecem sem precisar de gente nenhuma');
+      ok(/Limpeza/.test(r.semMapa),
+        'a dedução automática acerta ASG como Limpeza');
+      ok(/Auxiliar de Rampa/.test(r.semMapa),
+        'e ASA como Auxiliar de Rampa, que é o nome que só o dimensionamento usa');
+      ok(/3 horários dimensionados/.test(r.semMapa) && /2 horários dimensionados/.test(r.semMapa),
+        'cada grupo com a contagem da malha dele');
+
+      ok(/Administração/.test(r.comMapa),
+        'quando existe mapeamento confirmado, ele vence a dedução');
+      ok((r.comMapa.match(/escala-enx-vaga/g) || []).length === 5,
+        'e as posições continuam todas lá, só em outro grupo');
+    }
+
     sec('9. Nenhum erro de script');
     ok(erros.length === 0, 'a página carregou sem exceção' + (erros.length ? ': ' + erros.join(' | ') : ''));
   } finally {
