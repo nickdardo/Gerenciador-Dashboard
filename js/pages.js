@@ -97,7 +97,7 @@ function pageGerador(el) {
           </div>
 
           <div class="gen3-actions">
-            <button class="gen3-act gen3-act-p" onclick="genGoEscala()">Escala Online</button>
+            <button class="gen3-act gen3-act-p" onclick="genGoEscala()">Escala Capacity</button>
             <button class="gen3-act gen3-act-g" onclick="genGoComparador()">Comparar →</button>
             <button class="gen3-act gen3-act-s" onclick="genDownload()">
               <i class="ti ti-download" aria-hidden="true"></i> Excel
@@ -425,13 +425,13 @@ async function genGoEscala() {
   window._genRows = gRows;
   window._genBase = gBase;
   window._genMes  = mes;
-  // O dimensionamento alimenta a escala DIMENSIONADA, não a planejada —
-  // vir do Gerador e cair na planejada era o caminho errado por padrão.
-  window._escalaCenario = 'dimensionada';
-  try { localStorage.setItem('gde_escala_cenario', 'dimensionada'); } catch (_) {}
-  // Sinaliza pra Escala aplicar os horários assim que abrir.
+  /* O dimensionamento alimenta a Escala CAPACITY. Antes isto marcava o
+     cenário e navegava para 'escala' — funcionava enquanto o cenário era
+     um seletor. Agora cada página coage o seu, então sair do Gerador para
+     'escala' caía na Base e os horários do dimensionamento não entravam.
+     Quem decide o cenário é a porta: basta ir para a porta certa. */
   window._escalaAplicarDimAoAbrir = true;
-  navigateTo('escala');
+  navigateTo('capacity');
 }
 
 function genGoComparador() {
