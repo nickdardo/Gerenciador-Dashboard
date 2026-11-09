@@ -514,9 +514,9 @@ function paginaDeTeste() {
          percebe até fechar a folha. */
       const r = await page.evaluate(() => {
         window._escalaBase = 'GRU'; window._escalaMes = '2026-11';
-        window._escalaCenario = 'dimensionada';
+        window._escalaCenario = 'planejada';
         try { localStorage.removeItem(escalaChaveRetirados()); } catch (_) {}
-        window._escalaColabs = [{ matricula: '250722', nome: 'ITAMAR' }];
+        window._escalaColabs = [{ matricula: '250722', nome: 'ITAMAR', entrada_manual: '04:30' }];
         window.eoColabs = new Map([
           ['250722', { nome: 'ITAMAR', station: 'GRU' }],
           ['254562', { nome: 'RENATO', station: 'GRU' }],
@@ -544,10 +544,38 @@ function paginaDeTeste() {
 
       const limpo = await page.evaluate(() => {
         window._escalaColabs = [
-          { matricula: '250722' }, { matricula: '254562' }, { matricula: '260637' }];
+          { matricula: '250722', entrada_manual: '04:30' },
+          { matricula: '254562', entrada_manual: '11:00' },
+          { matricula: '260637', entrada_manual: '06:00' }];
         return escalaChipSemHorario();
       });
       ok(limpo === '', 'com todo mundo alocado, o chip some em vez de mostrar zero' + '  (veio ' + JSON.stringify(limpo) + ')');
+
+      /* Na Capacity, estar na escala não é ter horário: sem posição do
+         dimensionamento, o horário fica em branco e a pessoa entra na
+         conta. É esta a distância entre a malha e o efetivo. */
+      const naCapacity = await page.evaluate(() => {
+        window._escalaCenario = 'dimensionada';
+        window._escalaColabs = [
+          { matricula: '250722', nome: 'ITAMAR', entrada_manual: '07:00' },
+          { matricula: '254562', nome: 'RENATO', entrada_manual: null },
+          { matricula: '260637', nome: 'ALEX', entrada_manual: null }];
+        const lista = escalaSemHorario();
+        return { n: lista.length,
+                 semPos: lista.filter((p) => p.naEscala).map((p) => p.matricula).sort() };
+      });
+      ok(naCapacity.n === 2, 'na Capacity, quem não recebeu posição conta como sem horário'
+        + '  (veio ' + naCapacity.n + ')');
+      ok(naCapacity.semPos.join() === '254562,260637',
+        'nomeando quem é — e quem recebeu posição fica fora da conta');
+
+      const naBase = await page.evaluate(() => {
+        window._escalaCenario = 'planejada';
+        return escalaSemHorario().length;
+      });
+      ok(naBase === 0,
+        'na Base a regra é outra: o horário vem do ponto batido, então ninguém fica sem'
+        + '  (veio ' + naBase + ')');
     }
 
     sec('8f. Folgas por grupo e caixas só dos grupos presentes');

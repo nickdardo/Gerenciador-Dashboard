@@ -1342,7 +1342,29 @@ function escalaHorarioFixoDoColab(matricula, ano, mesNum, diasNoMes) {
 // ordenação simples, ordenação agrupada, ordenar por coluna) — extraído
 // aqui uma vez só pra não ter 4 cópias levemente diferentes se um dia
 // precisar mudar a regra.
+/* ══════════════════════════════════════════════════════
+   Na Capacity, o ponto batido NÃO vale como horário
+
+   As duas escalas têm regras diferentes, e era essa a razão de existirem
+   separadas: a Base puxa o horário que a pessoa vem batendo (a moda do
+   ponto no mês) ou o do mês anterior; a Capacity puxa EXATAMENTE o que o
+   dimensionamento pede.
+
+   O fallback para o ponto estava em quatro lugares, sem olhar o cenário.
+   Resultado: quem recebia posição do dimensionamento aparecia com o
+   horário certo, e quem não recebia aparecia com o horário do ponto — na
+   mesma tela, sem nada distinguindo um do outro. Era por isso que a
+   Capacity mostrava 00:00, 06:00 e 17:00, que não existem no
+   dimensionamento, misturados com 07:00 e 12:30, que existem.
+
+   Agora, na Capacity, quem não tem posição não tem horário: fica em
+   branco e entra na conta de "sem horário", que é a verdade — e é a
+   informação que interessa, porque é a distância entre a malha e o
+   efetivo. */
+const escalaPontoValeComoHorario = () => !escalaEhCapacity();
+
 function escalaEntradaEfetivaDoColab(c, ano, mesNum, diasNoMes) {
+  if (!escalaPontoValeComoHorario()) return c.entrada_manual || '';
   const horarioFixo = escalaHorarioFixoDoColab(c.matricula, ano, mesNum, diasNoMes);
   const [entradaCalc] = horarioFixo ? horarioFixo.split('-') : [null];
   return c.entrada_manual || entradaCalc || '';
@@ -1663,6 +1685,20 @@ function escalaSemHorario() {
   const base = String(window._escalaBase || '').toUpperCase();
   const retirados = escalaRetirados();
   const fora = [];
+
+  /* Na Capacity, estar na escala não é ter horário: quem não recebeu
+     posição do dimensionamento fica em branco. Essa gente é "sem
+     horário" tanto quanto quem está fora da lista, e é justamente a
+     distância entre a malha e o efetivo. */
+  if (escalaEhCapacity()) {
+    for (const c of (window._escalaColabs || [])) {
+      if (c.entrada_manual) continue;
+      const reg = window.eoColabs?.get(c.matricula);
+      fora.push({ matricula: c.matricula, nome: c.nome || reg?.nome || '',
+                  funcao: reg?.funcao || c.funcao_manual || '', ch: reg?.ch || c.ch_manual || '',
+                  retirado: false, horario: null, naEscala: true });
+    }
+  }
   for (const [mat, r] of (window.eoColabs || new Map())) {
     if (naEscala.has(mat)) continue;
     if (base && String(r.station || '').toUpperCase() !== base) continue;
@@ -1670,6 +1706,7 @@ function escalaSemHorario() {
                 retirado: retirados.has(mat), horario: retirados.get(mat) || null });
   }
   fora.sort((a, b) => (b.retirado - a.retirado)
+    || ((b.naEscala ? 1 : 0) - (a.naEscala ? 1 : 0))
     || String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
   return fora;
 }
@@ -2260,7 +2297,8 @@ function escalaLinhaColabHTML(c, ci, ctx) {
   // campos próprios da linha (funcao_manual / ch_manual).
   const funcao = info?.funcao || c.funcao_manual || '—';
   const ch = info?.ch || c.ch_manual || '—';
-  const horarioFixo = escalaHorarioFixoDoColab(c.matricula, ano, mesNum, diasNoMes);
+  const horarioFixo = escalaPontoValeComoHorario()
+    ? escalaHorarioFixoDoColab(c.matricula, ano, mesNum, diasNoMes) : null;
   const [entradaCalc, saidaCalc] = horarioFixo ? horarioFixo.split('-') : [null, null];
   const entrada = c.entrada_manual || entradaCalc || '';
   const saida = c.saida_manual || saidaCalc || '';
@@ -2428,7 +2466,8 @@ function escalaSubBlocoDoColab(c, ano, mesNum, diasNoMes, criterio) {
   const entrada = escalaEntradaEfetivaDoColab(c, ano, mesNum, diasNoMes);
   if (crit === 'horario') {
     if (!entrada) return '(sem horário)';
-    const horarioFixo = escalaHorarioFixoDoColab(c.matricula, ano, mesNum, diasNoMes);
+    const horarioFixo = escalaPontoValeComoHorario()
+      ? escalaHorarioFixoDoColab(c.matricula, ano, mesNum, diasNoMes) : null;
     const saidaCalc = horarioFixo ? horarioFixo.split('-')[1] : null;
     const saida = c.saida_manual || saidaCalc;
     return saida ? `${entrada} às ${saida}` : entrada;
@@ -2607,8 +2646,11 @@ function escalaColabsOrdenados(ano, mesNum, diasNoMes) {
       if (ob != null) return 1;
       const fa = window.eoColabs?.get(a.matricula)?.funcao || '';
       const fb = window.eoColabs?.get(b.matricula)?.funcao || '';
+      // String() nos dois lados: um comparador que estoura derruba a
+      // ordenação inteira, e com ela a grade — caro demais para economizar
+      // uma conversão.
       return fa.localeCompare(fb, 'pt-BR')
-        || entradaDoColab(a).localeCompare(entradaDoColab(b))
+        || String(entradaDoColab(a) || '').localeCompare(String(entradaDoColab(b) || ''))
         || String(a.nome || '').localeCompare(String(b.nome || ''), 'pt-BR');
     });
   }
@@ -3680,12 +3722,15 @@ function escalaAbrirSemHorario() {
     <span class="nome">${escalaEscapeAttr(p.nome)}</span>
     <span class="fn">${escalaEscapeAttr(p.funcao || '')}</span>
     ${p.retirado ? `<span class="tag">saiu de ${escalaEscapeAttr(p.horario || 'sem horário')}</span>` : ''}
-    <button type="button" onclick="escalaDevolverAEscala('${escalaEscapeAttr(p.matricula)}')"
-      title="Colocar de volta na escala">Devolver</button>
+    ${p.naEscala
+      ? '<span class="tag">sem horário</span>'
+      : `<button type="button" onclick="escalaDevolverAEscala('${escalaEscapeAttr(p.matricula)}')"
+           title="Colocar de volta na escala">Devolver</button>`}
   </li>`;
 
   const retirados = fora.filter((p) => p.retirado);
-  const nunca = fora.filter((p) => !p.retirado);
+  const semPosicao = fora.filter((p) => !p.retirado && p.naEscala);
+  const nunca = fora.filter((p) => !p.retirado && !p.naEscala);
   const card = document.createElement('div');
   card.id = 'escala-fora-card';
   card.className = 'escala-fora-card';
@@ -3697,6 +3742,9 @@ function escalaAbrirSemHorario() {
     </div>
     ${retirados.length ? `<div class="secao">Retirados da escala (${retirados.length})</div>
       <ul>${retirados.map(linha).join('')}</ul>` : ''}
+    ${semPosicao.length ? `<div class="secao">Na escala, sem posição no dimensionamento (${semPosicao.length})</div>
+      <ul>${semPosicao.slice(0, 60).map(linha).join('')}</ul>
+      ${semPosicao.length > 60 ? `<div class="mais">...e mais ${semPosicao.length - 60}</div>` : ''}` : ''}
     ${nunca.length ? `<div class="secao">No cadastro de ${escalaEscapeAttr(window._escalaBase)}, fora da escala (${nunca.length})</div>
       <ul>${nunca.slice(0, 60).map(linha).join('')}</ul>
       ${nunca.length > 60 ? `<div class="mais">...e mais ${nunca.length - 60}</div>` : ''}` : ''}`;
@@ -5616,7 +5664,8 @@ async function escalaRecalcularSaidas() {
     if (!entrada) continue;
     const nova = escalaSaidaCalculada(entrada, ch);
     if (!nova) { semCH.push(c); continue; }
-    const horarioFixo = escalaHorarioFixoDoColab(c.matricula, ano, mesNum, diasNoMes);
+    const horarioFixo = escalaPontoValeComoHorario()
+      ? escalaHorarioFixoDoColab(c.matricula, ano, mesNum, diasNoMes) : null;
     const atual = c.saida_manual || (horarioFixo ? horarioFixo.split('-')[1] : null);
     if (atual !== nova) mudancas.push({ c, de: atual || '--:--', para: nova });
   }
@@ -6954,9 +7003,10 @@ async function escalaExecutarAplicacaoDim(posicoes, mapa) {
   }
 
   if (sobrando.length) {
-    resumo.push(``, `GENTE SEM POSIÇÃO (mantém o horário atual):`);
+    resumo.push(``, `GENTE SEM POSIÇÃO (fica SEM horário na Capacity):`);
     sobrando.slice(0, 8).forEach(([g, n]) => resumo.push(`   ${g}: ${n} pessoa(s)`));
     if (sobrando.length > 8) resumo.push(`   ...e mais ${sobrando.length - 8} grupo(s)`);
+    resumo.push(`   A Capacity só mostra horário do dimensionamento — sem posição, sem horário.`);
   }
 
   resumo.push(``, `Confirma?`);
@@ -6978,9 +7028,32 @@ async function escalaExecutarAplicacaoDim(posicoes, mapa) {
       if (error) throw new Error(error.message);
       escalaLoadingAtualiza(Math.min(i + LOTE, linhas.length), linhas.length);
     }
+    /* Quem NÃO recebeu posição tem o horário apagado.
+
+       Sem isto, aplicar o dimensionamento duas vezes deixava resíduo: o
+       horário da aplicação anterior continuava gravado em quem não foi
+       casado desta vez, e a Capacity mostrava horários que o
+       dimensionamento de hoje não pede. Horário em branco é a resposta
+       certa — essa pessoa não tem posição na malha, e é isso que o
+       contador de "sem horário" mostra. */
+    const comPosicao = new Set(resultado.atribuicoes.map(a => a.matricula));
+    const aLimpar = colabs
+      .filter(c => !comPosicao.has(c.matricula) && (c.entrada_manual || c.saida_manual))
+      .map(c => ({ base, mes, cenario: escalaCenario(), matricula: c.matricula, nome: c.nome,
+                   entrada_manual: null, saida_manual: null }));
+    for (let i = 0; i < aLimpar.length; i += LOTE) {
+      const { error } = await db.from('escala_colaborador')
+        .upsert(aLimpar.slice(i, i + LOTE), { onConflict: 'base,mes,cenario,matricula' });
+      if (error) throw new Error(error.message);
+    }
+
     resultado.atribuicoes.forEach(a => {
       const c = colabs.find(x => x.matricula === a.matricula);
       if (c) { c.entrada_manual = a.entrada; c.saida_manual = a.saida; }
+    });
+    aLimpar.forEach(l => {
+      const c = colabs.find(x => x.matricula === l.matricula);
+      if (c) { c.entrada_manual = null; c.saida_manual = null; }
     });
 
     escalaGradeAtualiza();

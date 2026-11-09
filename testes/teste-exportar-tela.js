@@ -220,6 +220,67 @@ const GENTE = [
       ok(/Escala Base/.test(base.aoa[0][0]), 'e o título dentro também');
     }
 
+    sec('6b. Na Capacity, só o horário do dimensionamento sai');
+    {
+      /* A queixa, reproduzida: o dimensionamento começa 01:00, 02:30,
+         07:00, 11:00, 12:30, 16:00; a exportação trazia 00:00, 06:00 e
+         17:00, que não existem nele. Eram os horários do PONTO BATIDO —
+         a regra da Escala Base — aparecendo para quem não recebeu
+         posição, misturados na mesma coluna com os que receberam, sem
+         nada distinguindo um do outro. */
+      /* Página nova: as seções anteriores substituem
+         escalaEntradaEfetivaDoColab por um stub, e esta seção precisa
+         justamente da implementação de verdade — é a regra em teste. */
+      const p2 = await browser.newPage();
+      await p2.goto('file://' + tmp, { waitUntil: 'load' });
+      const r = await p2.evaluate(() => {
+        window._escalaBase = 'GRU'; window._escalaMes = '2026-11';
+        window._escalaDias = new Map(); window._escalaFeriados = new Map();
+        window._escalaOrdemColuna = null;
+        window._escalaColabs = [
+          // Recebeu posição do dimensionamento.
+          { matricula: '1', nome: 'COM POSICAO', funcao_manual: 'ASG LIMPEZA I',
+            ch_manual: 180, entrada_manual: '07:00', saida_manual: '13:00' },
+          // Não recebeu: na Base herdaria o ponto; na Capacity, não.
+          { matricula: '2', nome: 'SEM POSICAO', funcao_manual: 'ASG LIMPEZA I',
+            ch_manual: 180, entrada_manual: null, saida_manual: null },
+        ];
+        window.eoColabs = new Map(window._escalaColabs.map((c) =>
+          [c.matricula, { nome: c.nome, funcao: c.funcao_manual, ch: c.ch_manual, station: 'GRU' }]));
+        window.escalaFuncaoGrupoDoColab = (c) => ({ label: 'Limpeza' });
+        window.escalaAplicarFiltroSituacao = (l) => l;
+        // O ponto batido diz 00:00–06:00 para quem não tem posição.
+        window.escalaHorarioFixoDoColab = () => '00:00-06:00';
+
+        const colher = () => {
+          let cap = null; const orig = XLSX.writeFile;
+          XLSX.writeFile = (wb) => { cap = wb.Sheets.Escala; };
+          try { escalaExportarTelaExcel(); } finally { XLSX.writeFile = orig; }
+          return XLSX.utils.sheet_to_json(cap, { header: 1, defval: '' })
+            .slice(4).filter((l) => l[0]).map((l) => [l[0], l[5], l[6]]);
+        };
+        currentPage = 'capacity'; window._escalaCenario = 'dimensionada';
+        const capacity = colher();
+        currentPage = 'escala'; window._escalaCenario = 'planejada';
+        const planejada = colher();
+        return { capacity, planejada };
+      });
+
+      const cap = new Map(r.capacity.map((l) => [l[0], l[1]]));
+      eq(cap.get('1'), '07:00', 'quem recebeu posição sai com o horário do dimensionamento');
+      eq(cap.get('2'), '',
+        'e quem não recebeu sai EM BRANCO, não com o horário do ponto batido');
+      ok(!r.capacity.some((l) => l[1] === '00:00'),
+        'nenhum horário do ponto se mistura aos do dimensionamento na Capacity');
+
+      /* A Base mantém a regra dela, que é o motivo de as duas escalas
+         existirem separadas. Mudar a Capacity não pode mudar a Base. */
+      const base = new Map(r.planejada.map((l) => [l[0], l[1]]));
+      eq(base.get('2'), '00:00',
+        'na Base o ponto batido continua valendo — a regra dela não mudou');
+      await p2.close();
+    }
+
     sec('7. Nenhum erro de script');
     ok(erros.length === 0, 'a página rodou sem exceção' + (erros.length ? ': ' + erros.join(' | ') : ''));
   } finally {
