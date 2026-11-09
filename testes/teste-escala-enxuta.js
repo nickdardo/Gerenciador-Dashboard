@@ -711,6 +711,79 @@ function paginaDeTeste() {
         'e os dois números dizendo exatamente isso');
     }
 
+    sec('8j. Limpar colaboradores precisa durar a recarga');
+    {
+      /* O bug: a escala vazia era repovoada a partir do ponto batido, e
+         GRAVADA no banco. Limpar, trocar de mês ou dar F5, e todos
+         voltavam. A ação explícita da pessoa era desfeita sozinha, sem
+         nada dizendo por quê.
+
+         Para um mês novo o auto-preenchimento é conveniência; depois de
+         um "Limpar colaboradores", é o contrário disso. */
+      const r = await page.evaluate(() => {
+        window._escalaBase = 'GRU'; window._escalaMes = '2026-11';
+        const limpa = () => { try { localStorage.removeItem(escalaChaveEsvaziada('GRU', '2026-11')); } catch (_) {} };
+
+        window._escalaCenario = 'planejada'; limpa();
+        const mesNovo = escalaDeveAutoPopular('GRU', '2026-11', 0);
+        const jaTemGente = escalaDeveAutoPopular('GRU', '2026-11', 12);
+
+        escalaMarcarEsvaziada('GRU', '2026-11', true);
+        const depoisDeLimpar = escalaDeveAutoPopular('GRU', '2026-11', 0);
+
+        escalaMarcarEsvaziada('GRU', '2026-11', false);
+        const voltouAoNormal = escalaDeveAutoPopular('GRU', '2026-11', 0);
+
+        window._escalaCenario = 'dimensionada'; limpa();
+        const naCapacity = escalaDeveAutoPopular('GRU', '2026-11', 0);
+        window._escalaCenario = 'planejada';
+        return { mesNovo, jaTemGente, depoisDeLimpar, voltouAoNormal, naCapacity };
+      });
+
+      ok(r.mesNovo === true, 'mês novo e vazio continua sendo preenchido sozinho');
+      ok(r.jaTemGente === false, 'escala com gente nunca é repovoada por cima');
+      ok(r.depoisDeLimpar === false,
+        'depois de limpar, recarregar NÃO traz todo mundo de volta');
+      ok(r.voltouAoNormal === true,
+        'e adicionar alguém devolve o comportamento de mês novo');
+      ok(r.naCapacity === false,
+        'na Capacity nunca repovoa: ali o horário vem da malha, não do ponto batido');
+
+      /* A marca é por cenário: esvaziar a Base não pode decidir pela
+         Capacity, que tem regra própria. */
+      const porCenario = await page.evaluate(() => {
+        window._escalaCenario = 'planejada';
+        const a = escalaChaveEsvaziada('GRU', '2026-11');
+        window._escalaCenario = 'dimensionada';
+        const b = escalaChaveEsvaziada('GRU', '2026-11');
+        window._escalaCenario = 'planejada';
+        return a !== b;
+      });
+      ok(porCenario, 'a marca de esvaziada é separada por cenário');
+    }
+
+    sec('8k. A tela vazia diz por que está vazia');
+    {
+      const r = await page.evaluate(() => {
+        window._escalaCenario = 'planejada';
+        window._escalaColabs = []; window._escalaPosicoesDim = [];
+        window.eoColabs = new Map();
+        window.escalaAplicarFiltroSituacao = (l) => l;
+        try { localStorage.removeItem(escalaChaveEsvaziada('GRU', '2026-11')); } catch (_) {}
+        const normal = escalaGradeEnxutaHTML(2026, 11, 30);
+        escalaMarcarEsvaziada('GRU', '2026-11', true);
+        const esvaziada = escalaGradeEnxutaHTML(2026, 11, 30);
+        escalaMarcarEsvaziada('GRU', '2026-11', false);
+        return { normal, esvaziada };
+      });
+      ok(/Nenhum colaborador nesta escala ainda/.test(r.normal),
+        'mês novo diz que ainda não tem ninguém');
+      ok(/Escala esvaziada por você/.test(r.esvaziada),
+        'e escala limpa diz que foi você — não deixa a dúvida de se quebrou');
+      ok(/não se preenche sozinha/.test(r.esvaziada),
+        'explicando que ela não vai voltar sozinha');
+    }
+
     sec('9. Nenhum erro de script');
     ok(erros.length === 0, 'a página carregou sem exceção' + (erros.length ? ': ' + erros.join(' | ') : ''));
   } finally {

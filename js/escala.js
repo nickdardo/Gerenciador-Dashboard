@@ -822,9 +822,27 @@ async function escalaRenderGrade(el) {
   window._escalaTravada = !!travaRow?.travada;
   window._escalaTravaInfo = travaRow?.travada ? travaRow : null;
 
+  /* ── Auto-preenchimento: só quando ninguém esvaziou de propósito ──
+
+     A escala vazia era repovoada a partir do ponto batido, e GRAVADA no
+     banco. Para um mês novo isso é conveniência; depois de "Limpar
+     colaboradores", é a ação da pessoa sendo desfeita sozinha — limpar,
+     recarregar, e todos de volta, sem nada dizendo por quê.
+
+     Duas travas agora:
+
+     1) Na Capacity, nunca. Ali o horário vem do dimensionamento, não do
+        ponto — é a mesma confusão de regra entre as duas escalas que já
+        fazia aparecer horário que o dimensionamento não pede.
+
+     2) Na Base, não repovoa o que foi esvaziado de propósito. A marca
+        fica no navegador: some ao adicionar alguém, e some se a pessoa
+        abrir de outro computador, onde a escala volta a parecer um mês
+        novo. É o limite de guardar isso sem mudar o banco, e por isso o
+        aviso abaixo é explícito sobre o que acabou de acontecer. */
   let colabs = colabsIniciais || [];
   let autoPopulado = false;
-  if (!colabs.length) {
+  if (escalaDeveAutoPopular(base, mes, colabs.length)) {
     colabs = await escalaPopularAutomaticamente(base, mes);
     autoPopulado = colabs.length > 0;
   }
@@ -2750,10 +2768,14 @@ function escalaGradeEnxutaHTML(ano, mesNum, diasNoMes) {
      horários, faltam. Sair aqui escondia justamente isso. */
   const temMalha = escalaEhCapacity() && escalaMalhaDoDimensionamento().size > 0;
   if (!colabs.length && !temMalha) {
+    /* Se foi esvaziada de propósito, a tela diz isso. Senão, a pessoa que
+       limpou e recarregou fica sem saber se funcionou ou se quebrou. */
+    const esvaziada = escalaFoiEsvaziada(window._escalaBase, window._escalaMes);
     return `<div class="escala-enx-vazia">
-      <p>Nenhum colaborador nesta escala ainda.</p>
-      <p class="sub">Use <b>Aplicar horário Dimensionamento</b> para montar a partir do que foi planejado,
-         ou <b>Preencher com Staff</b> para trazer a base inteira.</p>
+      <p>${esvaziada ? 'Escala esvaziada por você.' : 'Nenhum colaborador nesta escala ainda.'}</p>
+      <p class="sub">${esvaziada
+        ? 'Ela não se preenche sozinha enquanto estiver assim. Use <b>Preencher com Staff</b> ou adicione por matrícula quando quiser montá-la de novo.'
+        : 'Use <b>Aplicar horário Dimensionamento</b> para montar a partir do que foi planejado, ou <b>Preencher com Staff</b> para trazer a base inteira.'}</p>
     </div>`;
   }
 
@@ -2988,6 +3010,7 @@ async function escalaVagaCommit(el) {
 
   window._escalaColabs = [...(window._escalaColabs || []), data];
   escalaDesmarcarRetirado(mat);
+  escalaMarcarEsvaziada(window._escalaBase, window._escalaMes, false);
   escalaGradeAtualiza();
   escalaMsg(`${reg.nome || mat} entrou na posição de ${entrada || 'horário indefinido'}.`);
 }
@@ -3404,6 +3427,8 @@ async function escalaAdicionarColab(matricula) {
   if (error) { alert('Erro ao adicionar: ' + error.message); return false; }
   window._escalaColabs = [...(window._escalaColabs||[]), data];
   escalaDesmarcarRetirado(matricula);
+  // Entrou gente: a escala deixou de estar esvaziada de propósito.
+  escalaMarcarEsvaziada(window._escalaBase, window._escalaMes, false);
   escalaGradeAtualiza();
   return true;
 }
@@ -3694,21 +3719,59 @@ async function escalaPreencherTodoStaff() {
   }
 
   window._escalaColabs = await escalaFetchColaboradores(base, window._escalaMes, 'created_at');
+  escalaMarcarEsvaziada(base, window._escalaMes, false);
   escalaGradeAtualiza();
   escalaMsg(`${novos.length} colaborador${novos.length===1?'':'es'} adicionado${novos.length===1?'':'s'} — organizados por função e horário de entrada.`);
+}
+
+/* A decisão de repovoar, isolada para poder ser conferida sozinha. */
+function escalaDeveAutoPopular(base, mes, quantosJaTem) {
+  if (quantosJaTem) return false;                 // já tem gente: nada a fazer
+  if (escalaEhCapacity()) return false;           // ali o horário vem da malha, não do ponto
+  if (escalaFoiEsvaziada(base, mes)) return false; // alguém esvaziou de propósito
+  return true;
+}
+
+/* A marca de "esvaziada de propósito", por base+mês+cenário. */
+function escalaChaveEsvaziada(base, mes) {
+  return `gde_escala_esvaziada_${base}_${mes}_${escalaCenario()}`;
+}
+function escalaFoiEsvaziada(base, mes) {
+  try { return localStorage.getItem(escalaChaveEsvaziada(base, mes)) === '1'; } catch (_) { return false; }
+}
+function escalaMarcarEsvaziada(base, mes, valor) {
+  try {
+    if (valor) localStorage.setItem(escalaChaveEsvaziada(base, mes), '1');
+    else localStorage.removeItem(escalaChaveEsvaziada(base, mes));
+  } catch (_) {}
 }
 
 async function escalaLimparColaboradores() {
   if (escalaVerificarTravada()) return;
   if (!confirm('Remover TODOS os colaboradores dessa escala (base+mês)? Isso também apaga todas as marcações de F/K/CH/J deles. Não dá pra desfazer.')) return;
-  const base = window._escalaBase, mes = window._escalaMes;
-  await db.from('escala_dia').delete().eq('base', base).eq('mes', mes).eq('cenario', escalaCenario());
-  const { error } = await db.from('escala_colaborador').delete().eq('base', base).eq('mes', mes).eq('cenario', escalaCenario());
+  const base = window._escalaBase, mes = window._escalaMes, cen = escalaCenario();
+  const quantos = (window._escalaColabs || []).length;
+
+  await db.from('escala_dia').delete().eq('base', base).eq('mes', mes).eq('cenario', cen);
+  /* O .select() devolve as linhas apagadas. Sem ele, uma política de
+     acesso que proíba o DELETE devolve sucesso com zero linhas afetadas,
+     e o painel anunciava "removidos" sem ter removido nada — a pessoa só
+     descobria ao recarregar. */
+  const { data: apagados, error } = await db.from('escala_colaborador').delete()
+    .eq('base', base).eq('mes', mes).eq('cenario', cen).select('matricula');
   if (error) { escalaMsg('Erro ao limpar: ' + error.message, true); return; }
+  if (quantos && (!apagados || !apagados.length)) {
+    escalaMsg(`Nada foi removido: o banco recusou a exclusão de ${quantos} colaborador(es), `
+      + `sem dar erro. Verifique as permissões de exclusão desta escala.`, true);
+    return;
+  }
+
+  escalaMarcarEsvaziada(base, mes, true);
   window._escalaColabs = [];
   window._escalaDias = new Map();
   escalaGradeAtualiza();
-  escalaMsg('Todos os colaboradores foram removidos dessa escala.');
+  escalaMsg(`${apagados ? apagados.length : quantos} colaborador(es) removidos. `
+    + `A escala fica vazia até você adicionar alguém — não volta sozinha ao recarregar.`);
 }
 
 async function escalaLimparStatus() {
