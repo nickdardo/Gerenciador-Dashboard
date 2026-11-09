@@ -325,6 +325,88 @@ const GENTE = [
       await p3.close();
     }
 
+    sec('6d. Horário que o dimensionamento não pede não chega à planilha');
+    {
+      /* A queixa, reproduzida: o dimensionamento começa 00:00, 07:00 e
+         11:00; a exportação trazia 21 pessoas às 06:00–12:00. Às 06:00
+         não começa ninguém — o que existe ali é o FIM da barra das
+         00:00. Aqueles valores estavam gravados em escala_colaborador de
+         aplicações antigas, e a tela os exibia como se fossem da malha,
+         porque bastava estarem na coluna.
+
+         A regra agora é outra: na Capacity, horário só existe se a malha
+         do GRUPO da pessoa o pedir. Resíduo não vira linha, não vira
+         célula de planilha e não entra na conta de cobertura. */
+      const p4 = await browser.newPage();
+      await p4.goto('file://' + tmp, { waitUntil: 'load' });
+      const r = await p4.evaluate(() => {
+        window._escalaBase = 'GRU'; window._escalaMes = '2026-11';
+        window._escalaCenario = 'dimensionada'; currentPage = 'capacity';
+        window._escalaDias = new Map(); window._escalaFeriados = new Map();
+        window._escalaOrdemColuna = null;
+        window._escalaPosicoesDim = [
+          { funcao: 'ASG LIMPEZA I', entrada: '00:00', saida: '06:00', carga: 180, qtd: 2 },
+          { funcao: 'ASG LIMPEZA I', entrada: '07:00', saida: '13:00', carga: 180, qtd: 1 },
+        ];
+        window.escalaCarregarMapaDim = () => ({ 'ASG LIMPEZA I': 'Limpeza' });
+        window._escalaColabs = [
+          // Horário que a malha pede.
+          { matricula: '1', nome: 'ANA', funcao_manual: 'ASG LIMPEZA I', ch_manual: 180,
+            entrada_manual: '00:00', saida_manual: '06:00' },
+          // 06:00 é o FIM da barra das 00:00, não um início. Resíduo.
+          { matricula: '2', nome: 'BIA', funcao_manual: 'ASG LIMPEZA I', ch_manual: 180,
+            entrada_manual: '06:00', saida_manual: '12:00' },
+          // Saída gravada sem entrada: não pode virar "saída solta".
+          { matricula: '3', nome: 'CAIO', funcao_manual: 'ASG LIMPEZA I', ch_manual: 180,
+            entrada_manual: null, saida_manual: '18:00' },
+        ];
+        window.eoColabs = new Map(window._escalaColabs.map((c) =>
+          [c.matricula, { nome: c.nome, funcao: c.funcao_manual, ch: c.ch_manual, station: 'GRU' }]));
+        window.escalaFuncaoGrupoDoColab = () => ({ label: 'Limpeza' });
+        window.escalaAplicarFiltroSituacao = (l) => l;
+
+        let cap = null; const orig = XLSX.writeFile;
+        XLSX.writeFile = (wb) => { cap = wb.Sheets.Escala; };
+        try { escalaExportarTelaExcel(); } finally { XLSX.writeFile = orig; }
+        return {
+          linhas: XLSX.utils.sheet_to_json(cap, { header: 1, defval: '' })
+            .slice(4).filter((l) => l[1]).map((l) => [l[1], l[5], l[6]]),
+          residuo: escalaHorariosForaDaMalha().map((p) => p.matricula),
+        };
+      });
+
+      const porNome = new Map(r.linhas.map((l) => [l[0], [l[1], l[2]]]));
+      eq((porNome.get('ANA') || [])[0], '00:00',
+        'quem está num horário da malha sai com ele');
+      eq((porNome.get('BIA') || [])[0], '',
+        'as 06:00, que a malha não pede, NÃO aparecem — era esta a queixa');
+      eq((porNome.get('CAIO') || [])[1], '',
+        'e saída gravada sem entrada não vira "saída solta", que parece dado e não é');
+
+      eq(r.residuo.join(), '2', 'o resíduo é identificado por matrícula, para poder ser apagado');
+
+      /* Malha vazia é "dimensionamento não carregou", não "nenhum horário
+         vale". Apagar a escala da tela por uma leitura que falhou troca
+         um dado errado por um susto — e o susto parece perda de dado. */
+      const semMalha = await p4.evaluate(() => {
+        window._escalaPosicoesDim = [];
+        return {
+          entrada: escalaEntradaEfetivaDoColab(window._escalaColabs[1], 2026, 11, 30),
+          residuo: escalaHorariosForaDaMalha().length,
+        };
+      });
+      eq(semMalha.entrada, '06:00',
+        'sem dimensionamento carregado, o horário gravado continua à vista');
+      eq(semMalha.residuo, 0, 'e nada é acusado de resíduo sem haver com o que comparar');
+
+      /* Com as 06:00 fora, a posição das 00:00 que BIA ocupava
+         indevidamente volta a contar como vaga a preencher. */
+      const vagas = r.linhas.filter((l) => l[0] === '(vaga)');
+      eq(vagas.length, 2,
+        'e as posições que ninguém cobre de verdade reaparecem como vaga');
+      await p4.close();
+    }
+
     sec('7. Nenhum erro de script');
     ok(erros.length === 0, 'a página rodou sem exceção' + (erros.length ? ': ' + erros.join(' | ') : ''));
   } finally {

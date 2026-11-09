@@ -4437,3 +4437,17 @@ body.escala-modo-grade .escala-fill { margin-top: 0; }
 .escala-modal-caixa label .adh-month-select,
 .escala-modal-caixa label input { display: block; width: 100%; margin-top: 4px; }
 .escala-modal-acoes { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+
+/* Resíduo de horário: o que está no banco e a malha não pede. Vermelho
+   porque é dado errado, não apenas pendência. */
+.escala-chip-residuo { border-color: #c02a2a; color: #a01f1f; display: inline-flex; align-items: center; gap: 5px; }
+.escala-chip-residuo .n {
+  font-weight: 700; font-variant-numeric: tabular-nums;
+  background: #a01f1f; color: #fff; border-radius: 9px; padding: 0 6px;
+}
+[data-theme="dark"] .escala-chip-residuo { border-color: #fc8181; color: #fc8181; }
+[data-theme="dark"] .escala-chip-residuo .n { background: #8a1f1f; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .escala-chip-residuo { border-color: #fc8181; color: #fc8181; }
+  :root:not([data-theme="light"]) .escala-chip-residuo .n { background: #8a1f1f; }
+}

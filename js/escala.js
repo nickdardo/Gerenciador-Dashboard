@@ -1425,11 +1425,99 @@ function escalaHorarioFixoDoColab(matricula, ano, mesNum, diasNoMes) {
    efetivo. */
 const escalaPontoValeComoHorario = () => !escalaEhCapacity();
 
+/* Na Capacity, um horário só EXISTE se o dimensionamento o pede.
+
+   Esta é a regra que faltava, e é o que torna impossível o problema em
+   vez de só improvável. Antes bastava o valor estar gravado em
+   escala_colaborador para a tela mostrá-lo — e ele podia ter sido
+   gravado por uma aplicação de semanas atrás, por um dimensionamento que
+   já foi substituído, ou por um "Preencher com Staff" de quando esse
+   botão ainda existia aqui. A tela não tinha como saber a diferença, e
+   quem lia a escala também não.
+
+   Agora o horário gravado é CONFERIDO contra a malha do grupo da pessoa.
+   Bate, aparece. Não bate, é resíduo: a pessoa aparece sem horário e a
+   posição correspondente aparece como vaga. Nenhum horário que o
+   dimensionamento não peça chega à tela, à exportação ou às folgas.
+
+   Isso vale só para a Capacity. A Base tem a regra dela — ponto batido e
+   mês anterior — e continua intocada. */
+function escalaHorarioValidoNaMalha(c) {
+  const entrada = c.entrada_manual;
+  if (!entrada) return null;
+  const todas = escalaMalhaDoDimensionamento();
+
+  /* Malha inteira vazia é "dimensionamento ainda não carregado", não
+     "nenhum horário é válido". Apagar a escala da tela por causa de uma
+     leitura que falhou seria trocar um dado errado por um susto — e o
+     susto parece perda de dado, que é pior. Sem malha, não há o que
+     conferir: mostra o que está gravado. */
+  if (!todas.size) return { entrada, saida: c.saida_manual || '' };
+
+  const grupo = escalaFuncaoGrupoDoColab(c).label;
+  const malha = todas.get(grupo);
+  if (!malha) return null;   // o grupo não está na malha: nada a honrar aqui
+  for (const [, h] of malha) {
+    if (h.entrada === entrada) return h;
+  }
+  return null;
+}
+
 function escalaEntradaEfetivaDoColab(c, ano, mesNum, diasNoMes) {
-  if (!escalaPontoValeComoHorario()) return c.entrada_manual || '';
+  if (!escalaPontoValeComoHorario()) {
+    return escalaHorarioValidoNaMalha(c) ? c.entrada_manual : '';
+  }
   const horarioFixo = escalaHorarioFixoDoColab(c.matricula, ano, mesNum, diasNoMes);
   const [entradaCalc] = horarioFixo ? horarioFixo.split('-') : [null];
   return c.entrada_manual || entradaCalc || '';
+}
+
+/* Sem entrada não há saída. Parece óbvio, e não era: a saída vinha de
+   saida_manual sozinha, então um resíduo podia mostrar "saída 12:00"
+   numa linha sem entrada nenhuma — o pior dos dois mundos, porque
+   parece dado e não é. */
+function escalaSaidaEfetivaDoColab(c, entrada, ch) {
+  if (!entrada) return '';
+  return c.saida_manual || escalaSaidaCalculada(entrada, ch) || '';
+}
+
+/* Quem carrega horário que a malha não conhece. É resíduo, e vale ser
+   contado: enquanto estiver no banco, volta a aparecer em qualquer
+   relatório que leia a coluna crua. */
+function escalaHorariosForaDaMalha() {
+  if (!escalaEhCapacity()) return [];
+  return (window._escalaColabs || [])
+    .filter((c) => c.entrada_manual && !escalaHorarioValidoNaMalha(c))
+    .map((c) => ({ matricula: c.matricula, nome: c.nome || '',
+                   entrada: c.entrada_manual, saida: c.saida_manual || '' }));
+}
+
+/* Apaga esse resíduo do banco, para a coluna crua passar a concordar com
+   o que a tela mostra. */
+async function escalaLimparHorariosForaDaMalha() {
+  const fora = escalaHorariosForaDaMalha();
+  if (!fora.length) { escalaMsg('Nenhum horário fora do dimensionamento.'); return; }
+  if (escalaVerificarTravada()) return;
+  if (!confirm(`${fora.length} pessoa(s) têm horário que o dimensionamento deste mês não pede.\n\n`
+    + `Eles já não aparecem na tela, mas continuam gravados e voltam em qualquer\n`
+    + `relatório que leia a coluna direto do banco.\n\nApagar esses horários?`)) return;
+
+  const base = window._escalaBase, mes = window._escalaMes, cen = escalaCenario();
+  const linhas = fora.map((p) => ({ base, mes, cenario: cen, matricula: p.matricula,
+                                    nome: p.nome, entrada_manual: null, saida_manual: null }));
+  escalaMostrarLoading(`Limpando ${linhas.length} horário(s)...`);
+  for (let i = 0; i < linhas.length; i += 200) {
+    const { error } = await db.from('escala_colaborador')
+      .upsert(linhas.slice(i, i + 200), { onConflict: 'base,mes,cenario,matricula' });
+    if (error) { escalaGradeAtualiza(); escalaMsg('Erro ao limpar: ' + error.message, true); return; }
+    escalaLoadingAtualiza(Math.min(i + 200, linhas.length), linhas.length);
+  }
+  fora.forEach((p) => {
+    const c = (window._escalaColabs || []).find((x) => x.matricula === p.matricula);
+    if (c) { c.entrada_manual = null; c.saida_manual = null; }
+  });
+  escalaGradeAtualiza();
+  escalaMsg(`${fora.length} horário(s) fora do dimensionamento apagados.`);
 }
 
 // Mesma lógica da entrada/saída fixa (moda do mês), mas usando o segundo
@@ -1715,7 +1803,19 @@ function escalaChipsHTML() {
     ? chips.map((c) => `<button type="button" class="escala-chip" onclick="escalaToggleFerramentas()"
         title="${escalaEscapeAttr(c.dica)} — clique para abrir as ferramentas">${escalaEscapeAttr(c.rot)}</button>`).join('')
     : `<span class="escala-chip-vazio">sem filtros</span>`;
-  return filtros + escalaChipSemHorario();
+  return filtros + escalaChipSemHorario() + escalaChipForaDaMalha();
+}
+
+/* Resíduo de horário, avisado na faixa. Ele não aparece mais na grade,
+   mas continua no banco — e quem exporta pelo Admin, ou lê a tabela
+   direto, ainda o encontra. */
+function escalaChipForaDaMalha() {
+  const fora = escalaHorariosForaDaMalha();
+  if (!fora.length) return '';
+  return `<button type="button" class="escala-chip escala-chip-residuo"
+    onclick="escalaLimparHorariosForaDaMalha()"
+    title="${fora.length} pessoa(s) com horário que o dimensionamento deste mês não pede. Já não aparecem na grade; clique para apagá-los do banco.">
+    <span class="n">${fora.length}</span> horário(s) fora do dimensionamento</button>`;
 }
 
 /* Quem saiu da escala não pode simplesmente sumir da vista.
@@ -3019,7 +3119,7 @@ function escalaGradeEnxutaHTML(ano, mesNum, diasNoMes) {
       const funcao = info?.funcao || c.funcao_manual || '—';
       const ch = info?.ch || c.ch_manual || '';
       const entrada = escalaEntradaEfetivaDoColab(c, ano, mesNum, diasNoMes) || '';
-      const saida = c.saida_manual || escalaSaidaCalculada(entrada, ch) || '';
+      const saida = escalaSaidaEfetivaDoColab(c, entrada, ch);
       const conteudo = escalaConteudoDoMes(c, ano, mesNum, diasNoMes);
 
       const folgasDias = escalaFolgasDoColab(c, ano, mesNum, diasNoMes, window._escalaDias);
@@ -8144,7 +8244,7 @@ function escalaExportarTelaExcel() {
     const info = window.eoColabs?.get(c.matricula);
     const ch = info?.ch || c.ch_manual || '';
     const entrada = escalaEntradaEfetivaDoColab(c, ano, mesNum, D) || '';
-    const saida = c.saida_manual || escalaSaidaCalculada(entrada, ch) || '';
+    const saida = escalaSaidaEfetivaDoColab(c, entrada, ch);
     const conteudo = escalaConteudoDoMes(c, ano, mesNum, D);
 
     const folgasDias = escalaFolgasDoColab(c, ano, mesNum, D, window._escalaDias);
