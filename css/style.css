@@ -3995,3 +3995,12 @@ body.escala-modo-grade .escala-fill { margin-top: 0; }
 .escala-enx-vazia p { margin: 0 0 6px; font-size: 14px; color: var(--text-secondary); }
 .escala-enx-vazia .sub { font-size: 12.5px; color: var(--text-muted); }
 .escala-enx-vazia b { color: var(--text-primary); }
+
+/* Etiqueta do cenário na barra de ferramentas. Era um seletor; virou
+   rótulo quando cada escala ganhou porta própria no menu — poder trocar
+   de cenário por ali contradiria o nome da página. */
+.escala-cenario-tag {
+  display: inline-flex; align-items: center; height: 30px; padding: 0 12px;
+  border: 1px solid; border-radius: 8px;
+  font-size: 12px; font-weight: 600; letter-spacing: .02em; white-space: nowrap;
+}

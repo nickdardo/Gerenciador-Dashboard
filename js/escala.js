@@ -51,37 +51,54 @@ function escalaIconeSolto(nome, tamanho) {
 }
 
 /* ══════════════════════════════════════════════════════
-   ESPELHO ESCALA — a página do menu lateral
+   AS DUAS ESCALAS
 
-   Mesmos dados da Escala Online, guardados no cenário 'enxuta': por isso
-   trava, histórico e exportação para o DP funcionam sem nada novo. O que
-   muda é a porta — item próprio no menu em vez de um valor escondido num
-   seletor — e a grade, reduzida ao que se usa para distribuir folga.
+   Mesma tela, mesmo layout, mesmas regras de folga — o que muda é DE ONDE
+   vêm os horários:
 
-   As duas páginas coagem o cenário ao entrar. Sem isso, quem saísse do
-   Espelho e voltasse pela Escala Online encontraria a grade enxuta lá,
-   porque o cenário fica guardado no navegador entre sessões.
+     Escala Base      cenário 'planejada'    histórico e mês anterior
+     Escala Capacity  cenário 'dimensionada' o dimensionamento subido no painel
+
+   Por serem dois cenários do mesmo registro, a trava, o histórico e a
+   exportação para o DP funcionam nas duas sem nada novo. E por serem
+   cenários distintos, o Comparador consegue pôr uma contra a outra: é
+   exatamente essa diferença que mostra onde a escala real se afastou do
+   que a malha pedia.
+
+   Cada página COAGE o seu cenário ao entrar. O cenário fica guardado no
+   navegador entre sessões, então sem isso quem saísse da Capacity e
+   voltasse pela Base encontraria os horários do dimensionamento lá,
+   achando que eram os seus.
+
+   O cenário deixou de ser um seletor no topo: a porta decide. Um seletor
+   que contradiz o nome da página é um jeito garantido de alguém editar a
+   escala errada sem perceber.
    ══════════════════════════════════════════════════════ */
-const ESCALA_TITULO = () => (escalaEhEnxuta() ? 'Espelho Escala' : 'Escala Online');
+const ESCALA_PAGINAS = {
+  escala:   { cenario: 'planejada',    titulo: 'Escala Base',
+              sub: 'Calendário mensal · histórico e mês anterior' },
+  capacity: { cenario: 'dimensionada', titulo: 'Escala Capacity',
+              sub: 'Calendário mensal · horários do dimensionamento' },
+};
+const escalaPaginaAtual = () =>
+  ESCALA_PAGINAS[typeof currentPage !== 'undefined' ? currentPage : 'escala'] || ESCALA_PAGINAS.escala;
+const ESCALA_TITULO = () => escalaPaginaAtual().titulo;
 
-async function pageEspelho(el) {
-  window._escalaCenario = 'enxuta';
-  try { localStorage.setItem('gde_escala_cenario', 'enxuta'); } catch (_) {}
+async function pageCapacity(el) {
   escalaEsquecerContagemDim(window._escalaBase, window._escalaMes);
   return pageEscala(el);
 }
 
 async function pageEscala(el) {
-  // Chegando pela Escala Online, o cenário enxuto não vale — ele pertence
-  // ao Espelho. Quem vem pelo Espelho já marcou antes de chamar aqui.
-  if (currentPage !== 'espelho' && escalaCenario() === 'enxuta') {
-    window._escalaCenario = 'planejada';
-    try { localStorage.setItem('gde_escala_cenario', 'planejada'); } catch (_) {}
-  }
+  // A porta manda no cenário, sempre — inclusive apagando o que ficou
+  // guardado de uma visita anterior à outra escala.
+  const pag = escalaPaginaAtual();
+  window._escalaCenario = pag.cenario;
+  try { localStorage.setItem('gde_escala_cenario', pag.cenario); } catch (_) {}
   el.innerHTML = `
     <div class="page-header"><div>
       <h1 class="page-title">${ESCALA_TITULO()}</h1>
-      <p class="page-sub">Calendário mensal · preenchimento e folgas</p>
+      <p class="page-sub">${escalaPaginaAtual().sub}</p>
     </div></div>
     <div class="adm-empty-state">
       <i class="ti ti-loader-2" style="font-size:32px;opacity:.4;animation:spin 1s linear infinite" aria-hidden="true"></i>
@@ -680,10 +697,11 @@ async function escalaRenderGrade(el) {
     setTimeout(() => escalaAplicarDimensionamento(true), 400);
   }
 
-  /* Enxuta sem dimensionamento não desenha grade. Não é teimosia: os
+  /* A Capacity sem dimensionamento não desenha grade. Não é teimosia: os
      horários vêm dele, e distribuir folga sobre horário errado é trabalho
-     que se joga fora inteiro quando o arquivo certo chega. */
-  if (escalaEhEnxuta()) {
+     que se joga fora inteiro quando o arquivo certo chega. A Base não tem
+     essa trava — ela se vira com o histórico e o mês anterior. */
+  if (escalaEhCapacity()) {
     const n = await escalaDimensionamentoContagem(base, mes);
     if (n === 0 || n === -1) {
       // A tela de bloqueio precisa das bases: é por ela que se troca de
@@ -830,12 +848,13 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
           ? `<select class="adh-month-select" onchange="escalaSetBase(this.value)">${bases.map(b=>`<option value="${b}" ${b===base?'selected':''}>${b}</option>`).join('')}</select>`
           : `<span class="adh-base-badge">${base||'—'}</span>`}
         <select class="adh-month-select" onchange="escalaSetMes(this.value)">${escalaMesOptionsHTML(mes)}</select>
-        ${escalaEhEnxuta() ? '' : `
-        <select class="adh-month-select" onchange="escalaSetCenario(this.value)"
-          title="Duas escalas paralelas pro mesmo mês. A Planejada é a de sempre; a Dimensionada recebe os horários do Gerador."
-          style="border-color:${escalaCenarioInfo().cor}66;color:${escalaCenarioInfo().cor};font-weight:600">
-          ${ESCALA_CENARIOS.filter(c => c.valor !== 'enxuta').map(c => `<option value="${c.valor}" ${escalaCenario()===c.valor?'selected':''}>Escala ${c.label}</option>`).join('')}
-        </select>`}
+        <!-- O seletor de cenário saiu: agora cada escala tem a sua porta no
+             menu lateral, e um seletor que contradiz o nome da página é um
+             jeito garantido de alguém editar a escala errada sem perceber.
+             O que fica é a etiqueta, dizendo em qual delas você está. -->
+        <span class="escala-cenario-tag"
+          style="border-color:${escalaCenarioInfo().cor}66;color:${escalaCenarioInfo().cor}"
+          title="${escalaEscapeAttr(escalaCenarioInfo().descricao)}">${escalaEscapeAttr(ESCALA_TITULO())}</span>
         <button class="adh-refresh-btn" id="escala-btn-comparar" style="display:none;border-color:#9f7aea66;color:#b794f4"
           onclick="escalaIrParaComparador()"
           title="Compara a escala Planejada com a Dimensionada — cobertura por dia, distribuição por turno e quem muda de horário">
@@ -1784,7 +1803,9 @@ const ESCALA_MODOS_COLUNA = {
 };
 const escalaModoColunas = () =>
   (ESCALA_MODOS_COLUNA[window._escalaModoColunas] ? window._escalaModoColunas : 'enxuto');
-const escalaGradeEhEnxuta = () => escalaModoColunas() === 'enxuto' || escalaEhEnxuta();
+// O layout enxuto vale para as duas escalas; o botão Colunas devolve as
+// outras quando o trabalho pedir.
+const escalaGradeEhEnxuta = () => escalaModoColunas() === 'enxuto' || escalaEhCapacity();
 
 function escalaCiclarModoColunas() {
   window._escalaModoColunas = ESCALA_MODOS_COLUNA[escalaModoColunas()].proximo;
@@ -2275,9 +2296,9 @@ function escalaMarcaRegra(ok) {
 }
 
 function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
-  /* A grade enxuta vale para as duas telas. No Espelho ela é a única
-     forma; na Escala Online é o modo de coluna escolhido, e o botão
-     "Colunas" devolve as outras quando o trabalho pedir. */
+  /* O layout enxuto vale para as duas escalas: na Capacity é a única
+     forma, na Base é o modo de coluna escolhido. O botão "Colunas"
+     devolve as outras quando o trabalho pedir. */
   if (escalaGradeEhEnxuta()) return escalaGradeEnxutaHTML(ano, mesNum, diasNoMes);
   // Coletor das saidas cujo valor no banco difere do calculado. Preenchido
   // linha a linha durante a montagem e lido depois pelo aviso do rodape.
@@ -4425,11 +4446,10 @@ const ESCALA_CENARIOS = [
     descricao: 'Escala montada a partir do histórico e do mês anterior' },
   { valor: 'dimensionada', label: 'Dimensionada', cor: '#9f7aea',
     descricao: 'Horários vindos do dimensionamento da malha (Gerador)' },
-  /* O cenário enxuto não aparece no seletor: a porta dele é o item
-     "Espelho Escala" no menu lateral. O registro segue aqui porque é o
-     que grava `cenario` no banco, junto da trava e do histórico. */
-  { valor: 'enxuta',       label: 'Espelho Escala', cor: '#3aa17e',
-    descricao: 'Grade reduzida: matrícula, função e os dias. Parte do dimensionamento da base' },
+  /* 'enxuta' saiu: era um terceiro cenário fazendo o mesmo que o
+     'dimensionada' — os dois puxavam do dimensionamento. A Capacity
+     passou a gravar no 'dimensionada', que é o que o Comparador já lê, e
+     o que havia no 'enxuta' é movido por sql/migrar_enxuta.sql. */
 ];
 
 /* ══════════════════════════════════════════════════════
@@ -4444,14 +4464,18 @@ const ESCALA_CENARIOS = [
    folga sobre horário chutado é o tipo de trabalho que se refaz inteiro
    quando o dimensionamento chega.
    ══════════════════════════════════════════════════════ */
-const escalaEhEnxuta = () => escalaCenario() === 'enxuta';
+/* A Capacity só abre com dimensionamento salvo — é dele que ela tira os
+   horários. Montar folga sobre horário chutado é trabalho que se joga
+   fora inteiro quando o arquivo certo chega. */
+const escalaEhCapacity = () => escalaCenario() === 'dimensionada';
+const escalaEhEnxuta = escalaEhCapacity;   // nome antigo, mesmo sentido
 
 /* Quantas posições o dimensionamento tem para esta base e mês. Guardado em
    memória por base|mês: a grade remonta a cada tecla digitada e não dá
    para ir ao banco toda vez. */
 /* Quais bases esta pessoa pode abrir. Admin vê todas as do cadastro; os
    demais, só as do próprio perfil. Estava escrito em três telas; virou um
-   lugar só porque a tela de bloqueio do Espelho também precisa da lista —
+   lugar só porque a tela de bloqueio da Capacity também precisa da lista —
    sem ela, quem caísse numa base sem dimensionamento ficava preso nela. */
 function escalaBasesDoUsuario() {
   const perfil = typeof currentUserProfile !== 'undefined' ? currentUserProfile : null;
@@ -4538,7 +4562,7 @@ function escalaEnxutaBloqueioHTML(base, mes, contagem, bases, dim) {
       <h2>${falhou ? 'Não consegui ler o dimensionamento' : 'Falta o dimensionamento desta base'}</h2>
       <p>${falhou
         ? `A consulta ao dimensionamento de <b>${escalaEscapeAttr(base)}</b> não respondeu. Tente de novo em instantes; se persistir, avise.`
-        : `O Espelho começa pelo que foi planejado: os horários de cada posição saem do dimensionamento de
+        : `A Escala Capacity parte do dimensionamento: os horários de cada posição saem do que foi planejado para
            <b>${escalaEscapeAttr(base)}</b> em <b>${escalaEscapeAttr(mesLabel)}</b>, e ainda não há nenhum salvo para esse par.`}</p>
       ${falhou ? '' : `<p class="escala-enx-bloq-sub">Suba o arquivo no <b>Gerador</b>, escolha a base e o mês, e volte aqui. A
          <b>Escala Online</b> continua funcionando normalmente enquanto isso.</p>`}
@@ -4576,7 +4600,7 @@ function escalaCenarioInfo() {
 async function escalaSetCenario(valor) {
   if (valor === escalaCenario()) return;
   // Entrar na Enxuta reconfere o dimensionamento: pode ter subido agora.
-  if (valor === 'enxuta') escalaEsquecerContagemDim(window._escalaBase, window._escalaMes);
+  if (valor === 'dimensionada') escalaEsquecerContagemDim(window._escalaBase, window._escalaMes);
   window._escalaCenario = valor;
   try { localStorage.setItem('gde_escala_cenario', valor); } catch (_) {}
   // Cada cenário tem os próprios dados: recarrega do zero em vez de
@@ -6102,7 +6126,7 @@ function escalaJornadaDoColab(matricula, c) {
 
 async function escalaAplicarDimensionamento(silencioso) {
   if (escalaCenario() === 'planejada') {
-    escalaMsg('O dimensionamento se aplica à Escala Dimensionada e ao Espelho Escala. Troque o cenário no topo ou abra o Espelho no menu lateral.', true);
+    escalaMsg('Os horários do dimensionamento pertencem à Escala Capacity. Abra-a no menu lateral.', true);
     return;
   }
   if (escalaVerificarTravada()) return;

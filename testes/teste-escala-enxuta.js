@@ -66,17 +66,25 @@ function paginaDeTeste() {
   await page.waitForFunction(() => typeof window.escalaCenario === 'function');
 
   try {
-    sec('1. O cenário existe e não atropela os outros dois');
+    sec('1. Dois cenários, uma porta para cada um');
     {
+      /* Eram três. O 'enxuta' saiu porque fazia o mesmo que o
+         'dimensionada' — os dois puxavam do dimensionamento — e dois
+         lugares para o mesmo dado é como a Capacity e o Comparador
+         acabariam olhando para metades diferentes da verdade. */
       const cen = await page.evaluate(() => ESCALA_CENARIOS.map((c) => c.valor));
-      ok(cen.length === 3, 'são três cenários (' + cen.join(', ') + ')');
+      ok(cen.length === 2, 'são dois cenários (' + cen.join(', ') + ')');
       ok(cen[0] === 'planejada' && cen[1] === 'dimensionada',
-        'Planejada e Dimensionada continuam onde estavam — a Enxuta entrou no fim');
-      ok(cen[2] === 'enxuta', 'e a Enxuta é a terceira');
+        'planejada para a Base, dimensionada para a Capacity');
+      ok(!cen.includes('enxuta'), "e 'enxuta' não está mais entre eles");
       const cores = await page.evaluate(() => ESCALA_CENARIOS.map((c) => c.cor));
-      ok(new Set(cores).size === 3, 'cada cenário tem cor própria, para o seletor não mentir');
-      ok(await page.evaluate(() => escalaCenario()) === 'planejada',
-        'sem escolha salva, continua abrindo na Planejada');
+      ok(new Set(cores).size === 2, 'cada um com a sua cor, para a etiqueta não mentir');
+
+      const pag = await page.evaluate(() => ESCALA_PAGINAS);
+      ok(pag.escala.cenario === 'planejada', 'a página escala grava na planejada');
+      ok(pag.capacity.cenario === 'dimensionada', 'e a capacity na dimensionada');
+      ok(pag.escala.titulo === 'Escala Base', 'os títulos são Escala Base');
+      ok(pag.capacity.titulo === 'Escala Capacity', 'e Escala Capacity');
     }
 
     sec('2. Sem dimensionamento, a grade não abre');
@@ -303,7 +311,7 @@ function paginaDeTeste() {
         'as regras novas ficam todas sob table.escala-enx');
     }
 
-    sec('8. O Espelho é porta própria no menu lateral');
+    sec('8. Cada escala é porta própria no menu lateral');
     {
       const app = fs.readFileSync(path.join(BASE, 'js', 'app.js'), 'utf8');
       const nav = app.match(/const NAV_ITEMS[\s\S]*?\n\];/);
@@ -312,22 +320,24 @@ function paginaDeTeste() {
         const linhas = nav[0].split('\n').filter((l) => /\bid:\s*'/.test(l));
         const ids = linhas.map((l) => l.match(/id:\s*'([^']+)'/)[1]);
         const iEscala = ids.indexOf('escala');
-        const iEspelho = ids.indexOf('espelho');
+        const iEspelho = ids.indexOf('capacity');
         ok(iEspelho === iEscala + 1,
-          'e o Espelho vem logo abaixo da Escala Online, como foi pedido');
-        ok(/id:\s*'espelho'[^\n]*'Espelho Escala'/.test(nav[0]),
-          'com o nome Espelho Escala no menu');
+          'a Capacity vem logo abaixo da Base, como foi pedido');
+        ok(/id:\s*'capacity'[^\n]*'Escala Capacity'/.test(nav[0]),
+          'com o nome Escala Capacity no menu');
+        ok(/id:\s*'escala'[^\n]*'Escala Base'/.test(nav[0]),
+          'e a outra chamada Escala Base');
       }
-      ok(/case 'espelho':\s*pageEspelho\(/.test(app),
-        'a rota do menu chama pageEspelho');
-      ok(/pageId === 'escala' \|\| pageId === 'espelho'/.test(app),
-        'e o botão de foco total vale para as duas telas');
+      ok(/case 'capacity':\s*pageCapacity\(/.test(app),
+        'a rota do menu chama pageCapacity');
+      ok(/pageId === 'escala' \|\| pageId === 'capacity'/.test(app),
+        'e o botão de ferramentas vale para as duas telas');
       // Recarregar a tela precisa voltar onde o usuário estava.
       ok(/paginasValidas = NAV_ITEMS\.map/.test(app),
         'as páginas válidas saem do próprio menu, então F5 no Espelho continua no Espelho');
 
       const i18n = fs.readFileSync(path.join(BASE, 'js', 'i18n.js'), 'utf8');
-      ok((i18n.match(/'nav\.espelho':/g) || []).length === 2,
+      ok((i18n.match(/'nav\.capacity':/g) || []).length === 2,
         'o rótulo está traduzido nos dois idiomas');
 
       /* Chave sem tradução não quebra nada — o t() devolve a própria chave,
@@ -347,21 +357,20 @@ function paginaDeTeste() {
 
       // A porta entra no cenário enxuto; entrar pela Escala Online sai dele.
       const fonte = fs.readFileSync(path.join(BASE, 'js', 'escala.js'), 'utf8');
-      ok(/async function pageEspelho/.test(fonte), 'pageEspelho existe');
-      ok(/currentPage !== 'espelho'[\s\S]{0,200}'planejada'/.test(fonte),
-        'e quem abre a Escala Online não cai no cenário do Espelho');
+      ok(/async function pageCapacity/.test(fonte), 'pageCapacity existe');
+      // A porta manda no cenário: sem isso, quem sai da Capacity e volta
+      // pela Base encontra os horários do dimensionamento achando que são
+      // os seus — o cenário fica guardado no navegador entre sessões.
+      ok(/window\._escalaCenario = pag\.cenario/.test(fonte),
+        'e a página coage o seu cenário ao entrar');
 
       // O título segue o cenário, e o seletor de cenário não aparece no
       // Espelho — a porta já diz qual escala é.
-      const tituloEnxuta = await page.evaluate(() => {
-        window._escalaCenario = 'enxuta'; return ESCALA_TITULO();
-      });
-      const tituloNormal = await page.evaluate(() => {
-        window._escalaCenario = 'planejada'; return ESCALA_TITULO();
-      });
-      ok(tituloEnxuta === 'Espelho Escala', 'no cenário enxuto o título é Espelho Escala');
-      ok(tituloNormal === 'Escala Online', 'nos outros, continua Escala Online');
-      ok(!/<h1 class="page-title">Escala Online<\/h1>/.test(fonte),
+      const tCap = await page.evaluate(() => { currentPage = 'capacity'; return ESCALA_TITULO(); });
+      const tBase = await page.evaluate(() => { currentPage = 'escala'; return ESCALA_TITULO(); });
+      ok(tCap === 'Escala Capacity', 'na página capacity o título é Escala Capacity');
+      ok(tBase === 'Escala Base', 'e na escala, Escala Base');
+      ok(!/<h1 class="page-title">Escala (Online|Base)<\/h1>/.test(fonte),
         'nenhum título ficou escrito na mão');
     }
 

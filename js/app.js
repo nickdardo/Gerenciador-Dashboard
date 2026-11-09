@@ -8,8 +8,8 @@ let currentPage = 'escala';
 const ALL_ROLES = ['admin','gerente','coordenador','supervisor','lideranca','operador'];
 
 const NAV_ITEMS = [
-  { id: 'escala',     icon: 'calendar',   label: 'Escala Online',  i18nKey: 'nav.escala',     roles: ALL_ROLES },
-  { id: 'espelho',    icon: 'grid',       label: 'Espelho Escala', i18nKey: 'nav.espelho',    roles: ALL_ROLES },
+  { id: 'escala',     icon: 'calendar',   label: 'Escala Base',     i18nKey: 'nav.escala',     roles: ALL_ROLES },
+  { id: 'capacity',   icon: 'grid',       label: 'Escala Capacity', i18nKey: 'nav.capacity',   roles: ALL_ROLES },
   { id: 'aderencia',  icon: 'clock',      label: 'Aderência',      i18nKey: 'nav.aderencia',  roles: ['admin','gerente','coordenador','supervisor','lideranca'] },
   { id: 'headcount',  icon: 'users',      label: 'Staff',      i18nKey: 'nav.staff',      roles: ['admin','gerente','coordenador','supervisor','lideranca'] },
   { id: 'gerador',    icon: 'settings',   label: 'Gerador',        i18nKey: 'nav.gerador',    roles: ['admin','gerente','coordenador','supervisor','lideranca'] },
@@ -174,7 +174,7 @@ function navigateTo(pageId) {
 
   // O modo grade só faz sentido onde existe grade.
   const foco = document.getElementById('tb-foco');
-  if (foco) foco.style.display = (pageId === 'escala' || pageId === 'espelho') ? '' : 'none';
+  if (foco) foco.style.display = (pageId === 'escala' || pageId === 'capacity') ? '' : 'none';
   document.body.classList.remove('escala-modo-grade');
 
   // Render page
@@ -184,7 +184,7 @@ function navigateTo(pageId) {
 
   switch (pageId) {
     case 'escala':     pageEscala(content);     break;
-    case 'espelho':    pageEspelho(content);    break;
+    case 'capacity':   pageCapacity(content);   break;
     case 'gerador':    pageGerador(content);    break;
     case 'comparador': pageComparador(content); break;
     case 'aderencia':  pageAderencia(content);  break;
