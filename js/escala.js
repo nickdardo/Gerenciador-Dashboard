@@ -884,6 +884,17 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
     ${escalaFaixaMiniHTML(dis, bases, mes, base)}
 
     <div class="hc-panel escala-ferr" id="escala-ferramentas" style="margin-bottom:16px">
+      <!-- Cabeçalho do menu: diz o que é e oferece a saída. Clicar fora e
+           o Esc continuam fechando, mas nenhum dos dois é visível — e um
+           menu que cobre a grade precisa mostrar como sair dele. -->
+      <div class="escala-ferr-topo">
+        <span class="escala-ferr-topo-tit">Ferramentas da escala</span>
+        <button type="button" class="escala-ferr-fechar" onclick="escalaToggleMenuFerramentas(false)"
+          aria-label="Fechar as ferramentas" title="Fechar (Esc)">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding-bottom:2px">
         <div style="position:relative;flex:1 1 240px;min-width:200px;max-width:320px">
           <input id="escala-busca" class="adh-search-input" ${dis} style="width:100%;box-sizing:border-box;padding:9px 12px;background:var(--bg-hover);border:1px solid var(--border-strong);border-radius:8px;color:var(--text-primary)"
@@ -1537,10 +1548,9 @@ function escalaFaixaMiniHTML(dis, bases, mes, base) {
             lista.map((b) => `<option value="${b}" ${b === base ? 'selected' : ''}>${b}</option>`).join('')}</select>`
         : `<span class="adh-base-badge">${base || '—'}</span>`}
       <select class="adh-month-select compacto" onchange="escalaSetMes(this.value)" title="Mês">${escalaMesOptionsHTML(mes)}</select>
-      <select class="adh-month-select compacto" onchange="escalaSetCenario(this.value)" title="Cenário"
-        style="border-color:${escalaCenarioInfo().cor}66;color:${escalaCenarioInfo().cor};font-weight:600">
-        ${ESCALA_CENARIOS.map((c) => `<option value="${c.valor}" ${escalaCenario() === c.valor ? 'selected' : ''}>${c.label}</option>`).join('')}
-      </select>`;
+      <span class="escala-cenario-tag compacto"
+        style="border-color:${escalaCenarioInfo().cor}66;color:${escalaCenarioInfo().cor}"
+        title="${escalaEscapeAttr(escalaCenarioInfo().descricao)}">${escalaEscapeAttr(ESCALA_TITULO())}</span>`;
 
   return `
     <div id="escala-ferr-mini" class="escala-ferr-mini" style="display:none">
@@ -1555,6 +1565,9 @@ function escalaFaixaMiniHTML(dis, bases, mes, base) {
       <span class="escala-ferr-sep"></span>
       <span id="escala-chips" class="escala-chips">${escalaChipsHTML()}</span>
       <span style="flex:1 1 auto"></span>
+      <button type="button" class="escala-leg-btn" onclick="escalaExportarTelaExcel()"
+        title="Baixar em Excel exatamente a escala que está na tela — mesma ordem, mesmos grupos, mesmas colunas"
+        aria-label="Baixar a escala em Excel">${escalaIconeSolto('sheet', 13)}</button>
       <button type="button" class="escala-leg-btn" onclick="escalaToggleLegendaMini(event)"
         title="Legenda dos códigos">?</button>
       <div id="escala-leg-popover" class="escala-leg-popover" style="display:none">
@@ -6588,4 +6601,95 @@ function escalaAbrirPainelComparacao(d) {
       </div>
     </div>`;
   document.body.insertAdjacentHTML('beforeend', html);
+}
+
+/* ══════════════════════════════════════════════════════
+   EXPORTAÇÃO FIEL À TELA
+
+   Já existia "Mais ações → Baixar Excel da escala". Ela serve a outro
+   propósito: sai na ordem crua do banco, com as colunas da grade
+   completa, e carrega o marcador que permite reimportar o arquivo depois.
+
+   Esta aqui é outra coisa — é a FOTO do que está na tela. Mesma ordem,
+   mesmos grupos, mesmas colunas, com as conferências de 6 dias e domingo
+   que a grade mostra. É o arquivo que se imprime e se leva para a
+   reunião, não o que se reimporta.
+
+   Por isso ela não tem o marcador: um arquivo que parece reimportável mas
+   perdeu a coluna Turno voltaria apagando turno de todo mundo.
+   ══════════════════════════════════════════════════════ */
+function escalaExportarTelaExcel() {
+  if (typeof XLSX === 'undefined') { escalaMsg('Biblioteca de Excel não carregou — recarregue a página.', true); return; }
+  const base = window._escalaBase, mes = window._escalaMes;
+  const [ano, mesNum] = mes.split('-').map(Number);
+  const D = new Date(ano, mesNum, 0).getDate();
+  const colabs = window._escalaColabs || [];
+  if (!colabs.length) { escalaMsg('Nada pra exportar — nenhum colaborador nessa escala ainda.', true); return; }
+
+  // O mesmo agrupamento da grade enxuta, para o arquivo sair na ordem que
+  // a pessoa está vendo — e não numa ordem que ela teria que reconferir.
+  const porGrupo = new Map();
+  for (const c of colabs) {
+    const g = escalaFuncaoGrupoDoColab(c).label || 'Sem função';
+    if (!porGrupo.has(g)) porGrupo.set(g, []);
+    porGrupo.get(g).push(c);
+  }
+
+  const diasCab = [];
+  for (let d = 1; d <= D; d++) {
+    diasCab.push(`${ESCALA_DIAS_SEMANA[new Date(ano, mesNum - 1, d).getDay()].toUpperCase()}\n${d}`);
+  }
+  const CAB = ['MATRÍCULA', 'NOME', 'FUNÇÃO', 'CH', ...diasCab,
+    '6 DIAS', 'DOM.', 'FOLGAS', 'ENTRADA', 'SAÍDA'];
+
+  const titulo = `${ESCALA_TITULO()} · ${base} · ${typeof adhMonthLabel === 'function' ? adhMonthLabel(mes) : mes}`;
+  const linhas = [[titulo], [`Gerado em ${new Date().toLocaleString('pt-BR')}`], [], CAB];
+  const linhasGrupo = [];                    // para pintar as faixas depois
+
+  for (const [grupo, gente] of porGrupo) {
+    linhasGrupo.push(linhas.length);
+    linhas.push([`${grupo} · ${gente.length} pessoa${gente.length === 1 ? '' : 's'}`]);
+
+    for (const c of gente) {
+      const info = window.eoColabs?.get(c.matricula);
+      const ch = info?.ch || c.ch_manual || '';
+      const entrada = escalaEntradaEfetivaDoColab(c, ano, mesNum, D) || '';
+      const saida = c.saida_manual || escalaSaidaCalculada(entrada, ch) || '';
+      const conteudo = escalaConteudoDoMes(c, ano, mesNum, D);
+
+      const folgasDias = escalaFolgasDoColab(c, ano, mesNum, D, window._escalaDias);
+      const agrupadas = new Set();
+      for (let d = 1; d <= D; d++) {
+        if (window._escalaDias.get(`${c.matricula}|${d}`)?.status === 'FA') agrupadas.add(d);
+      }
+      const r = escalaValidarRegrasFolga(folgasDias, ano, mesNum, D, agrupadas);
+      const feitas = conteudo.filter((x) => x.status === 'F' || x.status === 'FA').length;
+      const meta = escalaMetaFolgasDoColab(ch, D);
+
+      linhas.push([
+        c.matricula, c.nome || '', info?.funcao || c.funcao_manual || '', ch ? `${ch}H` : '',
+        ...conteudo.map((i) => i.status || ''),
+        // Texto, não símbolo: ✓ e ✗ viram emoji colorido em algumas
+        // fontes, e a planilha é documento de trabalho.
+        r.maxSequencia <= 6 ? 'OK' : `${r.maxSequencia} dias`,
+        r.domingos === 1 ? 'OK' : `${r.domingos} dom.`,
+        `${feitas}/${meta}`, entrada || '', saida || '',
+      ]);
+    }
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet(linhas);
+  ws['!cols'] = [{ wch: 11 }, { wch: 30 }, { wch: 20 }, { wch: 6 },
+    ...Array.from({ length: D }, () => ({ wch: 4.5 })),
+    { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 9 }, { wch: 9 }];
+  // Congela o cabeçalho e as quatro colunas de identificação, como na tela.
+  ws['!freeze'] = { xSplit: 4, ySplit: 4 };
+  ws['!views'] = [{ state: 'frozen', xSplit: 4, ySplit: 4 }];
+  // As faixas de grupo ocupam a linha inteira, como na grade.
+  ws['!merges'] = linhasGrupo.map((r) => ({ s: { r, c: 0 }, e: { r, c: CAB.length - 1 } }));
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Escala');
+  XLSX.writeFile(wb, `${ESCALA_TITULO().replace(/\s+/g, '_')}_${base}_${mes}.xlsx`);
+  escalaMsg(`Arquivo baixado: ${colabs.length} pessoa(s) em ${porGrupo.size} grupo(s).`);
 }

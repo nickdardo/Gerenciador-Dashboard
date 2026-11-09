@@ -37,7 +37,10 @@ function paginaDeTeste() {
 <div class="escala-nota">carga automática</div>
 <div class="escala-nota escala-nota-trava">escala travada</div>
 <div id="escala-ferr-mini" class="escala-ferr-mini" style="display:none"><span id="escala-chips"></span></div>
-<div class="hc-panel escala-ferr" id="escala-ferramentas">painel</div>
+<div class="hc-panel escala-ferr" id="escala-ferramentas">
+<div class="escala-ferr-topo"><span class="escala-ferr-topo-tit">Ferramentas da escala</span>
+<button type="button" class="escala-ferr-fechar" onclick="escalaToggleMenuFerramentas(false)" aria-label="Fechar as ferramentas">x</button></div>
+<div style="height:220px">conteudo</div></div>
 <div id="escala-legenda-linha" style="display:flex">legenda</div>
 </div>
 <script>window.db={from(){return{select:()=>Promise.resolve({data:[],error:null})}}};<\/script>
@@ -50,6 +53,7 @@ function paginaDeTeste() {
   fs.writeFileSync(tmp, paginaDeTeste());
   const url = 'file://' + tmp;
   const browser = await chromium.launch();
+  const navegador = browser;
   const erros = [];
 
   const abrir = async (altura) => {
@@ -186,6 +190,54 @@ function paginaDeTeste() {
       await p.close();
     }
 
+    sec('3b. O X fecha, e o menu cabe na tela');
+    {
+      /* Clicar fora e o Esc funcionam, mas nenhum dos dois é visível. Um
+         menu que cobre a grade precisa mostrar como sair dele. */
+      const p = await abrir(900);
+      await p.evaluate(() => escalaAplicarEstadoFerramentas());
+      const aberto = () => p.evaluate(() => document.getElementById('escala-ferramentas').classList.contains('aberto'));
+
+      await p.evaluate(() => escalaToggleMenuFerramentas(true));
+      await p.waitForTimeout(220);
+      ok(await p.$eval('.escala-ferr-fechar', (e) => !!e), 'o menu tem um X');
+      ok(await p.$eval('.escala-ferr-fechar', (e) => !!e.getAttribute('aria-label')),
+        'que se identifica para o leitor de tela');
+      await p.click('.escala-ferr-fechar');
+      await p.waitForTimeout(220);
+      ok(!(await aberto()), 'e clicar nele fecha');
+      await p.close();
+    }
+
+    sec('3c. O menu abre inteiro, sem cortar nem transbordar');
+    {
+      /* A 880px os seletores da última linha ficavam cortados e era
+         preciso rolar o menu para achar "Situação". O ponto do pedido era
+         ver tudo numa abertura só. */
+      for (const w of [1366, 1920, 2560]) {
+        const p = await navegador.newPage({ viewport: { width: w, height: 900 } });
+        await p.goto(url, { waitUntil: 'load' });
+        await p.waitForFunction(() => typeof escalaAplicarEstadoFerramentas === 'function');
+        await p.evaluate(() => { escalaAplicarEstadoFerramentas(); escalaToggleMenuFerramentas(true); });
+        await p.waitForTimeout(220);
+        const r = await p.evaluate(() => {
+          const e = document.getElementById('escala-ferramentas');
+          const b = e.getBoundingClientRect();
+          return { esq: Math.round(b.left), dir: Math.round(b.right), larg: Math.round(b.width),
+            janela: window.innerWidth, rolaV: e.scrollHeight > e.clientHeight + 1 };
+        });
+        ok(r.dir <= r.janela, `${w}px: o menu não passa da borda direita (termina em ${r.dir} de ${r.janela})`);
+        ok(r.esq >= 0, `${w}px: nem da esquerda`);
+        ok(!r.rolaV, `${w}px: e abre sem rolagem vertical — tudo numa olhada só`);
+        /* O ponto do pedido era largura: estreito, os botões quebram em
+           muitas linhas e "Situação" some lá embaixo. Em tela grande o
+           menu tem que usar o espaço, não ficar numa coluna magra. */
+        if (w >= 1920) ok(r.larg >= 1200, `${w}px: o menu usa o espaço (${r.larg}px de largura)`);
+        else ok(r.larg >= r.janela - 300, `${w}px: em tela menor, ocupa o que tem (${r.larg}px de ${r.janela})`);
+        await p.close();
+      }
+    }
+
     sec('6. A grade em tela cheia é o único estado, e o contexto não some junto');
     {
       /* Antes havia dois estados e um botão para alternar. Agora a grade
@@ -232,8 +284,14 @@ function paginaDeTeste() {
       });
       const sels = await p.$$eval('#escala-ferr-mini select', (a) => a.length);
       // Esconder o cabeçalho sem levar base e mês junto é como alguém acaba
-      // editando CGH achando que está em BEL.
-      ok(sels === 3, 'base, mês e cenário continuam à mão na faixa (' + sels + ' seletores)');
+      // editando CGH achando que está em BEL. O cenário também fica, mas
+      // como ETIQUETA: trocá-lo por ali contradiria o nome da página,
+      // agora que cada escala tem porta própria no menu.
+      ok(sels === 2, 'base e mês continuam à mão na faixa (' + sels + ' seletores)');
+      const tag = await p.$$eval('#escala-ferr-mini .escala-cenario-tag', (a) => a.length);
+      ok(tag === 1, 'e o cenário aparece como etiqueta, não como seletor');
+      const exp = await p.$$eval('#escala-ferr-mini [onclick*="escalaExportarTelaExcel"]', (a) => a.length);
+      ok(exp === 1, 'a faixa tem o botão de baixar a escala da tela');
       const base = await p.$eval('#escala-ferr-mini select', (e) => e.value);
       ok(base === 'CGH', 'e a base mostrada é a que está aberta, não a primeira da lista');
       await p.close();

@@ -3768,7 +3768,10 @@ body.escala-modo-grade .hc-panel.escala-ferr.escala-ferr-menu {
   top: calc(var(--topbar-h) + 8px);
   right: 16px;
   z-index: 60;
-  width: min(880px, calc(100vw - var(--sb-width) - 32px));
+  /* Largo o bastante para os botões caberem numa abertura só: a 880px os
+     seletores da última linha ficavam cortados e era preciso rolar o menu
+     para achar "Situação". O teto é a tela menos a barra lateral. */
+  width: min(1320px, calc(100vw - var(--sb-width) - 32px));
   max-height: calc(100vh - var(--topbar-h) - 24px);
   overflow-y: auto;
   margin: 0;
@@ -3781,7 +3784,7 @@ body.escala-modo-grade .hc-panel.escala-ferr.escala-ferr-menu {
 }
 #app-shell.sb-closed body.escala-modo-grade .hc-panel.escala-ferr.escala-ferr-menu,
 body.escala-modo-grade #app-shell.sb-closed .hc-panel.escala-ferr.escala-ferr-menu {
-  width: min(880px, calc(100vw - var(--sb-width-closed) - 32px));
+  width: min(1320px, calc(100vw - var(--sb-width-closed) - 32px));
 }
 body.escala-modo-grade .hc-panel.escala-ferr.escala-ferr-menu.aberto {
   opacity: 1; visibility: visible; transform: translateY(0);
@@ -4004,3 +4007,29 @@ body.escala-modo-grade .escala-fill { margin-top: 0; }
   border: 1px solid; border-radius: 8px;
   font-size: 12px; font-weight: 600; letter-spacing: .02em; white-space: nowrap;
 }
+
+/* Cabeçalho do menu de ferramentas: título e a saída. Fica grudado no
+   topo porque o menu rola quando a tela é baixa, e o X some junto se
+   rolar com o resto. */
+.escala-ferr-topo {
+  position: sticky; top: 0; z-index: 2;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin: -4px -2px 10px; padding: 2px 0 8px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+}
+.escala-ferr-topo-tit {
+  font-size: 11.5px; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--text-secondary);
+}
+.escala-ferr-fechar {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; flex: 0 0 auto;
+  border: 1px solid var(--border-strong, var(--border)); border-radius: 8px;
+  background: transparent; color: var(--text-secondary); cursor: pointer;
+  transition: background .12s ease, color .12s ease, border-color .12s ease;
+}
+.escala-ferr-fechar:hover {
+  background: var(--bg-hover); color: var(--text-primary); border-color: var(--text-secondary);
+}
+.escala-ferr-fechar:focus-visible { outline: 2px solid var(--blue, #00a0d2); outline-offset: 2px; }
