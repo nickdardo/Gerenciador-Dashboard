@@ -179,7 +179,7 @@ function genUpdateInfo() {
   list.innerHTML = `
     <div class="gen3-info-row"><span>Base detectada</span><span class="gen3-base-badge">${gBase||'—'}</span></div>
     <div class="gen3-info-row"><span>Abas</span><span>${gSheets.length} setor(es)</span></div>
-    <div class="gen3-info-row"><span>Arquivo</span><span style="color:#5a6a82;font-size:10px;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${gFile?.name||''}</span></div>
+    <div class="gen3-info-row"><span>Arquivo</span><span class="gen3-arquivo-nome">${gFile?.name||''}</span></div>
   `;
   // Update topbar base badge
   const badge = document.getElementById('tb-base');
@@ -304,9 +304,9 @@ function genRenderTable() {
       return `<tr>
         <td class="gen3-func-cell">${r.funcao}</td>
         <td style="font-variant-numeric:tabular-nums">${r.horario}</td>
-        <td style="color:#72c02c;font-weight:600">${r.carga}</td>
+        <td class="gen3-ch-cell">${r.carga}</td>
         <td><span class="gen3-tag ${cls}">${per}</span></td>
-        <td class="r" style="color:#e8edf3;font-weight:700">${r.qty}</td>
+        <td class="r gen3-qtd-cell">${r.qty}</td>
       </tr>`;
     }).join('');
 }

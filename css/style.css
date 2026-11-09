@@ -3768,10 +3768,12 @@ body.escala-modo-grade .hc-panel.escala-ferr.escala-ferr-menu {
   top: calc(var(--topbar-h) + 8px);
   right: 16px;
   z-index: 60;
-  /* Largo o bastante para os botões caberem numa abertura só: a 880px os
-     seletores da última linha ficavam cortados e era preciso rolar o menu
-     para achar "Situação". O teto é a tela menos a barra lateral. */
-  width: min(1320px, calc(100vw - var(--sb-width) - 32px));
+  /* Largura do painel inteiro. Começou em 880px, passou a 1320px e agora
+     ocupa tudo: com os filtros e as caixas de grupo dentro, o espaço é o
+     que torna as opções legíveis de uma olhada em vez de um labirinto de
+     linhas quebradas. */
+  left: calc(var(--sb-width) + 16px);
+  width: auto;
   max-height: calc(100vh - var(--topbar-h) - 24px);
   overflow-y: auto;
   margin: 0;
@@ -3784,7 +3786,7 @@ body.escala-modo-grade .hc-panel.escala-ferr.escala-ferr-menu {
 }
 #app-shell.sb-closed body.escala-modo-grade .hc-panel.escala-ferr.escala-ferr-menu,
 body.escala-modo-grade #app-shell.sb-closed .hc-panel.escala-ferr.escala-ferr-menu {
-  width: min(1320px, calc(100vw - var(--sb-width-closed) - 32px));
+  left: calc(var(--sb-width-closed) + 16px);
 }
 body.escala-modo-grade .hc-panel.escala-ferr.escala-ferr-menu.aberto {
   opacity: 1; visibility: visible; transform: translateY(0);
@@ -4033,3 +4035,37 @@ body.escala-modo-grade .escala-fill { margin-top: 0; }
   background: var(--bg-hover); color: var(--text-primary); border-color: var(--text-secondary);
 }
 .escala-ferr-fechar:focus-visible { outline: 2px solid var(--blue, #00a0d2); outline-offset: 2px; }
+
+/* ── Tela do Gerador: cores que estavam cravadas no HTML ─────────────
+   `#e8edf3` (quase branco) e `#5a6a82` foram escolhidos olhando só o
+   tema escuro. No claro, o número da coluna Qtd virava branco sobre
+   branco e sumia da tela. Agora saem dos tokens, que já mudam por tema. */
+.gen3-table td.gen3-qtd-cell { color: var(--text-primary); font-weight: 700; }
+/* O --green do sistema é tom de tema escuro: 2.20:1 sobre o fundo claro.
+   A coluna CH leva tom próprio por tema, como os códigos da grade. */
+.gen3-table td.gen3-ch-cell  { color: #1a6b41; font-weight: 600; }
+[data-theme="dark"] .gen3-table td.gen3-ch-cell { color: #72c02c; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .gen3-table td.gen3-ch-cell { color: #72c02c; }
+}
+.gen3-arquivo-nome {
+  color: var(--text-muted); font-size: 10px; max-width: 110px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* Rodapé do menu: o Aplicar. As caixas de grupo e os seletores mudam o
+   que a grade mostra, e remontar 289 pessoas a cada clique numa caixa
+   trava a tela — então a troca junta e sai de uma vez, no botão. */
+.escala-ferr-rodape {
+  position: sticky; bottom: 0; z-index: 2;
+  display: flex; align-items: center; justify-content: flex-end; gap: 10px;
+  margin: 12px -2px -4px; padding: 10px 0 2px;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border);
+}
+.escala-ferr-rodape .aviso {
+  margin-right: auto; font-size: 11.5px; color: var(--text-muted);
+}
+/* O Aplicar acende quando há escolha esperando. Botão que parece sempre
+   igual deixa a pessoa em dúvida se o clique fez algo. */
+.escala-ferr-aplicar-ativo { box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue, #00a0d2) 28%, transparent); }

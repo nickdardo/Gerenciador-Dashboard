@@ -1017,6 +1017,17 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
         </div>
       </div>
       <div id="escala-status-msg" style="font-size:11px;color:var(--text-muted);margin-top:8px;min-height:14px"></div>
+
+      <!-- Rodapé: o Aplicar. Cada caixa de grupo marcada remontava a grade
+           na hora, e com 289 pessoas isso trava a tela a cada clique. Agora
+           a escolha se acumula e sai de uma vez. -->
+      <div class="escala-ferr-rodape">
+        <span class="aviso" id="escala-ferr-pendente"></span>
+        <button type="button" class="adh-refresh-btn" onclick="escalaToggleMenuFerramentas(false)">Fechar</button>
+        <button type="button" class="adh-refresh-btn" id="escala-ferr-aplicar"
+          style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600"
+          onclick="escalaAplicarFiltrosMenu()">${escalaIcone('check')}Aplicar</button>
+      </div>
     </div>
 
     <div class="hc-panel escala-fill" style="display:flex;flex-direction:column;min-height:0">
@@ -1388,6 +1399,10 @@ function escalaToggleMenuFerramentas(forcar) {
       document.addEventListener('keydown', escalaMenuFerramentasEscHandler, true);
     }, 0);
   } else {
+    // Fechar sem aplicar não leva a escolha abandonada consigo: ela é
+    // descartada e os controles voltam a mostrar o que está valendo.
+    escalaDescartarPendentes();
+    escalaSincronizarControlesMenu();
     document.removeEventListener('mousedown', escalaMenuFerramentasForaHandler, true);
     document.removeEventListener('keydown', escalaMenuFerramentasEscHandler, true);
   }
@@ -1755,18 +1770,116 @@ function escalaSetMostrarGrupos(valor) {
     return; // a lista de grupos escolhidos só muda quando marca/desmarca no painel
   }
   if (painel) painel.style.display = 'none';
-  window._escalaGruposVisiveis = valor === '__sup_lider__' ? new Set(['Supervisores', 'Líder de Operações']) : null;
-  escalaSalvarGruposVisiveis();
-  escalaGradeAtualiza();
+  escalaPendente('grupos', valor === '__sup_lider__' ? new Set(['Supervisores', 'Líder de Operações']) : null);
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Escolher não é o mesmo que aplicar
+
+   Antes, cada caixa marcada remontava a grade na hora. Com 289 pessoas
+   e 31 dias, quem quer ver três grupos clicava três vezes e esperava
+   três vezes — e via a tela pular embaixo do menu enquanto escolhia.
+
+   Agora a escolha fica pendente, o rodapé diz o que está esperando e o
+   Aplicar leva tudo de uma vez. Só o que remonta a grade entra aqui;
+   densidade, por exemplo, é troca de classe CSS e continua instantânea,
+   porque esperar por ela seria pior do que o custo dela.
+   ────────────────────────────────────────────────────────────── */
+
+const ESCALA_PENDENTES = {
+  grupos:   { lê: () => window._escalaGruposVisiveis,
+              grava: (v) => { window._escalaGruposVisiveis = v; escalaSalvarGruposVisiveis(); },
+              compara: (v) => (v ? [...v].sort().join('|') : ''),
+              rotulo: (v) => (v ? `${v.size} grupo(s)` : 'todos os grupos') },
+  subbloco: { lê: () => window._escalaCriterioSubBloco,
+              grava: (v) => { window._escalaCriterioSubBloco = v;
+                              try { localStorage.setItem('gde_escala_criterio_subbloco', v); } catch (_) {} },
+              compara: (v) => String(v == null ? '' : v),
+              rotulo: () => 'sub-blocos' },
+  blocos:   { lê: () => !!window._escalaBlocosRecolhidos,
+              grava: (v) => { window._escalaBlocosRecolhidos = !!v;
+                              try { localStorage.setItem('gde_escala_blocos_recolhidos', v ? '1' : '0'); } catch (_) {} },
+              compara: (v) => (v ? '1' : '0'),
+              rotulo: (v) => (v ? 'blocos recolhidos' : 'blocos abertos') },
+};
+
+/* Guarda a escolha e avisa o rodapé. Fora do menu — na barra de chips,
+   por exemplo — não há Aplicar para clicar, então aplica na hora. */
+function escalaPendente(chave, valor) {
+  const reg = ESCALA_PENDENTES[chave];
+  if (!reg) return;
+  if (!escalaMenuFerramentasAberto()) {
+    reg.grava(valor);
+    escalaGradeAtualiza();
+    return;
+  }
+  window._escalaPendentes = window._escalaPendentes || {};
+  window._escalaPendentes[chave] = valor;
+  escalaMarcarPendencia();
+}
+
+/* Diz o que está esperando, para o Aplicar nunca ser um botão que às
+   vezes não faz nada sem explicar por quê. */
+function escalaMarcarPendencia() {
+  const pend = window._escalaPendentes || {};
+  const mudou = Object.keys(pend).filter((k) => {
+    const reg = ESCALA_PENDENTES[k];
+    return reg && reg.compara(pend[k]) !== reg.compara(reg.lê());
+  });
+  const aviso = document.getElementById('escala-ferr-pendente');
+  if (aviso) {
+    aviso.textContent = mudou.length
+      ? `Esperando: ${mudou.map((k) => ESCALA_PENDENTES[k].rotulo(pend[k])).join(', ')} — clique em Aplicar`
+      : '';
+  }
+  const btn = document.getElementById('escala-ferr-aplicar');
+  if (btn) btn.classList.toggle('escala-ferr-aplicar-ativo', mudou.length > 0);
 }
 
 function escalaAtualizarGruposEscolhidos() {
   const painel = document.getElementById('escala-grupos-painel');
   if (!painel) return;
   const marcados = [...painel.querySelectorAll('input[type="checkbox"]:checked')].map(i => i.value);
-  window._escalaGruposVisiveis = marcados.length ? new Set(marcados) : null;
-  escalaSalvarGruposVisiveis();
+  escalaPendente('grupos', marcados.length ? new Set(marcados) : null);
+}
+
+function escalaAplicarFiltrosMenu() {
+  const pend = window._escalaPendentes || {};
+  for (const k of Object.keys(pend)) {
+    const reg = ESCALA_PENDENTES[k];
+    if (reg) reg.grava(pend[k]);
+  }
+  window._escalaPendentes = {};
+  escalaMarcarPendencia();
   escalaGradeAtualiza();
+  escalaToggleMenuFerramentas(false);
+}
+
+/* Fechar sem aplicar descarta o que estava escolhido — e as caixas
+   voltam a mostrar o que está valendo, não o que foi abandonado. */
+function escalaDescartarPendentes() {
+  window._escalaPendentes = {};
+  escalaMarcarPendencia();
+}
+
+/* Devolve os controles ao que está valendo de fato. Sem isso, quem
+   desmarcou três grupos e fechou o menu reabriria vendo as caixas
+   desmarcadas e a grade cheia — dois estados discordando na mesma tela. */
+function escalaSincronizarControlesMenu() {
+  const painel = document.getElementById('escala-grupos-painel');
+  if (painel) {
+    const visiveis = window._escalaGruposVisiveis;
+    painel.querySelectorAll('input[type="checkbox"]').forEach((cx) => {
+      cx.checked = !visiveis || visiveis.has(cx.value);
+    });
+  }
+  const sel = (fn, valor) => {
+    const el = [...document.querySelectorAll('#escala-ferramentas select')]
+      .find((s) => (s.getAttribute('onchange') || '').includes(fn));
+    if (el) el.value = valor;
+  };
+  sel('escalaSetCriterioSubBloco', escalaCriterioSubBloco());
+  sel('escalaSetBlocosRecolhidos', window._escalaBlocosRecolhidos ? '__recolhido__' : '__expandido__');
 }
 
 function escalaSalvarGruposVisiveis() {
@@ -1776,9 +1889,7 @@ function escalaSalvarGruposVisiveis() {
 }
 
 function escalaSetBlocosRecolhidos(valor) {
-  window._escalaBlocosRecolhidos = valor === '__recolhido__';
-  try { localStorage.setItem('gde_escala_blocos_recolhidos', window._escalaBlocosRecolhidos ? '1' : '0'); } catch (_) {}
-  escalaGradeAtualiza();
+  escalaPendente('blocos', valor === '__recolhido__');
 }
 
 // Densidade da grade — "compacto" reduz padding e fonte via classe CSS
@@ -2062,9 +2173,7 @@ function escalaSubBlocoDoColab(c, ano, mesNum, diasNoMes, criterio) {
 }
 
 function escalaSetCriterioSubBloco(valor) {
-  window._escalaCriterioSubBloco = valor;
-  try { localStorage.setItem('gde_escala_criterio_subbloco', valor); } catch (_) {}
-  escalaGradeAtualiza();
+  escalaPendente('subbloco', valor);
 }
 
 // Ordena os sub-blocos: primeiro pelo horário de entrada de quem está
@@ -6265,14 +6374,15 @@ async function escalaExecutarAplicacaoDim(posicoes, mapa) {
 
   const resultado = escalaCasarVagasComPessoas(vagas, colabs, ano, mesNum, diasNoMes);
 
-  // ── Confirmação com o retrato do descompasso ────────────────────
-  const linhasGap = [];
-  for (const [chave, n] of resultado.vagasSobrando) {
-    linhasGap.push(`   ${chave}: ${n} posição(ões) sem ninguém`);
-  }
-  for (const [chave, n] of resultado.pessoasSobrando) {
-    linhasGap.push(`   ${chave}: ${n} pessoa(s) sem posição`);
-  }
+  /* ── Confirmação, horário por horário ────────────────────────────
+
+     Antes aqui só vinha um total por grupo+jornada. Quem dimensionou 12
+     ASG às 00:00 e viu 10 na grade não tinha como saber, no momento de
+     aplicar, que faltavam dois — descobria depois, olhando a escala. Agora
+     o descoberto vem nomeado pelo horário, que é a unidade que o
+     dimensionamento fala. */
+  const descobertos = resultado.porHorario.filter((h) => h.falta > 0);
+  const sobrando = [...resultado.pessoasSobrando];
 
   const resumo = [
     `APLICAR DIMENSIONAMENTO — ${base} · ${mes}`,
@@ -6281,13 +6391,32 @@ async function escalaExecutarAplicacaoDim(posicoes, mapa) {
     `${colabs.length} colaborador(es) na escala`,
     `${resultado.atribuicoes.length} horário(s) serão gravados`,
   ];
-  if (linhasGap.length) {
-    resumo.push(``, `DESCOMPASSO entre a malha e o efetivo:`, ...linhasGap.slice(0, 15));
-    if (linhasGap.length > 15) resumo.push(`   ...e mais ${linhasGap.length - 15}`);
+
+  if (descobertos.length) {
+    resumo.push(``, `HORÁRIOS QUE NÃO FECHAM (pedido x atendido):`);
+    descobertos.slice(0, 12).forEach((h) =>
+      resumo.push(`   ${h.horario}: ${h.pedido} pedidos, ${h.atendido} atendidos — faltam ${h.falta}`));
+    if (descobertos.length > 12) resumo.push(`   ...e mais ${descobertos.length - 12} horário(s)`);
+    resumo.push(`   O buraco cai nos horários com mais posições, para não zerar os pequenos.`);
   } else {
-    resumo.push(``, `Efetivo e dimensionamento batem exatamente.`);
+    resumo.push(``, `Todos os horários do dimensionamento fecham com gente.`);
   }
-  resumo.push(``, `Quem ficar sem posição mantém o horário atual.`, ``, `Confirma?`);
+
+  if (resultado.enxertos.length) {
+    resumo.push(``, `${resultado.enxertos.length} ENXERTO(S) de jornada diferente:`);
+    resultado.enxertos.slice(0, 8).forEach((e) =>
+      resumo.push(`   ${e.nome}: entra ${e.entrada} (posição de ${e.jornadaVaga}h) e sai ${e.saida}, pela própria CH de ${e.jornadaPessoa}h/dia`));
+    if (resultado.enxertos.length > 8) resumo.push(`   ...e mais ${resultado.enxertos.length - 8}`);
+  }
+
+  if (sobrando.length) {
+    resumo.push(``, `GENTE SEM POSIÇÃO (mantém o horário atual):`);
+    sobrando.slice(0, 8).forEach(([g, n]) => resumo.push(`   ${g}: ${n} pessoa(s)`));
+    if (sobrando.length > 8) resumo.push(`   ...e mais ${sobrando.length - 8} grupo(s)`);
+  }
+
+  resumo.push(``, `Confirma?`);
+  const linhasGap = descobertos.concat(sobrando.length ? [{}] : []);
 
   if (!confirm(resumo.join('\n'))) { escalaMsg('Aplicação cancelada — nada foi alterado.'); return; }
 
@@ -6311,64 +6440,170 @@ async function escalaExecutarAplicacaoDim(posicoes, mapa) {
     });
 
     escalaGradeAtualiza();
-    escalaMsg(`${resultado.atribuicoes.length} horário(s) aplicados do dimensionamento.`
-      + (linhasGap.length ? ` ${linhasGap.length} descompasso(s) entre malha e efetivo — veja no console.` : ''),
-      linhasGap.length ? 'aviso' : 'ok');
-    if (linhasGap.length) console.log(['[escala/dimensionamento] descompasso:', ...linhasGap].join('\n'));
+    const aviso = descobertos.length
+      ? ` ${descobertos.length} horário(s) sem fechar — veja no console.`
+      : (resultado.enxertos.length ? ` ${resultado.enxertos.length} enxerto(s) de jornada — veja no console.` : '');
+    escalaMsg(`${resultado.atribuicoes.length} horário(s) aplicados do dimensionamento.` + aviso,
+      descobertos.length ? 'aviso' : 'ok');
+    if (descobertos.length || resultado.enxertos.length) {
+      console.log(['[escala/dimensionamento] conferência por horário:',
+        ...resultado.porHorario.map((h) =>
+          `   ${h.horario}: pedido ${h.pedido}, atendido ${h.atendido}${h.falta > 0 ? `, FALTAM ${h.falta}` : ''}`),
+        ...(resultado.enxertos.length ? ['', '   enxertos de jornada diferente:'] : []),
+        ...resultado.enxertos.map((e) =>
+          `   ${e.matricula} ${e.nome}: ${e.entrada}–${e.saida} (posição ${e.jornadaVaga}h, CH ${e.jornadaPessoa}h/dia)`),
+      ].join('\n'));
+    }
   } catch (err) {
     escalaGradeAtualiza();
     escalaMsg(escalaTraduzirErroBanco(err.message, 'Erro ao aplicar dimensionamento'), true);
   }
 }
 
-// O casamento em si. Dentro de cada grupo + jornada diária, ordena vagas e
-// pessoas pelo horário de entrada e emparelha em ordem.
-//
-// Ordenar os dois lados e parear em sequência é o que MINIMIZA o
-// deslocamento total (resultado clássico de emparelhamento em uma
-// dimensão com custo monótono). Na prática: quem já entra cedo continua
-// cedo, quem entra tarde continua tarde, e o que aparecer diferente é
-// diferença real de dimensionamento — não embaralhamento.
-function escalaCasarVagasComPessoas(vagas, colabs, ano, mesNum, diasNoMes) {
-  const chaveDe = (grupo, jornada) => `${grupo} · ${jornada || '?'}h/dia`;
+/* ══════════════════════════════════════════════════════════════
+   O casamento entre as posições do dimensionamento e a gente da escala
 
-  const vagasPorChave = new Map();
-  vagas.forEach(v => {
-    const k = chaveDe(v.grupo, v.jornada);
-    if (!vagasPorChave.has(k)) vagasPorChave.set(k, []);
-    vagasPorChave.get(k).push(v);
+   Ordenar os dois lados pelo horário de entrada e emparelhar em sequência
+   é o que MINIMIZA o deslocamento total (resultado clássico de
+   emparelhamento em uma dimensão com custo monótono). Na prática: quem já
+   entra cedo continua cedo, quem entra tarde continua tarde, e o que
+   aparecer diferente é diferença real de dimensionamento — não
+   embaralhamento.
+
+   Duas coisas mudaram, e as duas vinham de queixa real.
+
+   1) A jornada diária deixou de ser parede. Antes, grupo+jornada era uma
+      caixa fechada: 12 posições de 6h com 10 pessoas de CH 180 e 2 de CH
+      210 deixavam 2 posições vazias enquanto 2 pessoas do MESMO grupo
+      sobravam ao lado. Agora, esgotada a jornada exata, a posição é
+      enxertada com quem está mais perto no mesmo grupo — guardando o
+      ENTRADA do dimensionamento, que é o que a malha exige, e calculando
+      a SAÍDA pela jornada da própria pessoa, que é o que a CH dela
+      permite. Honra o horário sem estourar a carga de ninguém, e cada
+      enxerto sai nomeado no relatório.
+
+   2) Quando falta gente de verdade, a escolha de qual posição fica vazia
+      é deliberada, não sobra do algoritmo: o buraco cai primeiro nos
+      horários com MAIS posições. Um horário de 12 perder 1 é diferente de
+      um horário de 2 ser zerado.
+   ══════════════════════════════════════════════════════════════ */
+function escalaCasarVagasComPessoas(vagas, colabs, ano, mesNum, diasNoMes) {
+  const minutos = (h) => escalaMinutosDeHora(h) ?? 9999;
+  const horarioDe = (v) => `${v.entrada || '?'}–${v.saida || '?'}`;
+  const chaveHorario = (v) => `${v.grupo} · ${horarioDe(v)}`;
+
+  // Quanto cada horário pede, para o relatório poder dizer 12 e 10.
+  const pedido = new Map();
+  vagas.forEach((v) => {
+    const k = chaveHorario(v);
+    pedido.set(k, (pedido.get(k) || 0) + 1);
   });
 
-  const pessoasPorChave = new Map();
-  colabs.forEach(c => {
+  const porGrupo = new Map();
+  vagas.forEach((v) => {
+    if (!porGrupo.has(v.grupo)) porGrupo.set(v.grupo, []);
+    porGrupo.get(v.grupo).push(v);
+  });
+
+  const pessoasPorGrupo = new Map();
+  colabs.forEach((c) => {
     const grupo = escalaFuncaoGrupoDoColab(c).label;
-    const jornada = escalaJornadaDoColab(c.matricula, c);
-    const k = chaveDe(grupo, jornada);
-    if (!pessoasPorChave.has(k)) pessoasPorChave.set(k, []);
-    pessoasPorChave.get(k).push({
+    if (!pessoasPorGrupo.has(grupo)) pessoasPorGrupo.set(grupo, []);
+    pessoasPorGrupo.get(grupo).push({
       matricula: c.matricula, nome: c.nome,
+      jornada: escalaJornadaDoColab(c.matricula, c),
       entradaAtual: escalaEntradaEfetivaDoColab(c, ano, mesNum, diasNoMes) || '',
     });
   });
 
-  const minutos = (h) => escalaMinutosDeHora(h) ?? 9999;
   const atribuicoes = [];
-  const vagasSobrando = new Map();
-  const pessoasSobrando = new Map();
+  const enxertos = [];                 // quem entrou por jornada diferente
+  const atendido = new Map();          // horário → quantos conseguiram gente
+  const pessoasSobrando = new Map();   // grupo → quantos ficaram sem posição
 
-  const chaves = new Set([...vagasPorChave.keys(), ...pessoasPorChave.keys()]);
-  for (const k of chaves) {
-    const v = (vagasPorChave.get(k) || []).slice().sort((a, b) => minutos(a.entrada) - minutos(b.entrada));
-    const p = (pessoasPorChave.get(k) || []).slice().sort((a, b) => minutos(a.entradaAtual) - minutos(b.entradaAtual));
-
+  /* Emparelha duas listas já do mesmo grupo, pelo horário, e devolve o
+     que não encontrou par de cada lado. */
+  const emparelhar = (v, p) => {
+    v.sort((a, b) => minutos(a.entrada) - minutos(b.entrada));
+    p.sort((a, b) => minutos(a.entradaAtual) - minutos(b.entradaAtual));
     const n = Math.min(v.length, p.length);
     for (let i = 0; i < n; i++) {
-      atribuicoes.push({ matricula: p[i].matricula, nome: p[i].nome, entrada: v[i].entrada, saida: v[i].saida });
+      const vaga = v[i], pes = p[i];
+      let saida = vaga.saida;
+      if (pes.jornada && vaga.jornada && pes.jornada !== vaga.jornada) {
+        // Entra na hora que a malha pede; sai pela jornada que a CH dela permite.
+        const ini = escalaMinutosDeHora(vaga.entrada);
+        if (ini !== null) saida = escalaHoraDeMinutos(ini + pes.jornada * 60);
+        enxertos.push({
+          matricula: pes.matricula, nome: pes.nome, grupo: vaga.grupo,
+          entrada: vaga.entrada, saida,
+          jornadaVaga: vaga.jornada, jornadaPessoa: pes.jornada,
+        });
+      }
+      atribuicoes.push({ matricula: pes.matricula, nome: pes.nome, entrada: vaga.entrada, saida });
+      const k = chaveHorario(vaga);
+      atendido.set(k, (atendido.get(k) || 0) + 1);
     }
-    if (v.length > n) vagasSobrando.set(k, v.length - n);
-    if (p.length > n) pessoasSobrando.set(k, p.length - n);
+    return { vagasRestantes: v.slice(n), pessoasRestantes: p.slice(n) };
+  };
+
+  const grupos = new Set([...porGrupo.keys(), ...pessoasPorGrupo.keys()]);
+  for (const grupo of grupos) {
+    let vg = (porGrupo.get(grupo) || []).slice();
+    let pg = (pessoasPorGrupo.get(grupo) || []).slice();
+
+    /* Falta gente no grupo: decide AGORA quais posições ficam de fora,
+       tirando dos horários mais numerosos, em rodadas, para não zerar um
+       horário pequeno enquanto um grande fica cheio. */
+    if (vg.length > pg.length) {
+      const sobra = vg.length - pg.length;
+      const grupoPorHorario = new Map();
+      vg.forEach((v) => {
+        const k = chaveHorario(v);
+        if (!grupoPorHorario.has(k)) grupoPorHorario.set(k, []);
+        grupoPorHorario.get(k).push(v);
+      });
+      const descartar = new Set();
+      for (let i = 0; i < sobra; i++) {
+        let maior = null, tam = -1;
+        for (const [k, lista] of grupoPorHorario) {
+          const livres = lista.filter((v) => !descartar.has(v)).length;
+          if (livres > tam) { tam = livres; maior = k; }
+        }
+        if (!maior || tam <= 0) break;
+        descartar.add(grupoPorHorario.get(maior).find((v) => !descartar.has(v)));
+      }
+      vg = vg.filter((v) => !descartar.has(v));
+    }
+
+    /* Uma única passada por grupo, ordenando os dois lados pelo horário.
+
+       Tentei antes casar primeiro as jornadas exatas e só depois enxertar
+       o que sobrasse. Erra: a primeira passada toma os horários da ponta
+       antes de os enxertos entrarem na conta, e quem entra às 21:00 vai
+       para a vaga das 06:00 enquanto o enxerto fica com as 22:00. Aqui a
+       proximidade de horário decide tudo de uma vez — que é justamente o
+       que foi pedido — e a jornada diferente deixa de ser parede: vira
+       ressalva nomeada, com a saída calculada pela CH da pessoa. */
+    const r = emparelhar(vg, pg, true);
+    if (r.pessoasRestantes.length) pessoasSobrando.set(grupo, r.pessoasRestantes.length);
   }
-  return { atribuicoes, vagasSobrando, pessoasSobrando };
+
+  /* Relatório por horário: o que a malha pediu, o que conseguiu gente e o
+     que ficou descoberto. É isto que faltava aparecer antes de aplicar. */
+  const porHorario = [];
+  for (const [k, pede] of pedido) {
+    const tem = atendido.get(k) || 0;
+    porHorario.push({ horario: k, pedido: pede, atendido: tem, falta: pede - tem });
+  }
+  porHorario.sort((a, b) => (b.falta - a.falta) || a.horario.localeCompare(b.horario, 'pt-BR'));
+
+  /* Os nomes antigos continuam valendo: vagasSobrando agregava por
+     grupo+jornada, e quem chamava só queria contar o descompasso. */
+  const vagasSobrando = new Map();
+  porHorario.filter((h) => h.falta > 0).forEach((h) => vagasSobrando.set(h.horario, h.falta));
+
+  return { atribuicoes, vagasSobrando, pessoasSobrando, porHorario, enxertos };
 }
 
 // O botão "Comparar" só faz sentido quando existem os DOIS cenários com

@@ -40,7 +40,20 @@ function paginaDeTeste() {
 <div class="hc-panel escala-ferr" id="escala-ferramentas">
 <div class="escala-ferr-topo"><span class="escala-ferr-topo-tit">Ferramentas da escala</span>
 <button type="button" class="escala-ferr-fechar" onclick="escalaToggleMenuFerramentas(false)" aria-label="Fechar as ferramentas">x</button></div>
-<div style="height:220px">conteudo</div></div>
+<div style="height:220px">conteudo
+<div id="escala-grupos-painel">
+<label><input type="checkbox" value="Supervisores" onchange="escalaAtualizarGruposEscolhidos()" checked>Supervisores</label>
+<label><input type="checkbox" value="Limpeza" onchange="escalaAtualizarGruposEscolhidos()" checked>Limpeza</label>
+<label><input type="checkbox" value="Auxiliar de Rampa" onchange="escalaAtualizarGruposEscolhidos()" checked>Auxiliar de Rampa</label>
+</div>
+<select onchange="escalaSetBlocosRecolhidos(this.value)">
+<option value="__expandido__" selected>Expandido</option><option value="__recolhido__">Recolhido</option></select>
+</div>
+<div class="escala-ferr-rodape">
+<span class="aviso" id="escala-ferr-pendente"></span>
+<button type="button" class="adh-refresh-btn" onclick="escalaToggleMenuFerramentas(false)">Fechar</button>
+<button type="button" class="adh-refresh-btn" id="escala-ferr-aplicar" onclick="escalaAplicarFiltrosMenu()">Aplicar</button>
+</div></div>
 <div id="escala-legenda-linha" style="display:flex">legenda</div>
 </div>
 <script>window.db={from(){return{select:()=>Promise.resolve({data:[],error:null})}}};<\/script>
@@ -320,6 +333,108 @@ function paginaDeTeste() {
       await p.keyboard.press('Control+Shift+G');
       await p.waitForTimeout(80);
       ok(!(await aberto()), 'digitando num campo, o atalho não dispara');
+      await p.close();
+    }
+
+    sec('9. O menu ocupa o painel inteiro');
+    {
+      /* Ele nasceu estreito e os botões vinham em três fileiras, com
+         rolagem interna. Com o painel inteiro à disposição, as funções
+         cabem de uma vez — que é o ponto de abrir um menu em vez de
+         empurrar a grade para baixo. */
+      const p = await abrir(900);
+      await p.evaluate(() => escalaAplicarEstadoFerramentas());
+      await p.evaluate(() => escalaToggleMenuFerramentas(true));
+      await p.waitForTimeout(220);
+      /* A referência é a área de conteúdo real — da borda da sidebar à
+         borda da janela. Esta página de teste não monta sidebar, então
+         #page-content vale a janela inteira e compará-lo com ele daria
+         falha por causa do andaime, não do CSS. */
+      const m = await p.evaluate(() => {
+        const menu = document.getElementById('escala-ferramentas').getBoundingClientRect();
+        const sb = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sb-width')) || 0;
+        return { menu: Math.round(menu.width), sb: Math.round(sb),
+                 disponivel: Math.round(window.innerWidth - sb),
+                 esq: Math.round(menu.left), dir: Math.round(window.innerWidth - menu.right) };
+      });
+      ok(m.sb > 0, `a sidebar tem largura declarada (${m.sb}px) para o menu se encostar nela`);
+      ok(m.menu >= m.disponivel - 40,
+        `o menu acompanha a área de conteúdo (${m.menu}px de ${m.disponivel}px)`);
+      ok(m.esq >= m.sb, `começa depois da sidebar (${m.esq}px, sidebar até ${m.sb}px)`);
+      ok(m.esq > 0 && m.dir > 0 && m.dir <= 40,
+        `e respira nas duas bordas (${m.esq}px à esquerda, ${m.dir}px à direita)`);
+      await p.close();
+    }
+
+    sec('10. Escolher não aplica; o Aplicar aplica');
+    {
+      const p = await abrir(900);
+      await p.evaluate(() => escalaAplicarEstadoFerramentas());
+      await p.evaluate(() => {
+        window.__render = 0;
+        window.escalaGradeAtualiza = () => { window.__render++; };
+        escalaToggleMenuFerramentas(true);
+      });
+      await p.waitForTimeout(220);
+
+      // Desmarcar duas caixas não deve remontar a grade nenhuma vez.
+      await p.evaluate(() => {
+        const cx = document.querySelectorAll('#escala-grupos-painel input');
+        cx[0].checked = false; cx[0].dispatchEvent(new Event('change'));
+        cx[1].checked = false; cx[1].dispatchEvent(new Event('change'));
+      });
+      ok(await p.evaluate(() => window.__render) === 0,
+        'duas caixas desmarcadas e a grade não remontou nenhuma vez');
+      ok(await p.evaluate(() => window._escalaGruposVisiveis) === null
+         || await p.evaluate(() => !window._escalaGruposVisiveis),
+        'o filtro que está valendo não mudou ainda');
+      ok(/Aplicar/.test(await p.$eval('#escala-ferr-pendente', (e) => e.textContent)),
+        'o rodapé diz o que está esperando: "' + (await p.$eval('#escala-ferr-pendente', (e) => e.textContent)) + '"');
+      ok(await p.evaluate(() => document.getElementById('escala-ferr-aplicar').classList.contains('escala-ferr-aplicar-ativo')),
+        'e o Aplicar acende, para não parecer um botão inerte');
+
+      // Aplicar: uma remontagem só, e o menu fecha.
+      await p.evaluate(() => escalaAplicarFiltrosMenu());
+      await p.waitForTimeout(220);
+      ok(await p.evaluate(() => window.__render) === 1,
+        'o Aplicar remontou a grade uma vez, não uma por clique');
+      ok(await p.evaluate(() => window._escalaGruposVisiveis && [...window._escalaGruposVisiveis].join()) === 'Auxiliar de Rampa',
+        'e o filtro passou a valer: ficou só o grupo que continuou marcado');
+      ok(!(await p.evaluate(() => document.getElementById('escala-ferramentas').classList.contains('aberto'))),
+        'aplicado, o menu sai da frente da grade');
+      ok(await p.$eval('#escala-ferr-pendente', (e) => e.textContent) === '',
+        'e não sobra aviso de pendência');
+      await p.close();
+    }
+
+    sec('11. Fechar sem aplicar descarta a escolha');
+    {
+      /* Sem isto, quem desmarca três grupos e fecha o menu reabre vendo
+         as caixas desmarcadas e a grade cheia — dois estados discordando
+         na mesma tela, e a dúvida de qual dos dois é verdade. */
+      const p = await abrir(900);
+      await p.evaluate(() => {
+        escalaAplicarEstadoFerramentas();
+        window.__render = 0;
+        window.escalaGradeAtualiza = () => { window.__render++; };
+        escalaToggleMenuFerramentas(true);
+      });
+      await p.waitForTimeout(220);
+      await p.evaluate(() => {
+        const cx = document.querySelectorAll('#escala-grupos-painel input');
+        cx[0].checked = false; cx[0].dispatchEvent(new Event('change'));
+      });
+      await p.evaluate(() => escalaToggleMenuFerramentas(false));
+      await p.waitForTimeout(220);
+      ok(await p.evaluate(() => window.__render) === 0,
+        'fechar sem aplicar não remonta a grade');
+      ok(await p.evaluate(() => !window._escalaGruposVisiveis),
+        'e não aplica o que foi abandonado');
+      ok(await p.evaluate(() =>
+        [...document.querySelectorAll('#escala-grupos-painel input')].every((c) => c.checked)),
+        'as caixas voltam a mostrar o que está valendo');
+      ok(await p.$eval('#escala-ferr-pendente', (e) => e.textContent) === '',
+        'e o aviso de pendência some junto');
       await p.close();
     }
 

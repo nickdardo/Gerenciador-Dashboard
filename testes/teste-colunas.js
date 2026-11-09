@@ -1164,12 +1164,53 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaModoColunas: 'essencial
   ok('pessoa sem posição é reportada', [...r3.pessoasSobrando.values()][0] === 1);
   ok('quem sobra não recebe horário inventado', r3.atribuicoes.length === 2);
 
-  // Jornada diferente não se mistura: CH 210 (7h) não pega vaga de 6h.
+  /* Jornada diferente ENXERTA, em vez de deixar a posição vazia.
+
+     Esta asserção era o contrário: a jornada era parede, e 12 posições de
+     6h com 10 pessoas de CH 180 e 2 de CH 210 deixavam 2 posições
+     descobertas com 2 pessoas do mesmo grupo paradas ao lado. Era isso
+     que aparecia na grade como "dimensionei 12 e vieram 10".
+
+     O enxerto guarda o ENTRADA que a malha pede e calcula a SAÍDA pela
+     jornada da própria pessoa — 7h de CH 210 sai 13:00, não 12:00. Honra
+     o horário sem estourar a carga de ninguém. */
   sandbox.window.eoColabs.set('P1', { nome: 'CEDO', funcao: 'AUXILIAR DE RAMPA I', ch: '210' });
   const r4 = sandbox.escalaCasarVagasComPessoas(vagas, pessoas, 2026, 10, 31);
-  ok('jornada de 7h não ocupa vaga de 6h',
-    !r4.atribuicoes.some(a => a.matricula === 'P1'), `${r4.atribuicoes.length} atribuições`);
+  const p1 = r4.atribuicoes.find(a => a.matricula === 'P1');
+  ok('as 3 posições fecham, mesmo com uma jornada diferente no grupo',
+    r4.atribuicoes.length === 3, `${r4.atribuicoes.length} atribuições`);
+  ok('a de 7h entra no horário que o dimensionamento pede',
+    p1 && p1.entrada === '06:00', p1 && p1.entrada);
+  ok('e sai pela própria CH de 7h, não pelas 6h da posição',
+    p1 && p1.saida === '13:00', p1 && p1.saida);
+  ok('nenhum horário fica descoberto por causa da jornada',
+    r4.porHorario.every(h => h.falta === 0));
+  ok('o enxerto sai nomeado, para ninguém descobrir depois',
+    r4.enxertos.length === 1 && r4.enxertos[0].matricula === 'P1'
+      && r4.enxertos[0].jornadaVaga === 6 && r4.enxertos[0].jornadaPessoa === 7,
+    JSON.stringify(r4.enxertos));
   sandbox.window.eoColabs.set('P1', { nome: 'CEDO', funcao: 'AUXILIAR DE RAMPA I', ch: '180' });
+
+  /* Faltando gente, o buraco é escolhido, não é sobra do algoritmo: cai
+     no horário com mais posições, para não zerar um horário pequeno. */
+  const r4b = sandbox.escalaCasarVagasComPessoas([
+    { grupo: 'Auxiliar de Rampa', jornada: 6, entrada: '06:00', saida: '12:00' },
+    { grupo: 'Auxiliar de Rampa', jornada: 6, entrada: '06:00', saida: '12:00' },
+    { grupo: 'Auxiliar de Rampa', jornada: 6, entrada: '06:00', saida: '12:00' },
+    { grupo: 'Auxiliar de Rampa', jornada: 6, entrada: '22:00', saida: '04:00' },
+  ], pessoas, 2026, 10, 31);
+  const faltou = r4b.porHorario.filter(h => h.falta > 0);
+  ok('falta 1 pessoa para 4 posições', r4b.atribuicoes.length === 3);
+  ok('e o horário que fica incompleto é o de 3 posições, não o de 1',
+    faltou.length === 1 && /06:00/.test(faltou[0].horario) && faltou[0].falta === 1,
+    JSON.stringify(faltou));
+  ok('o horário pequeno fecha inteiro',
+    r4b.porHorario.some(h => /22:00/.test(h.horario) && h.falta === 0));
+
+  // O relatório diz pedido x atendido por horário, que é a conta da queixa.
+  const r4c = sandbox.escalaCasarVagasComPessoas(vagas, pessoas, 2026, 10, 31);
+  ok('cada horário reporta quanto pediu e quanto atendeu',
+    r4c.porHorario.length === 3 && r4c.porHorario.every(h => h.pedido === 1 && h.atendido === 1));
 
   // Grupo diferente também não se mistura.
   const r5 = sandbox.escalaCasarVagasComPessoas(
