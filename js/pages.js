@@ -425,12 +425,33 @@ async function genGoEscala() {
   window._genRows = gRows;
   window._genBase = gBase;
   window._genMes  = mes;
+
   /* O dimensionamento alimenta a Escala CAPACITY. Antes isto marcava o
      cenário e navegava para 'escala' — funcionava enquanto o cenário era
      um seletor. Agora cada página coage o seu, então sair do Gerador para
      'escala' caía na Base e os horários do dimensionamento não entravam.
      Quem decide o cenário é a porta: basta ir para a porta certa. */
   window._escalaAplicarDimAoAbrir = true;
+
+  /* E a porta tem de abrir no MÊS e na BASE deste dimensionamento.
+
+     Isto faltava, e era o motivo de a Capacity abrir vazia vindo daqui:
+     _genBase e _genMes só eram consultados como último recurso, e só
+     enquanto a escala nunca tivesse sido aberta. Depois da primeira vez
+     ela guardava a própria escolha, e este botão não conseguia mais
+     mudá-la — subia-se um dimensionamento de dezembro, clicava-se aqui, e
+     caía-se em novembro, onde não há dimensionamento nenhum.
+
+     Clicar neste botão é um pedido explícito: ele vence o que a escala
+     lembrava. O localStorage recebe o mesmo valor para que um F5 logo em
+     seguida não volte ao mês antigo. */
+  window._escalaBase = gBase;
+  window._escalaMes = mes;
+  try {
+    localStorage.setItem('gde_escala_ultima_base', gBase);
+    localStorage.setItem('gde_escala_ultimo_mes', mes);
+  } catch (_) {}
+
   navigateTo('capacity');
 }
 
