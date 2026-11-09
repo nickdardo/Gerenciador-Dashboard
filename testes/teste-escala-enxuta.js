@@ -904,6 +904,105 @@ function paginaDeTeste() {
         'com gente alocada, o convite sai da frente');
     }
 
+    sec('8o. Preenchimento grupo a grupo, com os números que guiam');
+    {
+      /* Alocar a escala inteira de uma vez é tudo ou nada: se o resultado
+         de um grupo não agrada, desfazer é refazer todos. Grupo a grupo,
+         quem preenche trabalha na ordem que conhece e cada passo é
+         pequeno o bastante para ser revisto.
+
+         E o número que guia o trabalho é o de DISPONÍVEIS: quanta gente
+         do grupo ainda há no cadastro para cobrir as posições abertas. É
+         ele que precisa cair a cada alocação. */
+      const r = await page.evaluate(() => {
+        window._escalaBase = 'GRU'; window._escalaMes = '2026-11';
+        window._escalaCenario = 'dimensionada';
+        window._escalaDias = new Map(); window._escalaFeriados = new Map();
+        window._escalaGruposVisiveis = null; window._escalaOrdemColuna = null;
+        window.escalaAplicarFiltroSituacao = (l) => l;
+        window.escalaEntradaEfetivaDoColab = (c) => c.entrada_manual || '';
+        window.escalaFuncaoGrupoDoColab = (c) =>
+          ({ label: /LIMPEZA/.test(c.funcao_manual || '') ? 'Limpeza' : 'Operadores' });
+        window.escalaCarregarMapaDim = () => ({ 'ASG LIMPEZA I': 'Limpeza' });
+        window.hcIsDesligado = () => false;
+        window._escalaPosicoesDim = [
+          { funcao: 'ASG LIMPEZA I', entrada: '07:00', saida: '13:00', carga: 180, qtd: 4 },
+        ];
+        window._escalaColabs = [
+          { matricula: '1', nome: 'ANA', funcao_manual: 'ASG LIMPEZA I', ch_manual: 180, entrada_manual: '07:00' },
+        ];
+        // No cadastro: mais dois de Limpeza e um de outro grupo.
+        window.eoColabs = new Map([
+          ['1', { nome: 'ANA', funcao: 'ASG LIMPEZA I', ch: 180, station: 'GRU' }],
+          ['2', { nome: 'BIA', funcao: 'ASG LIMPEZA I', ch: 180, station: 'GRU' }],
+          ['3', { nome: 'CAIO', funcao: 'ASG LIMPEZA I', ch: 180, station: 'GRU' }],
+          ['4', { nome: 'DANI', funcao: 'OPERADOR I', ch: 180, station: 'GRU' }],
+          ['5', { nome: 'ELO', funcao: 'ASG LIMPEZA I', ch: 180, station: 'CGH' }],
+        ]);
+        return {
+          html: escalaGradeEnxutaHTML(2026, 11, 30),
+          disp: escalaDisponiveisDoGrupo('Limpeza').map((p) => p.matricula).sort(),
+          ped: escalaPedidosDoGrupo('Limpeza'),
+        };
+      });
+
+      ok(r.disp.join() === '2,3',
+        'disponíveis são os do grupo, da base, fora da escala — e só eles · ' + r.disp.join());
+      ok(/2 disponíveis no cadastro/.test(r.html),
+        'o número aparece na faixa, que é onde se decide o próximo passo');
+      ok(/Alocar este grupo/.test(r.html) && /escalaAlocarGrupo\('Limpeza'\)/.test(r.html),
+        'com o botão que aloca só este grupo');
+      ok(/escala-grupo-acao destaque/.test(r.html),
+        'e ele fica sempre visível, não escondido atrás do cursor');
+      ok(r.ped.dim === 4 && r.ped.extra === 0 && r.ped.total === 4,
+        'a contagem separa o que veio do arquivo do que foi aberto à mão');
+    }
+
+    sec('8p. Posição extra é contada à parte da malha');
+    {
+      /* "O dimensionamento pede 274" e "abrimos mais 6 porque sobrava
+         gente" são afirmações diferentes. Somar as duas num número só
+         apaga a segunda, e com ela a pergunta de por que ela existe. */
+      const r = await page.evaluate(() => {
+        window._escalaPosicoesDim = [
+          { funcao: 'ASG LIMPEZA I', entrada: '07:00', saida: '13:00', carga: 180, qtd: 4 },
+          { funcao: 'ASG LIMPEZA I', entrada: '07:00', saida: '13:00', carga: 180, qtd: 2,
+            setor: '__extra__' },
+        ];
+        window._escalaColabs = [];
+        return { html: escalaGradeEnxutaHTML(2026, 11, 30), ped: escalaPedidosDoGrupo('Limpeza') };
+      });
+      ok(r.ped.dim === 4 && r.ped.extra === 2 && r.ped.total === 6,
+        'quatro do arquivo mais duas abertas à mão · ' + JSON.stringify(r.ped));
+      ok(/4 horários dimensionados/.test(r.html) && /\+2 extras/.test(r.html),
+        'a faixa mostra os dois separados, não um total que esconde a diferença');
+      ok((r.html.match(/escala-enx-vaga/g) || []).length === 6,
+        'e as seis posições viram linha, extras inclusive');
+      ok(/Posição extra/.test(r.html) && /escalaAbrirPosicaoExtra/.test(r.html),
+        'com o caminho para abrir mais, quando sobrar gente');
+    }
+
+    sec('8q. "Preencher com Staff" sai da Capacity');
+    {
+      /* Era ele que trazia o efetivo SEM horário nenhum e produzia a
+         escala com horários fora do dimensionamento. Na Base continua
+         fazendo sentido: lá o horário vem do ponto. */
+      const r = await page.evaluate(() => {
+        const fonte = document.querySelector('script[src*="escala.js"]');
+        window._escalaCenario = 'dimensionada';
+        const cap = escalaEhCapacity();
+        window._escalaCenario = 'planejada';
+        const base = escalaEhCapacity();
+        return { cap, base, temFonte: !!fonte };
+      });
+      ok(r.cap === true && r.base === false, 'o cenário distingue as duas escalas');
+      const fonte = fs.readFileSync(path.join(BASE, 'js', 'escala.js'), 'utf8');
+      ok(/escalaEhCapacity\(\) \? '' : `<button[^`]*escalaPreencherTodoStaff/.test(fonte),
+        'o botão só é desenhado fora da Capacity');
+      ok(/Alocar staff nos horários/.test(fonte),
+        'e na Capacity o caminho é alocar na malha');
+    }
+
     sec('9. Nenhum erro de script');
     ok(erros.length === 0, 'a página carregou sem exceção' + (erros.length ? ': ' + erros.join(' | ') : ''));
   } finally {

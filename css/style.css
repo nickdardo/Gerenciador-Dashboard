@@ -4366,3 +4366,74 @@ body.escala-modo-grade .escala-fill { margin-top: 0; }
   :root:not([data-theme="light"]) .escala-enx-sem-posicao td:first-child { box-shadow: inset 3px 0 0 #e0b357; }
   :root:not([data-theme="light"]) .escala-enx-sem-posicao .hora { color: #f0c870; }
 }
+
+/* ── Ações e contadores da faixa do grupo ────────────────────────────── */
+.escala-grupo-acao {
+  margin-left: 8px;
+  padding: 2px 9px;
+  font-size: 10px;
+  font-weight: 500;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .12s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  vertical-align: middle;
+}
+.escala-grupo-acao svg { width: 11px; height: 11px; }
+.escala-enx-grupo:hover .escala-grupo-acao,
+.escala-grupo-acao:focus-visible { opacity: 1; }
+.escala-grupo-acao:hover { background: var(--bg-hover); color: var(--text-primary); border-color: var(--border-strong); }
+.escala-grupo-acao:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+/* A ação principal do preenchimento fica sempre visível: esconder atrás
+   do cursor o botão que é o motivo de a tela existir não ajuda ninguém. */
+.escala-grupo-acao.destaque {
+  opacity: 1;
+  border-color: color-mix(in srgb, var(--blue, #00a0d2) 45%, transparent);
+  /* O azul do tema dá 3,02:1 sobre branco — claro demais para texto de
+     10px. Um tom próprio no claro resolve sem mexer no token, que serve
+     bem em fundo preenchido. */
+  color: #0b7093;
+}
+[data-theme="dark"] .escala-grupo-acao.destaque { color: var(--blue, #00a0d2); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .escala-grupo-acao.destaque { color: var(--blue, #00a0d2); }
+}
+
+.escala-enx-grupo .qtd.extra { color: #4a5a8a; font-weight: 600; }
+.escala-enx-grupo .qtd.disp { color: #1a6b41; font-weight: 600; }
+[data-theme="dark"] .escala-enx-grupo .qtd.extra { color: #9db2e8; }
+[data-theme="dark"] .escala-enx-grupo .qtd.disp { color: #72c02c; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .escala-enx-grupo .qtd.extra { color: #9db2e8; }
+  :root:not([data-theme="light"]) .escala-enx-grupo .qtd.disp { color: #72c02c; }
+}
+
+/* ── Caixa da posição extra ──────────────────────────────────────────── */
+.escala-modal-fundo {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(0, 0, 0, .55);
+  display: flex; align-items: center; justify-content: center; padding: 32px;
+}
+.escala-modal-caixa {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  padding: 20px 22px;
+  width: 100%; max-width: 420px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .5);
+}
+.escala-modal-caixa h3 { margin: 0 0 6px; font-size: 15px; color: var(--text-primary); }
+.escala-modal-caixa .sub { margin: 0 0 16px; font-size: 11.5px; color: var(--text-secondary); line-height: 1.5; }
+.escala-modal-caixa label {
+  display: block; margin-bottom: 12px;
+  font-size: 11px; color: var(--text-secondary);
+}
+.escala-modal-caixa label .adh-month-select,
+.escala-modal-caixa label input { display: block; width: 100%; margin-top: 4px; }
+.escala-modal-acoes { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }

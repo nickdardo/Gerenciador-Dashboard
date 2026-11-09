@@ -1043,7 +1043,7 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
                style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600"
                title="Traz o efetivo da base e aloca cada pessoa no horário mais próximo do que o dimensionamento pede, de uma vez"
                >${escalaIcone('userPlus')}Alocar staff nos horários</button>` : ''}
-        <button class="adh-refresh-btn" ${dis} onclick="escalaPreencherTodoStaff()">${escalaIcone('users')}Preencher com Staff</button>
+        ${escalaEhCapacity() ? '' : `<button class="adh-refresh-btn" ${dis} onclick="escalaPreencherTodoStaff()">${escalaIcone('users')}Preencher com Staff</button>`}
         <button class="adh-refresh-btn" ${dis} onclick="escalaPreencherHorarioMesAnterior()">${escalaIcone('calclock')}Horário do mês anterior</button>
         ${escalaCenario() !== 'planejada' ? `
         <button class="adh-refresh-btn" ${dis} style="background:${escalaCenarioInfo().cor}24;border-color:${escalaCenarioInfo().cor}73;color:${escalaCenarioInfo().cor};font-weight:600"
@@ -2719,6 +2719,12 @@ function escalaColabsOrdenados(ano, mesNum, diasNoMes) {
 /* Expande qtd em posições individuais e agrupa por grupo + horário.
    Devolve Map(grupo → Map("entrada–saida" → {entrada, saida, pedido,
    jornada, funcoes})). */
+/* Marca das posições abertas à mão, guardadas na mesma tabela do
+   dimensionamento. Vale dizer: subir um dimensionamento novo apaga o mês
+   inteiro e leva os extras junto — o arquivo é a fonte, e um arquivo
+   novo recomeça a conversa. */
+const ESCALA_SETOR_EXTRA = '__extra__';
+
 function escalaMalhaDoDimensionamento() {
   const posicoes = window._escalaPosicoesDim || [];
   const mapa = escalaCarregarMapaDim(window._escalaBase) || {};
@@ -2744,13 +2750,48 @@ function escalaMalhaDoDimensionamento() {
     const g = porGrupo.get(grupo);
     if (!g.has(chave)) {
       g.set(chave, { entrada: p.entrada || '', saida: p.saida || '',
-                     pedido: 0, jornada: escalaChDiariaDaPosicao(p.carga), funcoes: new Set() });
+                     pedido: 0, extra: 0, jornada: escalaChDiariaDaPosicao(p.carga), funcoes: new Set() });
     }
     const h = g.get(chave);
+    /* Posições criadas à mão entram com setor '__extra__'. Contadas à
+       parte porque "o dimensionamento pede 274" e "nós abrimos mais 6
+       porque sobrava gente" são afirmações diferentes, e misturar as
+       duas num número só apaga a segunda. */
+    const ehExtra = p.setor === ESCALA_SETOR_EXTRA;
     h.pedido += (p.qtd || 1);
+    if (ehExtra) h.extra += (p.qtd || 1);
     if (p.funcao) h.funcoes.add(p.funcao);
   }
   return porGrupo;
+}
+
+/* Quantos horários o grupo pede, separando o que veio do arquivo do que
+   foi aberto à mão. */
+function escalaPedidosDoGrupo(grupo) {
+  const malha = escalaMalhaDoDimensionamento().get(grupo);
+  const r = { total: 0, extra: 0, dim: 0 };
+  if (!malha) return r;
+  for (const [, h] of malha) { r.total += h.pedido; r.extra += h.extra; }
+  r.dim = r.total - r.extra;
+  return r;
+}
+
+/* Gente do grupo que está no cadastro da base e ainda fora desta escala
+   — o estoque disponível para alocar. É o número que precisa cair
+   conforme se aloca. */
+function escalaDisponiveisDoGrupo(grupo) {
+  const base = String(window._escalaBase || '').toUpperCase();
+  const naEscala = new Set((window._escalaColabs || []).map((c) => c.matricula));
+  const fora = [];
+  for (const [mat, r] of (window.eoColabs || new Map())) {
+    if (naEscala.has(mat)) continue;
+    if (String(r.station || '').toUpperCase() !== base) continue;
+    if (typeof hcIsDesligado === 'function' && hcIsDesligado(mat)) continue;
+    const g = escalaFuncaoGrupoDoColab({ matricula: mat, funcao_manual: r.funcao }).label;
+    if (g !== grupo) continue;
+    fora.push({ matricula: mat, nome: r.nome || '', funcao: r.funcao || '', ch: r.ch || '' });
+  }
+  return fora;
 }
 
 /* Casa a gente que está na escala com as posições, pelo horário de
@@ -2818,7 +2859,7 @@ function escalaGradeEnxutaHTML(ano, mesNum, diasNoMes) {
     return `<div class="escala-enx-vazia">
       <p>${esvaziada ? 'Escala esvaziada por você.' : 'Nenhum colaborador nesta escala ainda.'}</p>
       <p class="sub">${esvaziada
-        ? 'Ela não se preenche sozinha enquanto estiver assim. Use <b>Preencher com Staff</b> ou adicione por matrícula quando quiser montá-la de novo.'
+        ? `Ela não se preenche sozinha enquanto estiver assim. Use <b>${escalaEhCapacity() ? 'Alocar staff nos horários' : 'Preencher com Staff'}</b> ou adicione por matrícula quando quiser montá-la de novo.`
         : 'Use <b>Aplicar horário Dimensionamento</b> para montar a partir do que foi planejado, ou <b>Preencher com Staff</b> para trazer a base inteira.'}</p>
     </div>`;
   }
@@ -2923,18 +2964,36 @@ function escalaGradeEnxutaHTML(ano, mesNum, diasNoMes) {
        horários o dimensionamento pede e quantas pessoas existem. Com os
        dois lado a lado, a diferença é lida de relance, sem contar no
        Excel. Quando divergem, o número de pessoas fica em destaque. */
-    const pedido = capacity ? escalaPedidoDoGrupo(grupo) : 0;
+    const ped = capacity ? escalaPedidosDoGrupo(grupo) : { total: 0, extra: 0, dim: 0 };
     const vazias = capacity ? escalaVagasVaziasDoGrupo(grupo, gente, ano, mesNum, diasNoMes) : [];
-    const contadores = capacity && pedido
-      ? `<span class="qtd">· ${pedido} horário${pedido === 1 ? '' : 's'} dimensionado${pedido === 1 ? '' : 's'}</span>
-         <span class="qtd ${gente.length === pedido ? '' : 'difere'}">· ${gente.length} pessoa${gente.length === 1 ? '' : 's'}</span>
-         ${vazias.length ? `<span class="qtd vazias">· ${vazias.length} sem gente</span>` : ''}`
+    const disp = capacity && ped.total ? escalaDisponiveisDoGrupo(grupo).length : 0;
+    const g1 = escalaEscapeAttr(grupo).replace(/'/g, "\\'");
+
+    /* Os números que guiam o preenchimento, na ordem em que a pergunta é
+       feita: quanto a malha pede, quanta gente está dentro, quanta
+       posição falta cobrir e quanta gente ainda há no cadastro para
+       cobri-la. O último é o que cai a cada alocação. */
+    const contadores = capacity && ped.total
+      ? `<span class="qtd">· ${ped.dim} horário${ped.dim === 1 ? '' : 's'} dimensionado${ped.dim === 1 ? '' : 's'}</span>
+         ${ped.extra ? `<span class="qtd extra">· +${ped.extra} extra${ped.extra === 1 ? '' : 's'}</span>` : ''}
+         <span class="qtd ${gente.length === ped.total ? '' : 'difere'}">· ${gente.length} pessoa${gente.length === 1 ? '' : 's'}</span>
+         ${vazias.length ? `<span class="qtd vazias">· ${vazias.length} sem gente</span>` : ''}
+         ${disp ? `<span class="qtd disp">· ${disp} ${disp === 1 ? 'disponível' : 'disponíveis'} no cadastro</span>` : ''}`
       : `<span class="qtd">· ${gente.length} pessoa${gente.length === 1 ? '' : 's'}</span>`;
+
+    const acoes = capacity && ped.total
+      ? `<button type="button" class="escala-grupo-acao destaque" onclick="escalaAlocarGrupo('${g1}')"
+           title="Traz gente do cadastro deste grupo e aloca no horário mais próximo, sem mexer nos outros grupos">
+           ${escalaIcone('userPlus')}Alocar este grupo</button>
+         <button type="button" class="escala-grupo-acao" onclick="escalaAbrirPosicaoExtra('${g1}')"
+           title="Abrir posições além do que o dimensionamento pede, para caber gente que sobrou">
+           ${escalaIcone('calendarPlus')}Posição extra</button>` : '';
 
     html += `<tr class="escala-enx-grupo"><td colspan="${NCOLS}"><span class="rot">
       ${escalaEscapeAttr(grupo)} ${contadores}
-      <button type="button" class="escala-grupo-folgas"
-        onclick="escalaGerarFolgasAuto('${escalaEscapeAttr(grupo).replace(/'/g, "\\'")}')"
+      ${acoes}
+      <button type="button" class="escala-grupo-acao"
+        onclick="escalaGerarFolgasAuto('${g1}')"
         title="Gerar folgas automáticas só deste grupo, sem mexer no resto da escala">
         ${escalaIcone('sparkles')}Folgas do grupo</button></span></td></tr>`;
 
@@ -3794,6 +3853,206 @@ async function escalaPreencherTodoStaff(semPerguntar) {
    posição — os dois aparecem, porque os dois são a mesma resposta vista
    de lados opostos.
    ══════════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════════
+   Alocar UM grupo
+
+   Alocar a escala inteira de uma vez é tudo ou nada: se o resultado de
+   um grupo não agrada, desfazer significa refazer todos. Grupo a grupo,
+   quem preenche trabalha na ordem que conhece — fecha a Limpeza, confere,
+   passa para a Rampa — e cada passo é pequeno o bastante para ser
+   revisto.
+
+   E o casamento aqui é fechado no grupo: ninguém de outra função entra
+   para tapar buraco, porque isso não é alocação, é confusão.
+   ══════════════════════════════════════════════════════ */
+async function escalaAlocarGrupo(grupo) {
+  if (!escalaEhCapacity()) { escalaMsg('Alocação por grupo é da Escala Capacity.', true); return; }
+  if (escalaVerificarTravada()) return;
+
+  const malha = escalaMalhaDoDimensionamento().get(grupo);
+  if (!malha || !malha.size) { escalaMsg(`O dimensionamento não pede nada para ${grupo}.`, true); return; }
+
+  const base = window._escalaBase, mes = window._escalaMes, cen = escalaCenario();
+  const [ano, mesNum] = mes.split('-').map(Number);
+  const D = new Date(ano, mesNum, 0).getDate();
+
+  const vagas = [];
+  for (const [, h] of malha) {
+    for (let i = 0; i < h.pedido; i++) {
+      vagas.push({ grupo, jornada: h.jornada, entrada: h.entrada, saida: h.saida });
+    }
+  }
+
+  const naEscala = (window._escalaColabs || [])
+    .filter((c) => escalaFuncaoGrupoDoColab(c).label === grupo);
+  const disponiveis = escalaDisponiveisDoGrupo(grupo);
+
+  /* Traz do cadastro só o que couber nas posições livres. Trazer todo o
+     efetivo do grupo encheria a escala de gente sem posição, que é
+     exatamente o estado que se quer evitar. */
+  const faltam = Math.max(0, vagas.length - naEscala.length);
+  const aTrazer = disponiveis.slice(0, faltam);
+
+  const ok = confirm(
+    `ALOCAR ${grupo.toUpperCase()} — ${base} · ${mes}\n\n`
+    + `${vagas.length} posição(ões) neste grupo\n`
+    + `${naEscala.length} pessoa(s) já na escala`
+    + (aTrazer.length ? `\n${aTrazer.length} do cadastro serão trazidas` : '')
+    + (disponiveis.length > aTrazer.length
+        ? `\n${disponiveis.length - aTrazer.length} ficam no cadastro: não há posição para elas`
+        : '')
+    + `\n\nCada pessoa vai para o horário mais próximo do que já faz.\n`
+    + `Nenhum outro grupo é tocado.\n\nContinuar?`);
+  if (!ok) { escalaMsg('Alocação cancelada — nada foi alterado.'); return; }
+
+  escalaMostrarLoading(`Alocando ${grupo}...`);
+  try {
+    if (aTrazer.length) {
+      const novas = aTrazer.map((p) => ({
+        base, mes, cenario: cen, matricula: p.matricula, nome: p.nome,
+        created_by: currentUserProfile?.id || currentUser?.id || null,
+      }));
+      for (let i = 0; i < novas.length; i += 200) {
+        const { error } = await db.from('escala_colaborador')
+          .upsert(novas.slice(i, i + 200), { onConflict: 'base,mes,cenario,matricula' });
+        if (error) throw new Error(error.message);
+      }
+      window._escalaColabs = await escalaFetchColaboradores(base, mes, 'created_at');
+      escalaMarcarEsvaziada(base, mes, false);
+    }
+
+    const gente = (window._escalaColabs || [])
+      .filter((c) => escalaFuncaoGrupoDoColab(c).label === grupo);
+    const r = escalaCasarVagasComPessoas(vagas, gente, ano, mesNum, D);
+
+    const comPosicao = new Set(r.atribuicoes.map((a) => a.matricula));
+    const linhas = r.atribuicoes.map((a) => ({
+      base, mes, cenario: cen, matricula: a.matricula, nome: a.nome,
+      entrada_manual: a.entrada, saida_manual: a.saida,
+    }));
+    // Quem ficou de fora perde o horário: senão fica com o da alocação
+    // anterior, que o dimensionamento de agora não pede.
+    gente.filter((c) => !comPosicao.has(c.matricula) && (c.entrada_manual || c.saida_manual))
+      .forEach((c) => linhas.push({ base, mes, cenario: cen, matricula: c.matricula, nome: c.nome,
+                                    entrada_manual: null, saida_manual: null }));
+
+    for (let i = 0; i < linhas.length; i += 200) {
+      const { error } = await db.from('escala_colaborador')
+        .upsert(linhas.slice(i, i + 200), { onConflict: 'base,mes,cenario,matricula' });
+      if (error) throw new Error(error.message);
+      escalaLoadingAtualiza(Math.min(i + 200, linhas.length), linhas.length);
+    }
+    linhas.forEach((l) => {
+      const c = (window._escalaColabs || []).find((x) => x.matricula === l.matricula);
+      if (c) { c.entrada_manual = l.entrada_manual ?? null; c.saida_manual = l.saida_manual ?? null; }
+    });
+
+    escalaGradeAtualiza();
+    const semGente = r.porHorario.filter((h) => h.falta > 0);
+    const semPosicao = gente.length - comPosicao.size;
+    escalaMsg(`${grupo}: ${r.atribuicoes.length} posição(ões) preenchida(s)`
+      + (semGente.length ? `, ${semGente.reduce((n, h) => n + h.falta, 0)} ainda sem gente` : '')
+      + (semPosicao ? `, ${semPosicao} pessoa(s) sem posição` : '') + '.',
+      semGente.length || semPosicao ? 'aviso' : 'ok');
+    if (semGente.length) {
+      console.log([`[escala/${grupo}] horários que não fecham:`,
+        ...semGente.map((h) => `   ${h.horario}: pedido ${h.pedido}, atendido ${h.atendido}, faltam ${h.falta}`),
+      ].join('\n'));
+    }
+  } catch (e) {
+    /* Redesenhar é o que tira a barra de progresso daqui — não existe um
+       "esconder loading" separado, e deixar a barra na tela depois de um
+       erro é pior que o erro. */
+    escalaGradeAtualiza();
+    escalaMsg('Erro ao alocar: ' + e.message, true);
+  }
+}
+
+/* Posições além do que o arquivo pede. Existem para quando sobra gente:
+   sem elas, o excedente fica sem horário e sem como receber um. */
+function escalaAbrirPosicaoExtra(grupo) {
+  if (escalaVerificarTravada()) return;
+  const malha = escalaMalhaDoDimensionamento().get(grupo) || new Map();
+  const horarios = [...malha.values()].sort((a, b) =>
+    (escalaMinutosDeHora(a.entrada) ?? 0) - (escalaMinutosDeHora(b.entrada) ?? 0));
+  const sobrando = escalaDisponiveisDoGrupo(grupo).length;
+
+  const opcoes = horarios.map((h) =>
+    `<option value="${escalaEscapeAttr(h.entrada)}|${escalaEscapeAttr(h.saida)}|${h.jornada || ''}">
+       ${escalaEscapeAttr(h.entrada)} – ${escalaEscapeAttr(h.saida)} (${h.jornada || '?'}h · ${h.pedido} hoje)
+     </option>`).join('');
+
+  const html = `
+    <div id="escala-modal-extra" class="escala-modal-fundo">
+      <div class="escala-modal-caixa">
+        <h3>Posição extra — ${escalaEscapeAttr(grupo)}</h3>
+        <p class="sub">Abre posições além do que o dimensionamento pede. Elas aparecem na
+          faixa do grupo contadas à parte, para não se confundirem com a malha do arquivo.
+          ${sobrando ? `Há <b>${sobrando}</b> pessoa(s) deste grupo no cadastro sem posição.` : ''}</p>
+        <label>Horário
+          <select id="extra-horario" class="adh-month-select">
+            ${opcoes || '<option value="">— o grupo não tem horários —</option>'}
+            <option value="__novo__">— outro horário —</option>
+          </select>
+        </label>
+        <div id="extra-novo" style="display:none">
+          <label>Entrada <input type="time" id="extra-entrada" class="adh-month-select"></label>
+          <label>Saída <input type="time" id="extra-saida" class="adh-month-select"></label>
+        </div>
+        <label>Quantas posições
+          <input type="number" id="extra-qtd" class="adh-month-select" min="1" max="200" value="1">
+        </label>
+        <div class="escala-modal-acoes">
+          <button type="button" class="adh-refresh-btn" onclick="document.getElementById('escala-modal-extra').remove()">Cancelar</button>
+          <button type="button" class="adh-refresh-btn" style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600"
+            onclick="escalaCriarPosicaoExtra('${escalaEscapeAttr(grupo).replace(/'/g, "\\'")}')">Criar</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+  const sel = document.getElementById('extra-horario');
+  sel.onchange = () => {
+    document.getElementById('extra-novo').style.display = sel.value === '__novo__' ? 'block' : 'none';
+  };
+}
+
+async function escalaCriarPosicaoExtra(grupo) {
+  const sel = document.getElementById('extra-horario');
+  const qtd = Math.max(1, Math.min(200, parseInt(document.getElementById('extra-qtd').value, 10) || 1));
+  let entrada, saida, jornada;
+  if (sel.value === '__novo__' || !sel.value) {
+    entrada = document.getElementById('extra-entrada').value;
+    saida = document.getElementById('extra-saida').value;
+    if (!entrada || !saida) { escalaMsg('Informe entrada e saída da posição extra.', true); return; }
+    const ini = escalaMinutosDeHora(entrada), fim = escalaMinutosDeHora(saida);
+    jornada = Math.round((((fim - ini) + 1440) % 1440) / 60) || 6;
+  } else {
+    const [e, s, j] = sel.value.split('|');
+    entrada = e; saida = s; jornada = parseInt(j, 10) || 6;
+  }
+
+  /* A função guardada é a primeira do grupo, só para o extra ter nome
+     no relatório. O que importa é o grupo, a entrada e a saída. */
+  const funcoes = [...(escalaMalhaDoDimensionamento().get(grupo) || new Map()).values()]
+    .flatMap((h) => [...h.funcoes]);
+  const { error } = await db.from('escala_dimensionamento').insert([{
+    base: window._escalaBase, mes: window._escalaMes, setor: ESCALA_SETOR_EXTRA,
+    funcao: funcoes[0] || grupo, entrada, saida, carga: jornada * 30, qtd,
+    gerado_por: currentUserProfile?.id || currentUser?.id || null,
+  }]);
+  if (error) { escalaMsg('Erro ao criar a posição extra: ' + error.message, true); return; }
+
+  window._escalaPosicoesDim = await escalaPaginar(
+    (de, ate) => db.from('escala_dimensionamento').select('*')
+      .eq('base', window._escalaBase).eq('mes', window._escalaMes)
+      .order('entrada').order('funcao').range(de, ate),
+    'escala_dimensionamento');
+
+  document.getElementById('escala-modal-extra')?.remove();
+  escalaGradeAtualiza();
+  escalaMsg(`${qtd} posição(ões) extra criada(s) em ${grupo}, das ${entrada} às ${saida}.`);
+}
+
 async function escalaAlocarStaffNosHorarios() {
   if (!escalaEhCapacity()) {
     escalaMsg('Esta alocação é da Escala Capacity — os horários vêm do dimensionamento.', true);
@@ -7298,7 +7557,7 @@ async function escalaExecutarAplicacaoDim(posicoes, mapa) {
 
   let colabs = window._escalaColabs || [];
   if (!colabs.length) {
-    escalaMsg('A Escala Dimensionada está vazia. Use "Preencher com Staff" primeiro — o dimensionamento define horários, não quem entra na escala.', true);
+    escalaMsg('A Escala Capacity está sem ninguém. Use "Alocar staff nos horários" — ele traz o efetivo e casa com a malha de uma vez.', true);
     return;
   }
 

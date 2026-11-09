@@ -1100,6 +1100,12 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaModoColunas: 'essencial
   const chamada = /\w+\s*\([^)]*\bbase\b/;
   while ((m = reObj.exec(fonte)) !== null) {
     const t = m[0];
+    /* escala_dimensionamento não tem coluna de cenário, e não é
+       esquecimento: o dimensionamento é o mesmo arquivo para as duas
+       escalas — quem escolhe cenário é quem o consome. A marca do setor
+       extra identifica essas gravações sem precisar de exceção por
+       linha. */
+    if (t.includes('ESCALA_SETOR_EXTRA')) continue;
     if (t.includes('cenario') || t.includes('escala_ultima_base') || t.includes('escalaPopularAutomaticamente')) continue;
     if (chamada.test(t)) continue;
     semCampo.push(t.split('\n')[0].trim().slice(0, 70));
