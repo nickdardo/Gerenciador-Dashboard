@@ -3754,8 +3754,42 @@ body.fg-locked { overflow: hidden; }
 .tb-foco-btn.aceso { background: var(--blue); border-color: var(--blue); color: #0b0f1a; }
 
 body.escala-modo-grade #page-content > .page-header,
-body.escala-modo-grade #page-content > .hc-panel.escala-ferr,
 body.escala-modo-grade #escala-legenda-linha { display: none !important; }
+
+/* ── Ferramentas como menu ───────────────────────────
+   O painel saiu da faixa permanente e virou menu: abre sobre a grade,
+   ancorado no botão da barra superior. A grade fica com a tela inteira o
+   tempo todo, e nenhuma função mudou de lugar — são os mesmos botões e os
+   mesmos handlers, só posicionados por CSS. Fechado ele continua no DOM,
+   por isso `visibility` e não `display`: assim nada é re-renderizado ao
+   abrir, e a grade de 289 pessoas × 31 dias não remonta à toa. */
+body.escala-modo-grade .hc-panel.escala-ferr.escala-ferr-menu {
+  position: fixed;
+  top: calc(var(--topbar-h) + 8px);
+  right: 16px;
+  z-index: 60;
+  width: min(880px, calc(100vw - var(--sb-width) - 32px));
+  max-height: calc(100vh - var(--topbar-h) - 24px);
+  overflow-y: auto;
+  margin: 0;
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: 12px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .34), 0 2px 8px rgba(0, 0, 0, .18);
+  opacity: 0; visibility: hidden;
+  transform: translateY(-6px);
+  transition: opacity .13s ease, transform .13s ease, visibility .13s;
+}
+#app-shell.sb-closed body.escala-modo-grade .hc-panel.escala-ferr.escala-ferr-menu,
+body.escala-modo-grade #app-shell.sb-closed .hc-panel.escala-ferr.escala-ferr-menu {
+  width: min(880px, calc(100vw - var(--sb-width-closed) - 32px));
+}
+body.escala-modo-grade .hc-panel.escala-ferr.escala-ferr-menu.aberto {
+  opacity: 1; visibility: visible; transform: translateY(0);
+}
+/* Sem transição para quem pediu menos movimento no sistema. */
+@media (prefers-reduced-motion: reduce) {
+  body.escala-modo-grade .hc-panel.escala-ferr.escala-ferr-menu { transition: none; }
+}
 
 /* Os avisos entre o cabeçalho e as ferramentas somem junto — menos o de
    escala travada, que muda o que você pode fazer e precisa continuar à
@@ -3782,7 +3816,50 @@ body.escala-modo-grade .escala-fill { margin-top: 0; }
    no olho. Entrada e saída fecham a linha porque vêm do dimensionamento e
    servem de referência, não de campo de edição.
    ══════════════════════════════════════════════════════ */
-#escala-grade-wrap table.escala-enx { font-size: 12.5px; }
+/* ── Largura da grade enxuta ─────────────────────────
+   As nove colunas de identificação e conferência têm medida própria; o
+   que sobra é dividido entre os dias do mês. Num monitor largo os dias
+   crescem e a grade preenche a tela; num estreito eles param em 26px e a
+   grade rola — 30 dias não cabem em tela pequena, e fingir que cabem só
+   deixa as colunas ilegíveis.
+
+   As duas primeiras colunas ficam congeladas na rolagem horizontal, e o
+   deslocamento da segunda SAI da largura da primeira: fossem dois números
+   digitados à mão, bastaria mexer num deles para a Nome cobrir a
+   Matrícula. */
+:root {
+  --enx-mat: 92px;  --enx-nome: 196px; --enx-fn: 136px; --enx-ch: 46px;
+  --enx-sel: 46px;  --enx-folgas: 60px; --enx-hora: 64px;
+  --enx-dia-min: 26px;
+}
+#escala-grade-wrap table.escala-enx {
+  font-size: 12.5px;
+  table-layout: fixed;
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  min-width: calc(var(--enx-mat) + var(--enx-nome) + var(--enx-fn) + var(--enx-ch)
+    + (var(--enx-sel) * 2) + var(--enx-folgas) + (var(--enx-hora) * 2)
+    + (var(--enx-dias, 30) * var(--enx-dia-min)));
+}
+#escala-grade-wrap table.escala-enx .c-mat    { width: var(--enx-mat); }
+#escala-grade-wrap table.escala-enx .c-nome   { width: var(--enx-nome); }
+#escala-grade-wrap table.escala-enx .c-fn     { width: var(--enx-fn); }
+#escala-grade-wrap table.escala-enx .c-ch     { width: var(--enx-ch); }
+#escala-grade-wrap table.escala-enx .c-sel    { width: var(--enx-sel); }
+#escala-grade-wrap table.escala-enx .c-folgas { width: var(--enx-folgas); }
+#escala-grade-wrap table.escala-enx .c-hora   { width: var(--enx-hora); }
+/* .c-dia fica sem largura de propósito: é ele que absorve a sobra. */
+#escala-grade-wrap table.escala-enx .col-mat  { left: 0; }
+#escala-grade-wrap table.escala-enx .col-nome { left: var(--enx-mat); }
+/* Nome e função são os únicos textos longos: cortam com reticências em
+   vez de empurrar a coluna, que em table-layout:fixed nem empurraria —
+   transbordaria por cima da vizinha. */
+#escala-grade-wrap table.escala-enx td.nome,
+#escala-grade-wrap table.escala-enx td.fn,
+#escala-grade-wrap table.escala-enx th {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 #escala-grade-wrap table.escala-enx th {
   position: sticky; top: 0; z-index: 3;
   background: var(--bg-surface); border: 1px solid var(--border);

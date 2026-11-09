@@ -106,23 +106,23 @@ function rodar(nome, opcoes) {
 }
 
 let tudoOk = true;
-tudoOk &= rodar('lista simples, colunas extras ligadas', { _escalaColunasSecundarias: true, _escalaAgruparPorTurno: false });
-tudoOk &= rodar('lista simples, colunas essenciais', { _escalaColunasSecundarias: false, _escalaAgruparPorTurno: false });
-tudoOk &= rodar('agrupado, colunas extras ligadas', { _escalaColunasSecundarias: true, _escalaAgruparPorTurno: true });
-tudoOk &= rodar('agrupado, colunas essenciais', { _escalaColunasSecundarias: false, _escalaAgruparPorTurno: true });
+tudoOk &= rodar('lista simples, colunas extras ligadas', { _escalaModoColunas: 'completo', _escalaColunasSecundarias: true, _escalaAgruparPorTurno: false });
+tudoOk &= rodar('lista simples, colunas essenciais', { _escalaModoColunas: 'essencial', _escalaColunasSecundarias: false, _escalaAgruparPorTurno: false });
+tudoOk &= rodar('agrupado, colunas extras ligadas', { _escalaModoColunas: 'completo', _escalaColunasSecundarias: true, _escalaAgruparPorTurno: true });
+tudoOk &= rodar('agrupado, colunas essenciais', { _escalaModoColunas: 'essencial', _escalaColunasSecundarias: false, _escalaAgruparPorTurno: true });
 
 // O colspan tem que continuar batendo em TODOS os critérios de sub-bloco —
 // é onde nascem as linhas novas de cabeçalho e de contagem.
 ['turno', 'horario', 'setor', 'bloco', 'nenhum'].forEach(crit => {
   tudoOk &= rodar(`agrupado, sub-bloco por "${crit}"`, {
-    _escalaColunasSecundarias: true, _escalaAgruparPorTurno: true, _escalaCriterioSubBloco: crit,
+    _escalaModoColunas: 'completo', _escalaColunasSecundarias: true, _escalaAgruparPorTurno: true, _escalaCriterioSubBloco: crit,
   });
 });
 
 // ── Sub-blocos separam por horário e cada um traz sua contagem ──────────
 (function () {
   Object.assign(sandbox.window, {
-    _escalaColunasSecundarias: true, _escalaAgruparPorTurno: true, _escalaCriterioSubBloco: 'turno',
+    _escalaModoColunas: 'completo', _escalaColunasSecundarias: true, _escalaAgruparPorTurno: true, _escalaCriterioSubBloco: 'turno',
   });
   const html = sandbox.escalaGradeTabelaHTML(ANO, MES, DIAS);
 
@@ -174,6 +174,7 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaColunasSecundarias: fal
 
 // ── Largura mínima nos dois modos ───────────────────────
 [true, false].forEach(sec => {
+  sandbox.window._escalaModoColunas = sec ? 'completo' : 'essencial';
   sandbox.window._escalaColunasSecundarias = sec;
   sandbox.window._escalaAgruparPorTurno = false;
   const html = sandbox.escalaGradeTabelaHTML(ANO, 1, 31); // janeiro: pior caso, 31 dias
@@ -234,7 +235,7 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaColunasSecundarias: fal
   sandbox.window.eoFeriasAll = [];
 
   // ── Colunas: Setor e Bloco saíram da grade ──────────
-  Object.assign(sandbox.window, { _escalaColunasSecundarias: true, _escalaAgruparPorTurno: false });
+  Object.assign(sandbox.window, { _escalaModoColunas: 'completo', _escalaColunasSecundarias: true, _escalaAgruparPorTurno: false });
   const html = sandbox.escalaGradeTabelaHTML(ANO, MES, DIAS);
   ok('coluna Setor removida do cabeçalho', !/>Setor</.test(html));
   ok('coluna Bloco removida do cabeçalho', !/>Bloco</.test(html));

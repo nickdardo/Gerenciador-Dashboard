@@ -55,52 +55,91 @@ function paginaDeTeste() {
   const abrir = async (altura) => {
     const p = await browser.newPage({ viewport: { width: 1280, height: altura } });
     p.on('pageerror', (e) => erros.push(e.message));
-    await p.goto(url, { waitUntil: 'domcontentloaded' });
+    // 'load' e não 'domcontentloaded': as verificações olham estilo
+    // calculado, e com o CSS ainda em voo a folha não valeria nada.
+    await p.goto(url, { waitUntil: 'load' });
     await p.waitForFunction(() => typeof window.escalaFerramentasRecolhido === 'function');
     return p;
   };
   const display = (p, sel) => p.$eval(sel, (e) => getComputedStyle(e).display);
 
   try {
-    sec('1. Tela alta — nada muda para quem tem espaço');
+    sec('1. A grade fica com a tela inteira, sempre');
     {
-      const p = await abrir(1000);
-      ok(await p.evaluate(() => escalaFerramentasRecolhido()) === false,
-        'com 1000px de altura o painel começa expandido');
-      await p.evaluate(() => escalaAplicarEstadoFerramentas());
-      ok(await display(p, '#escala-ferramentas') !== 'none', 'o painel de ferramentas aparece');
-      ok(await display(p, '#escala-ferr-mini') === 'none', 'e a faixa recolhida fica fora do caminho');
-      ok(await display(p, '#escala-legenda-linha') === 'flex', 'a legenda continua na linha');
-      await p.close();
+      /* O painel ocupava uma faixa permanente acima da grade e havia um
+         botão para recolhê-lo. Agora não há duas situações: a grade tem a
+         tela toda o tempo todo e as ferramentas abrem como menu, sobre
+         ela. A faixa fina continua visível porque carrega base, mês e
+         cenário — esconder o cabeçalho sem levar o contexto junto é como
+         alguém acaba editando CGH achando que está em BEL. */
+      for (const altura of [1000, 760]) {
+        const p = await abrir(altura);
+        await p.evaluate(() => escalaAplicarEstadoFerramentas());
+        ok(await p.evaluate(() => document.body.classList.contains('escala-modo-grade')),
+          `${altura}px de altura: a grade está em tela cheia`);
+        ok(await display(p, '#escala-ferr-mini') === 'flex',
+          `${altura}px: a faixa com base, mês e cenário fica visível`);
+        ok(await display(p, '#escala-legenda-linha') === 'none',
+          `${altura}px: a legenda sai da linha — volta no "?" da faixa`);
+        ok(await p.evaluate(() => document.getElementById('escala-ferramentas').classList.contains('escala-ferr-menu')),
+          `${altura}px: o painel virou menu`);
+        ok(!(await p.evaluate(() => document.getElementById('escala-ferramentas').classList.contains('aberto'))),
+          `${altura}px: e começa fechado`);
+        await p.close();
+      }
     }
 
-    sec('2. Tela baixa — recolhe sozinho, sem precisar descobrir o botão');
+    sec('2. O botão abre e fecha o menu');
     {
-      const p = await abrir(760);
-      ok(await p.evaluate(() => escalaFerramentasRecolhido()) === true,
-        'com 760px de altura já abre recolhido');
+      const p = await abrir(900);
       await p.evaluate(() => escalaAplicarEstadoFerramentas());
-      ok(await display(p, '#escala-ferramentas') === 'none', 'o painel sai');
-      ok(await display(p, '#escala-ferr-mini') === 'flex', 'a faixa entra no lugar dele');
-      ok(await display(p, '#escala-legenda-linha') === 'none',
-        'e a legenda sai da linha — ela volta no "?" da faixa');
-      await p.close();
-    }
+      const aberto = () => p.evaluate(() => document.getElementById('escala-ferramentas').classList.contains('aberto'));
+      /* `visibility` participa da transição de 130ms, então medir no
+         instante do clique pega o menu no meio do caminho. */
+      const assentar = () => p.waitForTimeout(220);
+      const visivel = () => p.$eval('#escala-ferramentas', (e) => getComputedStyle(e).visibility);
 
-    sec('3. A escolha de quem clicou vale mais que o tamanho da tela');
-    {
-      const p = await abrir(760);
+      await assentar();
+      ok(await visivel() === 'hidden', 'fechado, o menu não aparece');
       await p.evaluate(() => escalaToggleFerramentas());
-      ok(await p.evaluate(() => localStorage.getItem('gde_escala_ferramentas')) === '0',
-        'abrir grava a preferência');
-      ok(await display(p, '#escala-ferramentas') !== 'none', 'e o painel volta na hora');
+      await assentar();
+      ok(await aberto(), 'o botão abre');
+      ok(await visivel() === 'visible', 'e aí ele aparece');
+      await p.evaluate(() => escalaToggleFerramentas());
+      ok(!(await aberto()), 'e fecha de novo no segundo clique');
 
-      await p.evaluate(() => { localStorage.setItem('gde_escala_ferramentas', '0'); delete window._escalaFerrRecolhido; });
-      ok(await p.evaluate(() => escalaFerramentasRecolhido()) === false,
-        'quem escolheu "aberto" continua aberto mesmo em tela baixa');
-      await p.evaluate(() => { localStorage.setItem('gde_escala_ferramentas', '1'); delete window._escalaFerrRecolhido; });
-      ok(await p.evaluate(() => escalaFerramentasRecolhido()) === true,
-        'e quem escolheu "recolhido" continua recolhido');
+      // Fechado ele continua no DOM: é isso que evita remontar a grade de
+      // 289 pessoas × 31 dias a cada abertura.
+      ok(await display(p, '#escala-ferramentas') !== 'none',
+        'fechado, o menu continua no DOM — nada é re-renderizado ao abrir');
+      await p.close();
+    }
+
+    sec('3. Esc e clique fora fecham, como qualquer menu');
+    {
+      const p = await abrir(900);
+      await p.evaluate(() => escalaAplicarEstadoFerramentas());
+      const aberto = () => p.evaluate(() => document.getElementById('escala-ferramentas').classList.contains('aberto'));
+
+      await p.evaluate(() => escalaToggleMenuFerramentas(true));
+      ok(await aberto(), 'aberto');
+      await p.keyboard.press('Escape');
+      await p.waitForTimeout(60);
+      ok(!(await aberto()), 'Esc fecha');
+
+      await p.evaluate(() => escalaToggleMenuFerramentas(true));
+      await p.mouse.click(5, 400);
+      await p.waitForTimeout(60);
+      ok(!(await aberto()), 'clique fora fecha');
+
+      // Clicar DENTRO não pode fechar: senão nenhum botão do menu funciona.
+      await p.evaluate(() => escalaToggleMenuFerramentas(true));
+      await p.evaluate(() => {
+        const el = document.getElementById('escala-ferramentas');
+        el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      });
+      await p.waitForTimeout(60);
+      ok(await aberto(), 'clique dentro do menu não fecha');
       await p.close();
     }
 
@@ -147,30 +186,39 @@ function paginaDeTeste() {
       await p.close();
     }
 
-    sec('6. Modo grade — some com TUDO que está acima da grade');
+    sec('6. A grade em tela cheia é o único estado, e o contexto não some junto');
     {
+      /* Antes havia dois estados e um botão para alternar. Agora a grade
+         tem a tela inteira sempre, e o botão abre as ferramentas sobre
+         ela. O que NÃO pode sumir é o contexto: a faixa fina carrega base,
+         mês e cenário, porque esconder o cabeçalho sem levar isso junto é
+         como alguém acaba editando CGH achando que está em BEL. */
       const p = await abrir(1000);
-      await p.evaluate(() => { window._escalaFerrRecolhido = false; escalaAplicarEstadoFerramentas(); });
-      ok(await display(p, '.page-header') !== 'none', 'aberto, o cabeçalho da página aparece');
+      await p.evaluate(() => escalaAplicarEstadoFerramentas());
 
-      // o botão da barra superior é o interruptor principal
-      await p.click('#tb-foco');
-      ok(await p.evaluate(() => document.body.classList.contains('escala-modo-grade')),
-        'o clique no botão da barra superior liga o modo grade');
-      ok(await display(p, '.page-header') === 'none',
-        'e o cabeçalho da página some junto — era o que faltava, não só o cartão de ferramentas');
-      ok(await display(p, '#escala-ferramentas') === 'none', 'o cartão de ferramentas também');
-      ok(await display(p, '.escala-nota:not(.escala-nota-trava)') === 'none', 'e os avisos de rotina');
+      ok(await display(p, '.page-header') === 'none', 'o cabeçalho da página sai do caminho');
+      ok(await display(p, '.escala-nota:not(.escala-nota-trava)') === 'none', 'os avisos de rotina também');
       ok(await display(p, '.escala-nota-trava') !== 'none',
         'menos o de escala travada: ele muda o que você pode fazer, então fica');
-      ok(await p.$eval('#tb-foco', (e) => e.classList.contains('aceso')),
-        'o botão acende, para você saber em que estado está');
-      ok(/Sair do modo grade/.test(await p.$eval('#tb-foco', (e) => e.title)),
-        'e a dica do botão passa a oferecer a saída');
+      ok(await display(p, '#escala-ferr-mini') === 'flex',
+        'e a faixa com base, mês e cenário fica — o contexto nunca some');
 
       await p.click('#tb-foco');
-      ok(await display(p, '.page-header') !== 'none', 'clicar de novo traz tudo de volta');
-      ok(!(await p.$eval('#tb-foco', (e) => e.classList.contains('aceso'))), 'e o botão apaga');
+      await p.waitForTimeout(220);
+      ok(await p.$eval('#tb-foco', (e) => e.classList.contains('aceso')),
+        'o botão acende enquanto o menu está aberto');
+      ok(await p.$eval('#tb-foco', (e) => e.getAttribute('aria-expanded')) === 'true',
+        'e se anuncia como expandido para o leitor de tela');
+      ok(/Fechar/.test(await p.$eval('#tb-foco', (e) => e.title)),
+        'a dica do botão oferece o fechamento');
+
+      await p.click('#tb-foco');
+      await p.waitForTimeout(220);
+      ok(!(await p.$eval('#tb-foco', (e) => e.classList.contains('aceso'))), 'e apaga ao fechar');
+      ok(await p.$eval('#tb-foco', (e) => e.getAttribute('aria-expanded')) === 'false',
+        'voltando a se anunciar como recolhido');
+      ok(await display(p, '.page-header') === 'none',
+        'o cabeçalho continua fora: a tela cheia não depende do menu');
       await p.close();
     }
 
@@ -193,28 +241,30 @@ function paginaDeTeste() {
 
     sec('8. Atalho de teclado');
     {
+      /* O atalho agora abre e fecha o MENU — a tela cheia não é mais um
+         estado que se liga e desliga. As letras soltas marcam F/J/K/C/A na
+         célula, por isso ele tem modificador, e dentro de um campo de
+         texto não pode disparar. */
       const p = await abrir(1000);
-      await p.evaluate(() => { window._escalaFerrRecolhido = false; escalaAplicarEstadoFerramentas(); });
-      await p.keyboard.press('Control+Shift+G');
-      ok(await p.evaluate(() => document.body.classList.contains('escala-modo-grade')),
-        'Ctrl+Shift+G liga o modo grade sem precisar de célula selecionada');
-      await p.keyboard.press('Control+Shift+G');
-      ok(!(await p.evaluate(() => document.body.classList.contains('escala-modo-grade'))),
-        'e desliga');
+      await p.evaluate(() => escalaAplicarEstadoFerramentas());
+      const aberto = () => p.evaluate(() => document.getElementById('escala-ferramentas').classList.contains('aberto'));
 
-      // As letras soltas marcam F/J/K/C/A na célula — por isso o atalho tem
-      // modificador. E dentro de um campo de texto ele não pode disparar.
+      await p.keyboard.press('Control+Shift+G');
+      await p.waitForTimeout(80);
+      ok(await aberto(), 'Ctrl+Shift+G abre as ferramentas sem precisar de célula selecionada');
+      await p.keyboard.press('Control+Shift+G');
+      await p.waitForTimeout(80);
+      ok(!(await aberto()), 'e fecha');
+
       await p.evaluate(() => {
         const i = document.createElement('input'); i.id = 'tst'; document.body.appendChild(i); i.focus();
       });
       await p.keyboard.press('Control+Shift+G');
-      ok(!(await p.evaluate(() => document.body.classList.contains('escala-modo-grade'))),
-        'digitando num campo, o atalho não dispara');
+      await p.waitForTimeout(80);
+      ok(!(await aberto()), 'digitando num campo, o atalho não dispara');
       await p.close();
     }
 
-    sec('9. Nenhum erro de script');
-    ok(erros.length === 0, 'a página carregou sem exceção' + (erros.length ? ': ' + erros.join(' | ') : ''));
   } finally {
     await browser.close();
     fs.unlinkSync(tmp);

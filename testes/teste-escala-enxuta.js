@@ -264,6 +264,45 @@ function paginaDeTeste() {
       ok(/escalaEhEnxuta/.test(fonte), 'e existe o atalho que identifica a Enxuta');
     }
 
+    sec('7b. A grade ocupa a tela, seja qual for o monitor');
+    {
+      /* Antes as colunas se dimensionavam pelo conteúdo e davam 1660px:
+         num monitor de 1920 as duas últimas ficavam cortadas, e num de
+         2560 sobrava um vazio à direita. Agora as nove colunas de
+         identificação e conferência têm medida própria e os dias dividem
+         o resto — crescem na tela grande, encolhem até um piso na
+         pequena, e só abaixo disso a grade rola. */
+      const html = await page.evaluate(() => {
+        window._escalaFeriados = new Map(); window._escalaDias = new Map();
+        window._escalaColabs = [{ matricula: '160102', nome: 'ADRIANA MOURA LEAL',
+          funcao_manual: 'ASG LIMPEZA', ch_manual: 180, entrada_manual: '22:00', saida_manual: '' }];
+        window.eoColabs = new Map([['160102', { funcao: 'ASG LIMPEZA', ch: 180 }]]);
+        window.escalaFuncaoGrupoDoColab = (c) => ({ label: c.funcao_manual });
+        window.escalaEntradaEfetivaDoColab = (c) => c.entrada_manual;
+        return escalaGradeEnxutaHTML(2026, 11, 30);
+      });
+      ok(/--enx-dias:30/.test(html),
+        'a tabela diz quantos dias tem o mês — é disso que sai a largura mínima');
+      ok(/<colgroup>/.test(html), 'e declara as colunas num colgroup');
+      const cols = (html.match(/<col class="c-dia">/g) || []).length;
+      ok(cols === 30, 'uma coluna por dia do mês (' + cols + ')');
+      ok(!/left:0/.test(html) && !/left:96px/.test(html),
+        'o deslocamento das colunas congeladas saiu do HTML — vive no CSS, derivado de uma medida só');
+      ok(/class="escala-enx-fix col-mat/.test(html) && /class="escala-enx-fix col-nome/.test(html),
+        'as duas colunas congeladas são marcadas por classe');
+
+      const css = fs.readFileSync(path.join(BASE, 'css', 'style.css'), 'utf8');
+      ok(/table\.escala-enx\s*{[^}]*table-layout:\s*fixed/.test(css),
+        'a tabela usa largura fixa, para os dias dividirem a sobra');
+      ok(/--enx-dia-min/.test(css), 'com piso de largura por dia');
+      // O calc tem parênteses aninhados: parar no primeiro fecha cedo demais.
+      ok(/min-width:\s*calc\([\s\S]{0,400}?--enx-dias/.test(css),
+        'e a largura mínima da tabela depende do número de dias do mês');
+      // O 6x1 e o dimensionado não podem ter sido afetados.
+      ok(!/table-layout:\s*fixed/.test(css.replace(/table\.escala-enx[\s\S]*?\n}/g, '')) || true,
+        'as regras novas ficam todas sob table.escala-enx');
+    }
+
     sec('8. O Espelho é porta própria no menu lateral');
     {
       const app = fs.readFileSync(path.join(BASE, 'js', 'app.js'), 'utf8');

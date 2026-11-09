@@ -163,10 +163,23 @@ async function pageEscala(el) {
     try { recolhidoLocal = localStorage.getItem('gde_escala_blocos_recolhidos'); } catch (_) {}
     window._escalaBlocosRecolhidos = recolhidoLocal === '1';
   }
-  if (window._escalaColunasSecundarias === undefined) {
-    let secLocal = null;
-    try { secLocal = localStorage.getItem('gde_escala_colunas_secundarias'); } catch (_) {}
-    window._escalaColunasSecundarias = secLocal !== '0'; // mostrado por padrão, só esconde se a pessoa já escolheu esconder antes
+  if (window._escalaModoColunas === undefined) {
+    /* Três níveis de coluna, do mais completo ao mais limpo. Antes eram
+       dois, guardados num booleano ('gde_escala_colunas_secundarias'), e
+       esse valor antigo continua valendo: quem já tinha escolhido esconder
+       as secundárias abre no 'essencial', e não é jogado no enxuto sem
+       pedir. Quem nunca escolheu nada começa no enxuto, que é o layout
+       novo. */
+    let modo = null;
+    try {
+      modo = localStorage.getItem('gde_escala_modo_colunas');
+      if (!modo) {
+        const antigo = localStorage.getItem('gde_escala_colunas_secundarias');
+        if (antigo === '0') modo = 'essencial';
+        else if (antigo === '1') modo = 'completo';
+      }
+    } catch (_) {}
+    window._escalaModoColunas = ESCALA_MODOS_COLUNA[modo] ? modo : 'enxuto';
   }
   if (window._escalaCriterioSubBloco === undefined) {
     let critLocal = null;
@@ -1310,10 +1323,60 @@ function escalaFerramentasRecolhido() {
   return window._escalaFerrRecolhido;
 }
 
-function escalaToggleFerramentas() {
-  window._escalaFerrRecolhido = !escalaFerramentasRecolhido();
-  try { localStorage.setItem(ESCALA_FERR_CHAVE, window._escalaFerrRecolhido ? '1' : '0'); } catch (_) {}
-  escalaAplicarEstadoFerramentas();
+/* Todo mundo que pedia "mostrar/esconder ferramentas" — o botão da barra,
+   as etiquetas de filtro, o Ctrl+Shift+G — quer a mesma coisa: ver os
+   controles. Agora isso é abrir o menu, e o nome antigo continua valendo
+   para não espalhar a mudança por cinco lugares. */
+function escalaToggleFerramentas() { escalaToggleMenuFerramentas(); }
+
+/* O painel de ferramentas virou menu: ele abre sobre a grade, ancorado no
+   botão, em vez de ocupar uma faixa permanente da tela. A grade fica com
+   a tela inteira o tempo todo, e nenhuma função se perdeu de lugar — são
+   os mesmos botões, os mesmos seletores e os mesmos handlers, só
+   posicionados por CSS. Nada é re-renderizado ao abrir e fechar: a grade
+   de 289 pessoas × 31 dias custa caro demais para remontar à toa. */
+function escalaMenuFerramentasAberto() { return !!window._escalaFerrMenu; }
+
+function escalaToggleMenuFerramentas(forcar) {
+  const abrir = forcar === undefined ? !escalaMenuFerramentasAberto() : !!forcar;
+  window._escalaFerrMenu = abrir;
+  const painel = document.getElementById('escala-ferramentas');
+  if (painel) painel.classList.toggle('aberto', abrir);
+  const foco = document.getElementById('tb-foco');
+  if (foco) {
+    foco.classList.toggle('aceso', abrir);
+    foco.setAttribute('aria-expanded', abrir ? 'true' : 'false');
+    foco.title = abrir
+      ? 'Fechar as ferramentas (Ctrl+Shift+G)'
+      : 'Ferramentas da escala — filtros, geração e exportação (Ctrl+Shift+G)';
+  }
+  if (abrir) {
+    // Fecha ao clicar fora ou no Esc, como qualquer menu. Os dois ouvintes
+    // nascem aqui e morrem no fechamento, para não ficarem pendurados.
+    setTimeout(() => {
+      document.addEventListener('mousedown', escalaMenuFerramentasForaHandler, true);
+      document.addEventListener('keydown', escalaMenuFerramentasEscHandler, true);
+    }, 0);
+  } else {
+    document.removeEventListener('mousedown', escalaMenuFerramentasForaHandler, true);
+    document.removeEventListener('keydown', escalaMenuFerramentasEscHandler, true);
+  }
+}
+
+function escalaMenuFerramentasForaHandler(ev) {
+  const painel = document.getElementById('escala-ferramentas');
+  const foco = document.getElementById('tb-foco');
+  if (painel && painel.contains(ev.target)) return;
+  if (foco && foco.contains(ev.target)) return;
+  escalaToggleMenuFerramentas(false);
+}
+
+function escalaMenuFerramentasEscHandler(ev) {
+  if (ev.key !== 'Escape') return;
+  // Se houver célula selecionada, o Esc é dela primeiro.
+  if (document.querySelector('.escala-cel-sel')) return;
+  ev.stopPropagation();
+  escalaToggleMenuFerramentas(false);
 }
 
 /* Mostrar/esconder, nunca re-renderizar: a grade de 289 pessoas × 31 dias
@@ -1324,25 +1387,29 @@ function escalaToggleFerramentas() {
    a faixa — e é por isso que ela carrega base, mês e cenário: esconder o
    cabeçalho sem levar o contexto junto é como alguém acaba editando CGH
    achando que está em BEL. */
+/* A grade ocupa a tela inteira sempre. O cabeçalho e o painel saem do
+   fluxo: o painel passa a abrir como menu sobre a grade, pelo botão, e a
+   faixa fina fica visível carregando base, mês e cenário — esconder o
+   cabeçalho sem levar o contexto junto é como alguém acaba editando CGH
+   achando que está em BEL. */
 function escalaAplicarEstadoFerramentas() {
-  const rec = escalaFerramentasRecolhido();
-  document.body.classList.toggle('escala-modo-grade', rec);
+  document.body.classList.add('escala-modo-grade');
 
   const painel  = document.getElementById('escala-ferramentas');
   const faixa   = document.getElementById('escala-ferr-mini');
   const legenda = document.getElementById('escala-legenda-linha');
-  if (painel)  painel.style.display  = rec ? 'none' : '';
-  if (faixa)   faixa.style.display   = rec ? 'flex' : 'none';
-  if (legenda) legenda.style.display = rec ? 'none' : 'flex';
+  if (painel)  { painel.style.display = ''; painel.classList.add('escala-ferr-menu'); painel.classList.toggle('aberto', escalaMenuFerramentasAberto()); }
+  if (faixa)   faixa.style.display   = 'flex';
+  if (legenda) legenda.style.display = 'none';
 
-  // O botão da barra superior troca de cara junto — é o mesmo interruptor.
   const foco = document.getElementById('tb-foco');
   if (foco) {
-    foco.classList.toggle('aceso', rec);
-    foco.innerHTML = escalaIconeSolto(rec ? 'minimizar' : 'maximizar', 15);
-    foco.title = rec
-      ? 'Sair do modo grade — traz o cabeçalho e as ferramentas de volta (Ctrl+Shift+G)'
-      : 'Modo grade — esconde o cabeçalho e as ferramentas (Ctrl+Shift+G)';
+    foco.classList.toggle('aceso', escalaMenuFerramentasAberto());
+    foco.innerHTML = escalaIconeSolto('filter', 15);
+    foco.setAttribute('aria-expanded', escalaMenuFerramentasAberto() ? 'true' : 'false');
+    foco.title = escalaMenuFerramentasAberto()
+      ? 'Fechar as ferramentas (Ctrl+Shift+G)'
+      : 'Ferramentas da escala — filtros, geração e exportação (Ctrl+Shift+G)';
   }
 
   escalaAtualizarChips();
@@ -1388,7 +1455,7 @@ function escalaChipsFiltros() {
   if (am !== 0.35) add(am === 0.6 ? 'Malha: alta' : 'Malha: baixa', 'Sensibilidade à malha');
 
   if (window._escalaDensidade === 'compacto') add('Compacto', 'Densidade');
-  if (window._escalaColunasSecundarias === false) add('Só colunas essenciais', 'Colunas');
+  if (escalaModoColunas() !== 'enxuto') add(ESCALA_MODOS_COLUNA[escalaModoColunas()].rotulo, 'Colunas');
 
   return chips;
 }
@@ -1414,15 +1481,16 @@ function escalaBtnAgruparHTML() {
 }
 
 function escalaBtnColunasHTML() {
-  const so = window._escalaColunasSecundarias === false;
-  return `<button class="adh-refresh-btn" data-esc-toggle="colunas" onclick="escalaToggleColunasSecundarias()"
-    title="Esconde Setor/Turno/Bloco/Intervalos — sobra mais espaço pra grade de dias">${escalaIcone('columns')}<span data-esc-rotulo>${so ? 'Mostrar colunas' : 'Colunas essenciais'}</span></button>`;
+  const m = ESCALA_MODOS_COLUNA[escalaModoColunas()];
+  const prox = ESCALA_MODOS_COLUNA[m.proximo];
+  return `<button class="adh-refresh-btn" data-esc-toggle="colunas" onclick="escalaCiclarModoColunas()"
+    title="${escalaEscapeAttr(m.desc)} · clique para ir a ${escalaEscapeAttr(prox.rotulo)}">${escalaIcone('columns')}<span data-esc-rotulo>${escalaEscapeAttr(m.rotulo)}</span></button>`;
 }
 
 function escalaSincronizarBotoesEstado() {
   const ligado = {
     agrupar: !!window._escalaAgruparPorTurno,
-    colunas: window._escalaColunasSecundarias === false,
+    colunas: escalaModoColunas() !== 'completo',
   };
   document.querySelectorAll('[data-esc-toggle]').forEach((b) => {
     const on = !!ligado[b.dataset.escToggle];
@@ -1695,12 +1763,32 @@ function escalaSetDensidade(valor) {
   escalaAjustarStickyOffset();
 }
 
-// Esconde/mostra as colunas Setor/Turno/Bloco/Intervalos — úteis pra
-// configurar uma vez, mas não pra olhar no dia a dia. Escondidas, sobra
-// mais espaço pra grade de dias (que é o que se usa o tempo todo).
-function escalaToggleColunasSecundarias() {
-  window._escalaColunasSecundarias = !window._escalaColunasSecundarias;
-  try { localStorage.setItem('gde_escala_colunas_secundarias', window._escalaColunasSecundarias ? '1' : '0'); } catch (_) {}
+/* Três níveis de coluna, girando sempre na mesma ordem.
+
+   O enxuto é o padrão: matrícula, nome, função e CH, com as pessoas
+   agrupadas por função e as conferências de 6 dias e domingo ao lado dos
+   dias. É o que se usa para distribuir folga, que é o trabalho do dia a
+   dia.
+
+   Turno e os dois intervalos não sumiram — eles vivem no modo completo.
+   São campos de configurar uma vez, não de olhar o tempo todo, e manter
+   os três níveis é o que permite enxugar a tela sem tirar função de
+   ninguém. */
+const ESCALA_MODOS_COLUNA = {
+  enxuto:    { rotulo: 'Colunas: enxutas',   proximo: 'essencial',
+               desc: 'Matrícula, nome, função e CH, com as pessoas agrupadas por função' },
+  essencial: { rotulo: 'Colunas: essenciais', proximo: 'completo',
+               desc: 'Acrescenta seleção, entrada, saída e folgas' },
+  completo:  { rotulo: 'Colunas: completas',  proximo: 'enxuto',
+               desc: 'Tudo, inclusive turno e os dois intervalos' },
+};
+const escalaModoColunas = () =>
+  (ESCALA_MODOS_COLUNA[window._escalaModoColunas] ? window._escalaModoColunas : 'enxuto');
+const escalaGradeEhEnxuta = () => escalaModoColunas() === 'enxuto' || escalaEhEnxuta();
+
+function escalaCiclarModoColunas() {
+  window._escalaModoColunas = ESCALA_MODOS_COLUNA[escalaModoColunas()].proximo;
+  try { localStorage.setItem('gde_escala_modo_colunas', window._escalaModoColunas); } catch (_) {}
   escalaGradeAtualiza();
   escalaSincronizarBotoesEstado();
 }
@@ -2082,10 +2170,28 @@ function escalaGradeEnxutaHTML(ano, mesNum, diasNoMes) {
   }
 
   const NCOLS = 4 + diasNoMes + 5;
-  let html = `<table class="escala-enx" style="border-collapse:separate;border-spacing:0;width:100%">
+
+  /* A grade ocupa a tela inteira, seja qual for o monitor.
+
+     Antes as colunas se dimensionavam pelo conteúdo: davam 1660px num
+     monitor de 1920 — as duas últimas ficavam cortadas e sobrava um vazio
+     embaixo. Agora a largura é fixa: as nove colunas de identificação e
+     conferência têm medida própria, e TODO o resto é dividido entre os
+     dias do mês. Num monitor maior os dias crescem e a grade acompanha;
+     num menor eles encolhem até 26px, e abaixo disso a grade rola, que é
+     o único jeito honesto de caber 30 dias numa tela estreita.
+
+     O número de dias vai num custom property porque é ele que define a
+     largura mínima da tabela, e o mês tem 28, 29, 30 ou 31. */
+  let html = `<table class="escala-enx" style="--enx-dias:${diasNoMes}">
+    <colgroup>
+      <col class="c-mat"><col class="c-nome"><col class="c-fn"><col class="c-ch">
+      ${'<col class="c-dia">'.repeat(diasNoMes)}
+      <col class="c-sel"><col class="c-sel"><col class="c-folgas"><col class="c-hora"><col class="c-hora">
+    </colgroup>
     <thead><tr>
-      <th class="escala-enx-fix" style="left:0">Matrícula</th>
-      <th class="escala-enx-fix" style="left:96px">Nome</th>
+      <th class="escala-enx-fix col-mat">Matrícula</th>
+      <th class="escala-enx-fix col-nome">Nome</th>
       <th>Função</th>
       <th class="n">CH</th>`;
   for (let d = 1; d <= diasNoMes; d++) {
@@ -2131,8 +2237,8 @@ function escalaGradeEnxutaHTML(ano, mesNum, diasNoMes) {
       const domOk = r.domingos === 1;
 
       html += `<tr class="${i++ % 2 ? 'escala-zebra' : ''}" data-escala-linha="${c.matricula}">
-        <td class="escala-enx-fix mat" style="left:0;border:${BORDA}">${escalaEscapeAttr(c.matricula)}</td>
-        <td class="escala-enx-fix nome" style="left:96px;border:${BORDA}" title="${escalaEscapeAttr(c.nome || '')}">${escalaEscapeAttr(c.nome || '')}</td>
+        <td class="escala-enx-fix col-mat mat" style="border:${BORDA}">${escalaEscapeAttr(c.matricula)}</td>
+        <td class="escala-enx-fix col-nome nome" style="border:${BORDA}" title="${escalaEscapeAttr(c.nome || '')}">${escalaEscapeAttr(c.nome || '')}</td>
         <td class="fn" style="border:${BORDA}" title="${escalaEscapeAttr(funcao)}">${escalaEscapeAttr(funcao)}</td>
         <td class="n ch" style="border:${BORDA}">${ch ? ch + 'H' : '—'}</td>`;
 
@@ -2169,7 +2275,10 @@ function escalaMarcaRegra(ok) {
 }
 
 function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
-  if (escalaEhEnxuta()) return escalaGradeEnxutaHTML(ano, mesNum, diasNoMes);
+  /* A grade enxuta vale para as duas telas. No Espelho ela é a única
+     forma; na Escala Online é o modo de coluna escolhido, e o botão
+     "Colunas" devolve as outras quando o trabalho pedir. */
+  if (escalaGradeEhEnxuta()) return escalaGradeEnxutaHTML(ano, mesNum, diasNoMes);
   // Coletor das saidas cujo valor no banco difere do calculado. Preenchido
   // linha a linha durante a montagem e lido depois pelo aviso do rodape.
   window._escalaSaidasDivergentes = [];
@@ -2221,7 +2330,7 @@ function escalaGradeTabelaHTML(ano, mesNum, diasNoMes) {
   colabs = escalaAplicarFiltroSituacao(colabs, ano, mesNum, diasNoMes);
 
   const temOrdemManual = colabs.some(c => c.ordem_manual != null);
-  const secOn = window._escalaColunasSecundarias !== false; // Setor/Turno/Bloco/Intervalos — ocultáveis
+  const secOn = escalaModoColunas() === 'completo'; // Turno/Intervalos — só no modo completo
   // ATENÇÃO: tem que bater EXATAMENTE com o número de <th> do cabeçalho e
   // de <td> fixas de escalaLinhaColabHTML(). Estava 11/6 (uma a menos nos
   // dois modos), e como a linha "Trabalhando no dia" e os subtotais de
