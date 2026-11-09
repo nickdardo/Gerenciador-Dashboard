@@ -395,19 +395,24 @@ async function escalaRenderDash(el) {
     }
   }
 
-  // ── Reserva: dimensionamento estático do Gerador (só se o motor real não tiver dado) ──
-  let linhasEstaticas = [];
-  if (!demandaPorDia) {
-    /* Uma linha por função × horário × carga. Numa base grande isso
-       passa de 1.000 sem aviso, e a reserva do dimensionamento voltaria
-       incompleta — pior que vazia, porque parece certa. */
-    linhasEstaticas = await escalaPaginar(
-      (from, ate) => db.from('escala_dimensionamento').select('*')
-        .eq('base', base).eq('mes', mes).order('entrada').order('funcao').range(from, ate),
-      'escala_dimensionamento');
-  }
+  /* As posições do dimensionamento agora são lidas SEMPRE, não só como
+     reserva quando falta o motor de demanda.
+
+     A Capacity precisa delas em toda montagem da grade: as linhas dela
+     são as posições da malha, e uma posição sem ninguém continua sendo
+     uma linha. Antes isso só carregava quando o motor real não tinha
+     dado, então a grade não tinha como saber quantos horários o
+     dimensionamento pede.
+
+     Uma linha por função × horário × carga — numa base grande passa de
+     1.000 sem aviso, por isso vai paginada. */
+  const linhasEstaticas = await escalaPaginar(
+    (from, ate) => db.from('escala_dimensionamento').select('*')
+      .eq('base', base).eq('mes', mes).order('entrada').order('funcao').range(from, ate),
+    'escala_dimensionamento');
 
   window._escalaDemandaPorDia = demandaPorDia;
+  window._escalaPosicoesDim = linhasEstaticas;
   window._escalaLinhasEstaticas = linhasEstaticas;
   window._escalaModoReal = !!demandaPorDia;
 
@@ -2657,12 +2662,94 @@ function escalaColabsOrdenados(ano, mesNum, diasNoMes) {
   return escalaAplicarFiltroSituacao(lista, ano, mesNum, diasNoMes);
 }
 
+/* ══════════════════════════════════════════════════════
+   A malha do dimensionamento, posição por posição
+
+   Até aqui a Capacity mostrava PESSOAS com horários vindos do
+   dimensionamento. Quando faltava gente, a posição simplesmente não
+   aparecia — a malha pedia 274 horários de Limpeza, a tela mostrava 140
+   linhas, e não havia como ver os 134 que faltavam a não ser contando
+   no Excel.
+
+   Agora a Capacity mostra a MALHA: toda posição vira linha, com ou sem
+   gente. Posição vazia é informação, não ausência de informação — é
+   exatamente o que precisa ser contratado ou remanejado.
+   ══════════════════════════════════════════════════════ */
+
+/* Expande qtd em posições individuais e agrupa por grupo + horário.
+   Devolve Map(grupo → Map("entrada–saida" → {entrada, saida, pedido,
+   jornada, funcoes})). */
+function escalaMalhaDoDimensionamento() {
+  const posicoes = window._escalaPosicoesDim || [];
+  const mapa = escalaCarregarMapaDim(window._escalaBase) || {};
+  const porGrupo = new Map();
+  for (const p of posicoes) {
+    const grupo = mapa[p.funcao];
+    if (!grupo || grupo === '__ignorar__') continue;
+    const chave = `${p.entrada || '?'}–${p.saida || '?'}`;
+    if (!porGrupo.has(grupo)) porGrupo.set(grupo, new Map());
+    const g = porGrupo.get(grupo);
+    if (!g.has(chave)) {
+      g.set(chave, { entrada: p.entrada || '', saida: p.saida || '',
+                     pedido: 0, jornada: escalaChDiariaDaPosicao(p.carga), funcoes: new Set() });
+    }
+    const h = g.get(chave);
+    h.pedido += (p.qtd || 1);
+    if (p.funcao) h.funcoes.add(p.funcao);
+  }
+  return porGrupo;
+}
+
+/* Casa a gente que está na escala com as posições, pelo horário de
+   entrada, e devolve as posições que sobraram vazias.
+
+   O casamento é por ENTRADA, não pelo par entrada–saída: quem foi
+   enxertado de outra jornada entra na hora que a malha pede e sai pela
+   própria CH, então o par não bate mas a posição está coberta. */
+function escalaVagasVaziasDoGrupo(grupo, gente, ano, mesNum, diasNoMes) {
+  const malha = escalaMalhaDoDimensionamento().get(grupo);
+  if (!malha || !malha.size) return [];
+
+  const cobertas = new Map();
+  for (const c of gente) {
+    const e = escalaEntradaEfetivaDoColab(c, ano, mesNum, diasNoMes);
+    if (!e) continue;
+    cobertas.set(e, (cobertas.get(e) || 0) + 1);
+  }
+
+  const vazias = [];
+  for (const [, h] of malha) {
+    const tem = Math.min(h.pedido, cobertas.get(h.entrada) || 0);
+    cobertas.set(h.entrada, (cobertas.get(h.entrada) || 0) - tem);
+    for (let i = 0; i < h.pedido - tem; i++) {
+      vazias.push({ entrada: h.entrada, saida: h.saida, jornada: h.jornada,
+                    funcao: [...h.funcoes][0] || '', grupo });
+    }
+  }
+  return vazias;
+}
+
+/* Quantos horários a malha pede para o grupo — o número que tem de
+   bater com o dimensionamento. */
+function escalaPedidoDoGrupo(grupo) {
+  const malha = escalaMalhaDoDimensionamento().get(grupo);
+  if (!malha) return 0;
+  let n = 0;
+  for (const [, h] of malha) n += h.pedido;
+  return n;
+}
+
 function escalaGradeEnxutaHTML(ano, mesNum, diasNoMes) {
   const colabs = escalaColabsOrdenados(ano, mesNum, diasNoMes);
   const BORDA = '1px solid var(--border)';
   const travada = !!window._escalaTravada;
 
-  if (!colabs.length) {
+  /* Sem ninguém na escala, a Capacity ainda tem o que mostrar: a malha
+     inteira, com todas as posições vazias. É o retrato mais útil que
+     existe nesse momento — diz exatamente quantas pessoas, e em que
+     horários, faltam. Sair aqui escondia justamente isso. */
+  const temMalha = escalaEhCapacity() && escalaMalhaDoDimensionamento().size > 0;
+  if (!colabs.length && !temMalha) {
     return `<div class="escala-enx-vazia">
       <p>Nenhum colaborador nesta escala ainda.</p>
       <p class="sub">Use <b>Aplicar horário Dimensionamento</b> para montar a partir do que foi planejado,
@@ -2689,6 +2776,16 @@ function escalaGradeEnxutaHTML(ano, mesNum, diasNoMes) {
     if (visiveis && visiveis.size && !visiveis.has(g)) continue;
     if (!porGrupo.has(g)) porGrupo.set(g, []);
     porGrupo.get(g).push(c);
+  }
+
+  /* Grupo que a malha pede e que não tem NINGUÉM também precisa de
+     faixa. Construído só a partir dos colaboradores, ele sumiria da tela
+     inteira — e some justamente o caso mais grave, o do grupo sem
+     ninguém contratado. */
+  if (escalaEhCapacity()) {
+    for (const [g] of escalaMalhaDoDimensionamento()) {
+      if (!porGrupo.has(g) && (!visiveis || !visiveis.size || visiveis.has(g))) porGrupo.set(g, []);
+    }
   }
 
   const posGrupo = (g) => {
@@ -2745,6 +2842,7 @@ function escalaGradeEnxutaHTML(ano, mesNum, diasNoMes) {
       <th class="n">Entrada</th><th class="n">Saída</th>
     </tr></thead><tbody>`;
 
+  const capacity = escalaEhCapacity();
   let i = 0;
   for (const [grupo, gente] of porGrupo) {
     /* O rótulo gruda, não a célula: com colspan de 39 colunas, prender o
@@ -2755,8 +2853,20 @@ function escalaGradeEnxutaHTML(ano, mesNum, diasNoMes) {
        Supervisores significava recalcular 1.200 pessoas e torcer para
        que o resto não mudasse. O botão fica na faixa, ao lado da
        contagem, porque é onde o grupo já está nomeado. */
+    /* A faixa carrega os dois números que precisam bater: quantos
+       horários o dimensionamento pede e quantas pessoas existem. Com os
+       dois lado a lado, a diferença é lida de relance, sem contar no
+       Excel. Quando divergem, o número de pessoas fica em destaque. */
+    const pedido = capacity ? escalaPedidoDoGrupo(grupo) : 0;
+    const vazias = capacity ? escalaVagasVaziasDoGrupo(grupo, gente, ano, mesNum, diasNoMes) : [];
+    const contadores = capacity && pedido
+      ? `<span class="qtd">· ${pedido} horário${pedido === 1 ? '' : 's'} dimensionado${pedido === 1 ? '' : 's'}</span>
+         <span class="qtd ${gente.length === pedido ? '' : 'difere'}">· ${gente.length} pessoa${gente.length === 1 ? '' : 's'}</span>
+         ${vazias.length ? `<span class="qtd vazias">· ${vazias.length} sem gente</span>` : ''}`
+      : `<span class="qtd">· ${gente.length} pessoa${gente.length === 1 ? '' : 's'}</span>`;
+
     html += `<tr class="escala-enx-grupo"><td colspan="${NCOLS}"><span class="rot">
-      ${escalaEscapeAttr(grupo)} <span class="qtd">· ${gente.length} pessoa${gente.length === 1 ? '' : 's'}</span>
+      ${escalaEscapeAttr(grupo)} ${contadores}
       <button type="button" class="escala-grupo-folgas"
         onclick="escalaGerarFolgasAuto('${escalaEscapeAttr(grupo).replace(/'/g, "\\'")}')"
         title="Gerar folgas automáticas só deste grupo, sem mexer no resto da escala">
@@ -2813,8 +2923,73 @@ function escalaGradeEnxutaHTML(ano, mesNum, diasNoMes) {
         <td class="n hora" style="border:${BORDA}">${escalaEscapeAttr(saida || '--:--')}</td>
       </tr>`;
     }
+
+    /* As posições que o dimensionamento pede e ninguém cobre.
+
+       Linha vazia não é falta de informação: é a vaga a contratar ou
+       remanejar, com o horário que a malha exige. Digitar uma matrícula
+       aqui preenche a posição com aquele horário, sem precisar passar
+       pelo "Preencher com Staff". */
+    for (const v of vazias) {
+      html += `<tr class="${i++ % 2 ? 'escala-zebra' : ''} escala-enx-vaga">
+        <td class="escala-enx-fix col-mat mat" style="border:${BORDA}"><span
+          class="escala-mat-edit escala-mat-vaga" contenteditable="true" spellcheck="false"
+          data-vaga-entrada="${escalaEscapeAttr(v.entrada)}"
+          data-vaga-saida="${escalaEscapeAttr(v.saida)}"
+          title="Posição do dimensionamento sem ninguém. Digite uma matrícula para preenchê-la neste horário."
+          onfocus="escalaMatFoco(this)" onkeydown="escalaMatTecla(event, this)"
+          onblur="escalaVagaCommit(this)"></span></td>
+        <td class="escala-enx-fix col-nome nome vazia" style="border:${BORDA}">— posição sem colaborador —</td>
+        <td class="escala-enx-fix col-fn fn" style="border:${BORDA}">${escalaEscapeAttr(v.funcao || grupo)}</td>
+        <td class="escala-enx-fix col-ch n" style="border:${BORDA}">${v.jornada ? v.jornada + 'h' : ''}</td>
+        ${'<td class="dia vazia" style="border:' + BORDA + '"></td>'.repeat(diasNoMes)}
+        <td class="n sel" style="border:${BORDA}"></td>
+        <td class="n sel" style="border:${BORDA}"></td>
+        <td class="n cont" style="border:${BORDA}"></td>
+        <td class="n hora" style="border:${BORDA}">${escalaEscapeAttr(v.entrada || '--:--')}</td>
+        <td class="n hora" style="border:${BORDA}">${escalaEscapeAttr(v.saida || '--:--')}</td>
+      </tr>`;
+    }
   }
   return html + '</tbody></table>';
+}
+
+/* Digitar matrícula numa posição vazia: a pessoa entra na escala já com
+   o horário que a malha pede, sem passar pelo casamento em massa. */
+async function escalaVagaCommit(el) {
+  const mat = el.textContent.replace(/\D/g, '').trim();
+  el.textContent = '';
+  if (!mat) return;
+
+  const reg = window.eoColabs?.get(mat);
+  if (!reg) { escalaMsg(`Matrícula ${mat} não existe no cadastro.`, true); return; }
+  const base = String(window._escalaBase || '').toUpperCase();
+  if (base && String(reg.station || '').toUpperCase() !== base) {
+    escalaMsg(`${reg.nome || mat} é da base ${reg.station || '?'}, não de ${base}.`, true);
+    return;
+  }
+  if ((window._escalaColabs || []).some((c) => c.matricula === mat)) {
+    escalaMsg(`${reg.nome || mat} já está nesta escala. Troque pela matrícula na linha dele.`, true);
+    return;
+  }
+  if (escalaVerificarTravada()) return;
+
+  const entrada = el.dataset.vagaEntrada || null;
+  const saida = el.dataset.vagaSaida || null;
+  const payload = {
+    base: window._escalaBase, mes: window._escalaMes, cenario: escalaCenario(),
+    matricula: mat, nome: reg.nome || '',
+    entrada_manual: entrada, saida_manual: saida,
+    created_by: currentUserProfile?.id || currentUser?.id || null,
+  };
+  const { data, error } = await db.from('escala_colaborador')
+    .upsert(payload, { onConflict: 'base,mes,cenario,matricula' }).select().single();
+  if (error) { escalaMsg('Erro ao preencher a posição: ' + error.message, true); return; }
+
+  window._escalaColabs = [...(window._escalaColabs || []), data];
+  escalaDesmarcarRetirado(mat);
+  escalaGradeAtualiza();
+  escalaMsg(`${reg.nome || mat} entrou na posição de ${entrada || 'horário indefinido'}.`);
 }
 
 /* Marca de conferência em SVG, e não em caractere: ✓ e ✕ viram emoji
@@ -7550,6 +7725,33 @@ function escalaExportarTelaExcel() {
       feitas, meta,
       ...conteudo.map((i) => i.status || ''),
     ]);
+  }
+
+  /* As posições vazias vão para a planilha também.
+
+     Exportar só quem tem gente devolveria o mesmo retrato incompleto que
+     a tela dava antes: a malha pede 274 horários, saem 140 linhas, e a
+     diferença só aparece contando no Excel. Com as vagas na planilha, o
+     filtro por NOME = "(vaga)" dá a lista do que falta contratar. */
+  if (escalaEhCapacity()) {
+    const porGrupoGente = new Map();
+    for (const c of colabs) {
+      const g = escalaFuncaoGrupoDoColab(c).label || 'Sem função';
+      if (!porGrupoGente.has(g)) porGrupoGente.set(g, []);
+      porGrupoGente.get(g).push(c);
+    }
+    for (const [grupo] of escalaMalhaDoDimensionamento()) {
+      const gente = porGrupoGente.get(grupo) || [];
+      for (const v of escalaVagasVaziasDoGrupo(grupo, gente, ano, mesNum, D)) {
+        linhas.push([
+          '', '(vaga)', grupo, v.funcao || '',
+          v.jornada ? v.jornada * 30 : '',
+          v.entrada || '', v.saida || '',
+          '', '', '', '',
+          ...Array.from({ length: D }, () => ''),
+        ]);
+      }
+    }
   }
 
   const ws = XLSX.utils.aoa_to_sheet(linhas);

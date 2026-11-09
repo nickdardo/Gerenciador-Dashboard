@@ -4309,3 +4309,31 @@ body.escala-modo-grade .escala-fill { margin-top: 0; }
 }
 .escala-fora-card li button:hover { background: var(--blue); color: #fff; border-color: var(--blue); }
 .escala-fora-card .mais { padding: 4px 12px 10px; color: var(--text-secondary); font-size: 11px; }
+
+/* ── Posição do dimensionamento sem colaborador ───────────────────────
+   Linha vazia aqui é informação, não ausência dela: é a vaga a
+   contratar, com o horário que a malha exige. Listrada para não ser
+   confundida com linha de gente, mas legível — ela vai ser lida. */
+.escala-enx-vaga td { background: repeating-linear-gradient(
+  135deg, transparent, transparent 6px,
+  color-mix(in srgb, var(--text-muted) 9%, transparent) 6px,
+  color-mix(in srgb, var(--text-muted) 9%, transparent) 12px); }
+.escala-enx-vaga .nome.vazia { color: var(--text-secondary); font-style: italic; }
+.escala-enx-vaga .hora { font-weight: 700; }
+.escala-mat-vaga:empty::before {
+  content: '+ matrícula';
+  color: var(--text-secondary);
+  font-style: italic;
+}
+.escala-mat-vaga:focus:empty::before { content: ''; }
+
+/* Os dois números da faixa. Quando divergem, o de pessoas ganha peso —
+   é a diferença entre a malha e o efetivo, e é o que se procura. */
+.escala-enx-grupo .qtd.difere { color: #8a5f12; font-weight: 700; }
+.escala-enx-grupo .qtd.vazias { color: #a01f1f; font-weight: 700; }
+[data-theme="dark"] .escala-enx-grupo .qtd.difere { color: #f0c870; }
+[data-theme="dark"] .escala-enx-grupo .qtd.vazias { color: #fc8181; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .escala-enx-grupo .qtd.difere { color: #f0c870; }
+  :root:not([data-theme="light"]) .escala-enx-grupo .qtd.vazias { color: #fc8181; }
+}

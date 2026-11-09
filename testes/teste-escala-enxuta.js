@@ -626,6 +626,91 @@ function paginaDeTeste() {
         'todos os ícones usados desenham de fato' + (faltando.length ? ' — vazios: ' + faltando.join(', ') : ''));
     }
 
+    sec('8h. A Capacity espelha a malha, não só quem tem gente');
+    {
+      /* A queixa: o dimensionamento de Limpeza pedia 274 horários, a
+         tela mostrava 140 linhas, e os 134 que faltavam não existiam em
+         lugar nenhum — nem como vaga, nem como número. Posição sem gente
+         é o dado mais importante da Capacity: é o que falta contratar. */
+      const montar = (cenario) => page.evaluate((cen) => {
+        window._escalaBase = 'GRU'; window._escalaMes = '2026-11';
+        window._escalaCenario = cen;
+        window._escalaDias = new Map(); window._escalaFeriados = new Map();
+        window._escalaGruposVisiveis = null; window._escalaOrdemColuna = null;
+        // A malha pede 5 ASG (3 às 07:00, 2 às 16:00) e 2 ENC às 05:00.
+        window._escalaPosicoesDim = [
+          { funcao: 'ASG LIMPEZA I', entrada: '07:00', saida: '13:00', carga: 180, qtd: 3 },
+          { funcao: 'ASG LIMPEZA I', entrada: '16:00', saida: '22:00', carga: 180, qtd: 2 },
+          { funcao: 'ENC. DE LIMPEZA II', entrada: '05:00', saida: '11:00', carga: 180, qtd: 2 },
+        ];
+        window.escalaCarregarMapaDim = () =>
+          ({ 'ASG LIMPEZA I': 'Limpeza', 'ENC. DE LIMPEZA II': 'Limpeza' });
+        // Só duas pessoas, ambas às 07:00.
+        window._escalaColabs = [
+          { matricula: '1', nome: 'ANA', funcao_manual: 'ASG LIMPEZA I', ch_manual: 180, entrada_manual: '07:00' },
+          { matricula: '2', nome: 'BIA', funcao_manual: 'ASG LIMPEZA I', ch_manual: 180, entrada_manual: '07:00' },
+        ];
+        window.eoColabs = new Map(window._escalaColabs.map((c) =>
+          [c.matricula, { nome: c.nome, funcao: c.funcao_manual, ch: c.ch_manual, station: 'GRU' }]));
+        window.escalaFuncaoGrupoDoColab = () => ({ label: 'Limpeza' });
+        window.escalaAplicarFiltroSituacao = (l) => l;
+        /* Declarado aqui de propósito: os stubs vivem na mesma página e
+           atravessam seções. A 8f deixa este fixado em '06:00', e herdar
+           isso fazia as duas pessoas das 07:00 não cobrirem posição
+           nenhuma — falha do andaime, não do produto. */
+        window.escalaEntradaEfetivaDoColab = (c) => c.entrada_manual || '';
+        return escalaGradeEnxutaHTML(2026, 11, 30);
+      }, cenario);
+
+      const html = await montar('dimensionada');
+      const vagas = (html.match(/escala-enx-vaga/g) || []).length;
+      ok(vagas === 5, 'as 5 posições sem gente viram linha (veio ' + vagas + ')');
+      ok(/7 horários dimensionados/.test(html),
+        'a faixa diz quantos horários a malha pede');
+      ok(/2 pessoas/.test(html), 'e quantas pessoas existem, para bater um com o outro');
+      ok(/class="qtd difere"/.test(html),
+        'quando os dois não batem, o número de pessoas fica em destaque');
+      ok(/5 sem gente/.test(html), 'e a diferença sai explícita');
+
+      /* Os horários das vagas são os da malha — 16:00 e 05:00 não têm
+         ninguém, e é exatamente isso que tem de aparecer. */
+      ok(html.includes('data-vaga-entrada="16:00"'), 'a vaga das 16:00 aparece com o horário dela');
+      ok(html.includes('data-vaga-entrada="05:00"'), 'e a das 05:00 também');
+      const seteZero = (html.match(/data-vaga-entrada="07:00"/g) || []).length;
+      ok(seteZero === 1,
+        'das 3 posições de 07:00, duas estão cobertas e sobra uma vaga (veio ' + seteZero + ')');
+
+      /* A Base não tem malha: inventar vagas nela seria mostrar posição
+         que a regra dela não conhece. */
+      const base = await montar('planejada');
+      ok(!/escala-enx-vaga/.test(base), 'a Base continua sem linhas de vaga');
+      ok(!/horários dimensionados/.test(base), 'e sem o contador de malha, que não é regra dela');
+    }
+
+    sec('8i. Grupo que a malha pede e ninguém cobre não some da tela');
+    {
+      /* O caso mais grave some justamente por ser o mais grave: a grade
+         era montada a partir dos colaboradores, então um grupo sem
+         ninguém contratado não tinha faixa nenhuma. */
+      const html = await page.evaluate(() => {
+        window._escalaCenario = 'dimensionada';
+        window._escalaPosicoesDim = [
+          { funcao: 'OPERADOR DE EQUIPAMENTO', entrada: '06:00', saida: '12:00', carga: 180, qtd: 4 },
+        ];
+        window.escalaCarregarMapaDim = () => ({ 'OPERADOR DE EQUIPAMENTO': 'Operadores' });
+        window.escalaEntradaEfetivaDoColab = (c) => c.entrada_manual || '';
+        window._escalaColabs = [];
+        window.eoColabs = new Map();
+        window._escalaGruposVisiveis = null;
+        return escalaGradeEnxutaHTML(2026, 11, 30);
+      });
+      ok(/Operadores/.test(html), 'o grupo sem ninguém aparece com faixa própria');
+      ok((html.match(/escala-enx-vaga/g) || []).length === 4,
+        'com as 4 posições que a malha pede, todas vazias');
+      ok(/4 horários dimensionados/.test(html) && /0 pessoas/.test(html),
+        'e os dois números dizendo exatamente isso');
+    }
+
     sec('9. Nenhum erro de script');
     ok(erros.length === 0, 'a página carregou sem exceção' + (erros.length ? ': ' + erros.join(' | ') : ''));
   } finally {

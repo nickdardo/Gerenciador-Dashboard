@@ -281,6 +281,50 @@ const GENTE = [
       await p2.close();
     }
 
+    sec('6c. A planilha leva as posições vazias da malha');
+    {
+      /* Exportar só quem tem gente devolveria o mesmo retrato
+         incompleto que a tela dava: a malha pede 5 horários, saem 2
+         linhas, e a diferença só aparece contando no Excel. Com as vagas
+         na planilha, filtrar NOME = "(vaga)" dá a lista do que falta. */
+      const p3 = await browser.newPage();
+      await p3.goto('file://' + tmp, { waitUntil: 'load' });
+      const r = await p3.evaluate(() => {
+        window._escalaBase = 'GRU'; window._escalaMes = '2026-11';
+        window._escalaCenario = 'dimensionada'; currentPage = 'capacity';
+        window._escalaDias = new Map(); window._escalaFeriados = new Map();
+        window._escalaOrdemColuna = null;
+        window._escalaPosicoesDim = [
+          { funcao: 'ASG LIMPEZA I', entrada: '07:00', saida: '13:00', carga: 180, qtd: 3 },
+          { funcao: 'ASG LIMPEZA I', entrada: '16:00', saida: '22:00', carga: 180, qtd: 2 },
+        ];
+        window.escalaCarregarMapaDim = () => ({ 'ASG LIMPEZA I': 'Limpeza' });
+        window._escalaColabs = [
+          { matricula: '1', nome: 'ANA', funcao_manual: 'ASG LIMPEZA I', ch_manual: 180,
+            entrada_manual: '07:00', saida_manual: '13:00' },
+        ];
+        window.eoColabs = new Map([['1', { nome: 'ANA', funcao: 'ASG LIMPEZA I', ch: 180, station: 'GRU' }]]);
+        window.escalaFuncaoGrupoDoColab = () => ({ label: 'Limpeza' });
+        window.escalaAplicarFiltroSituacao = (l) => l;
+
+        let cap = null; const orig = XLSX.writeFile;
+        XLSX.writeFile = (wb) => { cap = wb.Sheets.Escala; };
+        try { escalaExportarTelaExcel(); } finally { XLSX.writeFile = orig; }
+        return XLSX.utils.sheet_to_json(cap, { header: 1, defval: '' })
+          .slice(4).filter((l) => l[1]).map((l) => [l[1], l[5], l[6]]);
+      });
+
+      eq(r.length, 5, 'a planilha traz as 5 posições da malha, não só a pessoa que existe');
+      const vagas = r.filter((l) => l[0] === '(vaga)');
+      eq(vagas.length, 4, 'quatro delas sem ninguém');
+      eq(vagas.filter((v) => v[1] === '16:00').length, 2,
+        'as duas das 16:00, que não têm ninguém, aparecem');
+      eq(vagas.filter((v) => v[1] === '07:00').length, 2,
+        'e sobram duas das 07:00, porque uma está coberta');
+      ok(vagas.every((v) => v[2]), 'cada vaga leva também o horário de saída da malha');
+      await p3.close();
+    }
+
     sec('7. Nenhum erro de script');
     ok(erros.length === 0, 'a página rodou sem exceção' + (erros.length ? ': ' + erros.join(' | ') : ''));
   } finally {
