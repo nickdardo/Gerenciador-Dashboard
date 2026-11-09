@@ -219,6 +219,41 @@ sec('7. As ações abertas da escala');
     'ele usa o tom secundário, que passa nos dois temas');
 }
 
+sec('8. A faixa âmbar de "sem horário" e a matrícula duplicada');
+{
+  /* Medi estas cores com um aferidor próprio e ele mentiu duas vezes
+     antes de acertar: primeiro comparou tudo contra preto (o fundo
+     transparente era detectado por uma string que diferia por um
+     espaço), depois tratou véu de 16% como cor opaca, acusando 1,33:1
+     onde a tela mostra 6,00:1. Fundo semitransparente tem de ser
+     COMPOSTO sobre o do pai; é o que as contas abaixo fazem.
+
+     As que sobraram depois disso eram reais: branco sobre o âmbar
+     #c08a2a dava 3,04:1 nos dois temas. */
+  const AMBAR_CLARO = hex('#704d0c');
+  const AMBAR_ESCURO = hex('#8a5f12');
+  const BRANCO = hex('#ffffff');
+
+  ok(!/\.escala-chip-fora \.n\s*\{[^}]*background:\s*#c08a2a/.test(css),
+    'o âmbar que reprovava não ficou no contador');
+  for (const [tema, fundo] of [['claro', AMBAR_CLARO], ['escuro', AMBAR_ESCURO]]) {
+    const r = contraste(BRANCO, fundo);
+    ok(r >= ALVO, `${tema}: o número do contador dá ${r.toFixed(2)} sobre o âmbar (mínimo ${ALVO})`);
+  }
+
+  /* A matrícula duplicada não pode depender só da cor da letra: vermelho
+     sobre vermelho some para quem distingue mal os dois. O fundo e a
+     borda carregam o aviso junto. */
+  ok(/\.escala-mat-edit\.duplicada\s*\{[^}]*background:/.test(css),
+    'a duplicada muda o fundo, não só a cor da letra');
+  ok(/\.escala-mat-edit\.duplicada\s*\{[^}]*border-color:/.test(css),
+    'e ganha borda, para o aviso não ser só cromático');
+  ok(/\[data-theme="dark"\]\s*\.escala-mat-edit\.duplicada/.test(css),
+    'com tom próprio no tema escuro');
+  ok(/@media \(prefers-color-scheme: dark\)[\s\S]{0,600}\.escala-mat-edit\.duplicada/.test(css),
+    'e a preferência do sistema coberta também');
+}
+
 function resumo() {
   console.log('\n' + '─'.repeat(58));
   if (!fail) console.log('\x1b[32m✓ ' + pass + ' verificações passaram\x1b[0m');

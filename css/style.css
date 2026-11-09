@@ -4147,3 +4147,165 @@ body.escala-modo-grade .escala-fill { margin-top: 0; }
   max-height: 220px;
   overflow-y: auto;
 }
+
+/* ── Caixas de grupo, agora direto no menu ─────────────────────────── */
+.escala-grupos-acoes { display: flex; gap: 6px; margin-bottom: 6px; }
+.escala-grupos-acoes button {
+  font-size: 10.5px;
+  padding: 3px 7px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.escala-grupos-acoes button:hover { background: var(--bg-hover); color: var(--text-primary); }
+.escala-grupo-caixa {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 2px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.escala-grupo-caixa:hover { color: var(--text-primary); }
+.escala-grupo-caixa .nome { flex: 1; }
+/* A contagem é o que denuncia grupo com gente a menos sem abrir a escala. */
+.escala-grupo-caixa .qtd {
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+  border-radius: 9px;
+  padding: 1px 6px;
+}
+.escala-grupos-vazio { font-size: 11px; color: var(--text-secondary); padding: 4px 2px; }
+
+/* Gerar folgas só deste grupo. Discreto por padrão — a faixa é de leitura,
+   não de ação — e só ganha corpo quando o cursor passa pela faixa. */
+.escala-grupo-folgas {
+  margin-left: 10px;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 500;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .12s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  vertical-align: middle;
+}
+.escala-grupo-folgas svg { width: 11px; height: 11px; }
+.escala-enx-grupo:hover .escala-grupo-folgas,
+.escala-grupo-folgas:focus-visible { opacity: 1; }
+.escala-grupo-folgas:hover { background: var(--bg-hover); color: var(--text-primary); border-color: var(--border-strong); }
+/* Teclado: sem isto o botão existiria só para quem usa mouse. */
+.escala-grupo-folgas:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+
+/* ── Matrícula editável ───────────────────────────────────────────────
+   A célula é o lugar da troca: digitar outra matrícula é dizer quem
+   cobre aquele horário. Discreta até receber o cursor, porque a coluna é
+   de leitura na maior parte do tempo. */
+.escala-mat-edit {
+  display: inline-block;
+  min-width: 56px;
+  padding: 1px 3px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  outline: none;
+  cursor: text;
+  font-variant-numeric: tabular-nums;
+}
+.escala-mat-edit:hover { border-color: var(--border); background: var(--bg-hover); }
+.escala-mat-edit:focus { border-color: var(--blue); background: var(--bg-surface); }
+/* Duplicada: a mesma pessoa em dois horários. Fundo além da cor da letra,
+   porque vermelho sobre vermelho some para quem não distingue bem as duas. */
+.escala-mat-edit.duplicada {
+  background: rgba(192, 42, 42, .16);
+  border-color: #c02a2a;
+  color: #a01f1f;
+  font-weight: 700;
+}
+[data-theme="dark"] .escala-mat-edit.duplicada { background: rgba(252,129,129,.2); border-color: #fc8181; color: #ffc0c0; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .escala-mat-edit.duplicada { background: rgba(252,129,129,.2); border-color: #fc8181; color: #ffc0c0; }
+}
+
+/* ── Contador de quem ficou sem horário ──────────────────────────────── */
+/* Âmbar medido, não escolhido no olho: branco sobre #c08a2a dava 3,04:1,
+   e o texto do chip 4,07:1 sobre o fundo composto da faixa. Os dois
+   tons abaixo passam de 4,5:1 nos dois temas. */
+.escala-chip-fora { border-color: #c08a2a; color: #704d0c; display: inline-flex; align-items: center; gap: 5px; }
+.escala-chip-fora .n {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  background: #704d0c;
+  color: #fff;
+  border-radius: 9px;
+  padding: 0 6px;
+}
+[data-theme="dark"] .escala-chip-fora { border-color: #e0b357; color: #f0c870; }
+[data-theme="dark"] .escala-chip-fora .n { background: #8a5f12; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .escala-chip-fora { border-color: #e0b357; color: #f0c870; }
+  :root:not([data-theme="light"]) .escala-chip-fora .n { background: #8a5f12; }
+}
+
+.escala-fora-card {
+  position: fixed;
+  z-index: 120;
+  width: 460px;
+  max-height: 60vh;
+  overflow-y: auto;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  box-shadow: var(--adh-shadow-card);
+  font-size: 12px;
+}
+.escala-fora-card .topo {
+  position: sticky; top: 0;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 12px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+}
+.escala-fora-card .topo strong { color: var(--text-primary); }
+.escala-fora-card .fechar {
+  background: none; border: none; cursor: pointer;
+  font-size: 18px; line-height: 1; color: var(--text-secondary); padding: 0 4px;
+}
+.escala-fora-card .fechar:hover { color: var(--text-primary); }
+.escala-fora-card .secao {
+  padding: 8px 12px 4px;
+  font-size: 10px; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.escala-fora-card ul { list-style: none; margin: 0; padding: 0 6px 6px; }
+.escala-fora-card li {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 6px; border-radius: 6px;
+}
+.escala-fora-card li:hover { background: var(--bg-hover); }
+.escala-fora-card .mat { font-variant-numeric: tabular-nums; color: var(--text-secondary); min-width: 54px; }
+.escala-fora-card .nome { flex: 1; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.escala-fora-card .fn { color: var(--text-secondary); font-size: 10.5px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.escala-fora-card .tag { font-size: 10px; color: #8a5f12; background: rgba(192,138,42,.15); border-radius: 8px; padding: 1px 6px; white-space: nowrap; }
+[data-theme="dark"] .escala-fora-card .tag { color: #f0c870; background: rgba(224,179,87,.16); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .escala-fora-card .tag { color: #f0c870; background: rgba(224,179,87,.16); }
+}
+.escala-fora-card li button {
+  font-size: 10.5px; padding: 3px 8px; border-radius: 5px;
+  border: 1px solid var(--border); background: var(--bg-surface);
+  color: var(--text-secondary); cursor: pointer; white-space: nowrap;
+}
+.escala-fora-card li button:hover { background: var(--blue); color: #fff; border-color: var(--blue); }
+.escala-fora-card .mais { padding: 4px 12px 10px; color: var(--text-secondary); font-size: 11px; }

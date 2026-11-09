@@ -5,10 +5,15 @@
    do banco, com as colunas da grade completa, e carrega o marcador que
    permite reimportar o arquivo depois.
 
-   Esta é outra coisa, e a diferença importa: é a FOTO do que está na
-   tela — mesma ordem, mesmos grupos de função, as mesmas conferências de
-   6 dias e domingo que a grade mostra. É o arquivo que se imprime e se
-   leva para a reunião.
+   Esta é outra coisa: é a escala que está na tela — mesma ordem, mesmo
+   filtro — entregue como TABELA, para ser filtrada e ordenada no Excel.
+
+   Ela já tentou ser a foto da grade, com as faixas de grupo mescladas
+   atravessando as 39 colunas. Ficava parecida com a tela e imprestável
+   na planilha: célula mesclada quebra filtro e ordenação, e a faixa é
+   uma linha que não é pessoa nenhuma — ao filtrar por função ela some ou
+   fica boiando no meio dos dados. O grupo virou coluna, que é como uma
+   planilha representa atributo repetido.
 
    Por isso ela NÃO carrega o marcador de reimportação. Um arquivo que
    parecesse reimportável mas perdeu a coluna Turno voltaria apagando
@@ -67,6 +72,7 @@ const GENTE = [
     window.eoColabs = new Map(window._escalaColabs.map((c) => [c.matricula, { funcao: c.funcao_manual, ch: c.ch_manual }]));
     window.escalaFuncaoGrupoDoColab = (c) => ({ label: c.funcao_manual });
     window.escalaEntradaEfetivaDoColab = (c) => c.entrada_manual;
+    window.escalaAplicarFiltroSituacao = (l) => l;
     // Folgas de seis em seis para a primeira pessoa; as outras ficam sem.
     for (let d = 1; d <= D; d += 6) window._escalaDias.set('251595|' + d, { status: 'F' });
     window.escalaMsg = (m) => { window.__ultimaMsg = m; };
@@ -83,7 +89,11 @@ const GENTE = [
       merges: (capturado.ws['!merges'] || []).map((m) => [m.s.r, m.s.c, m.e.c]),
       views: capturado.ws['!views'] || null,
       cols: (capturado.ws['!cols'] || []).length,
+      autofiltro: capturado.ws['!autofilter'] ? capturado.ws['!autofilter'].ref : null,
       msg: window.__ultimaMsg,
+      tipos: Object.keys(capturado.ws)
+        .filter((k) => /^[A-Z]+[0-9]+$/.test(k))
+        .reduce((m, k) => { m[k] = capturado.ws[k].t; return m; }, {}),
     };
   }, [GENTE, pagina]);
 
@@ -101,27 +111,75 @@ const GENTE = [
         ok(/Gerado em/.test(r.aoa[1][0]), 'a segunda diz quando foi gerado');
 
         const cab = r.aoa[3];
-        eq(cab.slice(0, 4).join('|'), 'MATRÍCULA|NOME|FUNÇÃO|CH', 'as quatro colunas de identificação');
-        eq(cab.slice(-5).join('|'), '6 DIAS|DOM.|FOLGAS|ENTRADA|SAÍDA',
-          'e as conferências que a grade mostra, do mesmo jeito');
-        eq(cab.length, 4 + 30 + 5, 'uma coluna por dia do mês entre elas (' + cab.length + ' no total)');
-        ok(/^DOM/.test(cab[4]) && /1$/.test(cab[4].trim()),
-          'o cabeçalho do dia traz o dia da semana junto: ' + JSON.stringify(cab[4]));
+        eq(cab.slice(0, 11).join('|'),
+          'MATRÍCULA|NOME|GRUPO|FUNÇÃO|CH|ENTRADA|SAÍDA|6 DIAS|DOM.|FOLGAS FEITAS|META FOLGAS',
+          'as colunas de identificação e conferência vêm todas antes dos dias');
+        eq(cab.length, 11 + 30, 'e os 30 dias do mês depois (' + cab.length + ' colunas)');
+        ok(/^1 /.test(cab[11]) && /DOM/.test(cab[11]),
+          'o cabeçalho do dia traz número e dia da semana numa linha só: ' + JSON.stringify(cab[11]));
+        ok(!cab.some((c) => /\n/.test(String(c))),
+          'sem quebra de linha no cabeçalho, que exigiria "quebrar texto" ligado para aparecer');
       }
     }
 
-    sec('2. Os grupos viram faixa, como na grade');
+    sec('2. O grupo é coluna, não faixa mesclada');
+    {
+      /* O ponto de toda a mudança: mesclagem quebra filtro e ordenação.
+         Com o grupo em coluna, filtrar por grupo é igual a filtrar por
+         qualquer outra coisa. */
+      const r = await exportar('capacity');
+      eq(r.merges.length, 0, 'nenhuma célula mesclada no arquivo');
+      const tudo = r.aoa.flat().join(' ');
+      ok(!/· 2 pessoas|· 1 pessoa/.test(tudo),
+        'e nenhuma linha de faixa sobrou boiando entre os dados');
+
+      const linhas = r.aoa.slice(4).filter((l) => l[0]);
+      eq(linhas.length, 3, 'uma linha por pessoa, sem linhas intrusas');
+      eq(linhas.map((l) => l[2]).join('|'),
+        'ASG LIMPEZA I|ASG LIMPEZA I|ENC. DE LIMPEZA II',
+        'cada linha carrega o grupo dela na coluna GRUPO');
+      /* A ordem é a da TELA, não a do banco: a exportação passou a pedir
+         a lista no mesmo lugar que a grade. No padrão automático isso é
+         função, depois horário — ROSANA entra 06:00 e ELIENE 17:00, então
+         ROSANA vem primeiro, como aparece na tela. */
+      eq(linhas.map((l) => l[1]).join(' / '),
+        'ROSANA MARTA DA ANUNCIACAO BRITO / ELIENE VIEIRA SANTOS FERNANDES / JACKSON RAFAEL DE ANDRADE',
+        'a ordem é a mesma que está sendo vista, por horário dentro do grupo');
+
+      const porNome = await page.evaluate(() => {
+        window._escalaOrdemColuna = 'nome'; window._escalaOrdemDirecao = 'asc';
+        let cap = null; const orig = XLSX.writeFile;
+        XLSX.writeFile = (wb) => { cap = wb.Sheets.Escala; };
+        try { escalaExportarTelaExcel(); } finally { XLSX.writeFile = orig; window._escalaOrdemColuna = null; }
+        return XLSX.utils.sheet_to_json(cap, { header: 1, defval: '' })
+          .slice(4).filter((l) => l[0]).map((l) => l[1]);
+      });
+      /* Tabela plana: ordenar por nome é alfabético puro, sem respeitar
+         bloco de grupo — que é exatamente o que se espera de uma
+         planilha, e o motivo de o grupo ter virado coluna. */
+      eq(porNome.join(' / '),
+        'ELIENE VIEIRA SANTOS FERNANDES / JACKSON RAFAEL DE ANDRADE / ROSANA MARTA DA ANUNCIACAO BRITO',
+        'e muda junto quando se muda o "Organizar por" no painel');
+    }
+
+    sec('2b. O filtro vem pronto e os números são números');
     {
       const r = await exportar('capacity');
-      eq(r.aoa[4][0], 'ASG LIMPEZA I · 2 pessoas', 'a faixa nomeia o grupo e conta a gente');
-      eq(r.aoa[7][0], 'ENC. DE LIMPEZA II · 1 pessoa', 'e concorda no singular quando é uma só');
-      eq(r.merges.length, 2, 'cada faixa ocupa a linha inteira (2 mescladas)');
-      ok(r.merges.every((m) => m[1] === 0 && m[2] === 38),
-        'da primeira à última coluna, como na tela');
-      // A ordem na planilha é a ordem dos grupos na tela, não a do banco.
-      const nomes = [r.aoa[5][1], r.aoa[6][1], r.aoa[8][1]];
-      eq(nomes.join(' / '), 'ELIENE VIEIRA SANTOS FERNANDES / ROSANA MARTA DA ANUNCIACAO BRITO / JACKSON RAFAEL DE ANDRADE',
-        'e a gente sai agrupada, não na ordem crua');
+      ok(r.autofiltro, 'o autofiltro está ligado: ' + r.autofiltro);
+      ok(/^A4:/.test(r.autofiltro || ''),
+        'ancorado no cabeçalho, não na linha do título: ' + r.autofiltro);
+
+      /* Matrícula como número perderia o zero à esquerda e deixaria de
+         bater com a do DP. CH como texto ("180H") não soma nem filtra por
+         faixa. Cada um no tipo que o uso pede. */
+      eq(r.tipos.A5, 's', 'matrícula sai como texto, para não comer zero à esquerda');
+      eq(r.tipos.E5, 'n', 'CH sai como número, para somar e filtrar por faixa');
+      eq(r.tipos.J5, 'n', 'folgas feitas, idem');
+      eq(r.tipos.K5, 'n', 'e a meta também');
+
+      const linha = r.aoa[4];
+      ok(typeof linha[9] === 'number' && typeof linha[10] === 'number',
+        'folgas vêm em duas colunas somáveis, não em "5/5" que não soma');
     }
 
     sec('3. As conferências vão por extenso, não por símbolo');
@@ -129,21 +187,19 @@ const GENTE = [
       /* ✓ e ✗ viram emoji colorido em algumas fontes, e a planilha é
          documento de trabalho — às vezes impresso em preto e branco. */
       const r = await exportar('capacity');
-      const linha = r.aoa[5];
-      const [seq, dom, folgas] = linha.slice(-5, -2);
+      const linha = r.aoa[4];
       ok(!/[✓✔✕✖✗✘❌✅]/.test(r.aoa.flat().join('')), 'nenhum visto ou cruz no arquivo inteiro');
-      ok(seq === 'OK' || /dias$/.test(seq), '6 dias sai como OK ou o número: ' + JSON.stringify(seq));
-      ok(dom === 'OK' || /dom\.$/.test(dom), 'domingo idem: ' + JSON.stringify(dom));
-      ok(/^\d+\/\d+$/.test(folgas), 'e as folgas como feitas/meta: ' + JSON.stringify(folgas));
+      ok(linha[7] === 'OK' || /dias$/.test(linha[7]), '6 dias sai como OK ou o número: ' + JSON.stringify(linha[7]));
+      ok(linha[8] === 'OK' || /dom\.$/.test(linha[8]), 'domingo idem: ' + JSON.stringify(linha[8]));
     }
 
     sec('4. O cabeçalho e a identificação ficam congelados');
     {
       const r = await exportar('capacity');
       ok(r.views && r.views[0] && r.views[0].state === 'frozen', 'o painel sai congelado');
-      eq(r.views[0].xSplit, 4, 'as quatro colunas de identificação ficam à vista ao rolar');
+      eq(r.views[0].xSplit, 11, 'tudo que diz QUEM é a pessoa fica à vista ao rolar pelos dias');
       eq(r.views[0].ySplit, 4, 'e o cabeçalho também');
-      eq(r.cols, 39, 'cada coluna com largura própria — dia estreito, nome largo');
+      eq(r.cols, 41, 'cada coluna com largura própria — dia estreito, nome largo');
     }
 
     sec('5. Este arquivo não se finge de reimportável');

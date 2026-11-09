@@ -465,6 +465,139 @@ function paginaDeTeste() {
       }
     }
 
+    sec('8d. A matrícula é editável e a troca é explícita');
+    {
+      const html = await page.evaluate(() => {
+        window._escalaFeriados = new Map(); window._escalaDias = new Map();
+        window._escalaColabs = [
+          { matricula: '250722', nome: 'ITAMAR', funcao_manual: 'SUPERVISOR', ch_manual: 210, entrada_manual: '04:30', saida_manual: '' },
+          { matricula: '254562', nome: 'RENATO', funcao_manual: 'SUPERVISOR', ch_manual: 210, entrada_manual: '11:00', saida_manual: '' },
+        ];
+        window.eoColabs = new Map(window._escalaColabs.map((c) =>
+          [c.matricula, { nome: c.nome, funcao: c.funcao_manual, ch: c.ch_manual, station: 'GRU' }]));
+        window.escalaFuncaoGrupoDoColab = (c) => ({ label: c.funcao_manual });
+        window.escalaEntradaEfetivaDoColab = (c) => c.entrada_manual;
+        window.escalaAplicarFiltroSituacao = (l) => l;
+        window._escalaGruposVisiveis = null; window._escalaOrdemColuna = null;
+        window._escalaBase = 'GRU'; window._escalaMes = '2026-11';
+        return escalaGradeEnxutaHTML(2026, 11, 30);
+      });
+      ok(/class="escala-mat-edit"[^>]*contenteditable="true"/.test(html),
+        'a célula de matrícula aceita digitação');
+      ok(/data-mat="250722"/.test(html), 'e guarda a matrícula original para poder voltar atrás');
+      ok(/onkeydown="escalaMatTecla/.test(html) && /onblur="escalaMatCommit/.test(html),
+        'Enter confirma e Esc cancela, sem precisar de botão');
+
+      /* Só dígito entra: barrar aqui evita a viagem até o cadastro para
+         descobrir que "joão" não é matrícula. */
+      const bloqueio = await page.evaluate(() => {
+        let impedido = false;
+        const ev = { key: 'j', preventDefault: () => { impedido = true; } };
+        escalaMatTecla(ev, { dataset: {}, textContent: '', blur() {}, classList: { remove() {} } });
+        return impedido;
+      });
+      ok(bloqueio, 'letra digitada na matrícula é recusada na hora');
+
+      // Esc devolve o valor anterior, não deixa meio editado.
+      const voltou = await page.evaluate(() => {
+        const el = { dataset: { orig: '250722' }, textContent: '999',
+                     blur() {}, classList: { remove() {}, add() {} } };
+        escalaMatTecla({ key: 'Escape', preventDefault() {} }, el);
+        return el.textContent;
+      });
+      ok(voltou === '250722', 'Esc devolve a matrícula que estava lá' + '  (veio ' + JSON.stringify(voltou) + ')');
+    }
+
+    sec('8e. Quem sai do horário vira conta visível');
+    {
+      /* Dez trocas são dez pessoas fora do mês. Sem contador, ninguém
+         percebe até fechar a folha. */
+      const r = await page.evaluate(() => {
+        window._escalaBase = 'GRU'; window._escalaMes = '2026-11';
+        window._escalaCenario = 'dimensionada';
+        try { localStorage.removeItem(escalaChaveRetirados()); } catch (_) {}
+        window._escalaColabs = [{ matricula: '250722', nome: 'ITAMAR' }];
+        window.eoColabs = new Map([
+          ['250722', { nome: 'ITAMAR', station: 'GRU' }],
+          ['254562', { nome: 'RENATO', station: 'GRU' }],
+          ['260637', { nome: 'ALEX', station: 'GRU' }],
+          ['999999', { nome: 'DE OUTRA BASE', station: 'CGH' }],
+        ]);
+        const antes = escalaSemHorario();
+        escalaMarcarRetirado('254562', '11:00');
+        const depois = escalaSemHorario();
+        return {
+          antes: antes.length,
+          bases: antes.map((p) => p.matricula),
+          retirado: depois.find((p) => p.matricula === '254562'),
+          primeiro: depois[0].matricula,
+          chip: escalaChipSemHorario(),
+        };
+      });
+      ok(r.antes === 2, 'conta quem está no cadastro da base e fora da escala' + '  (veio ' + JSON.stringify(r.antes) + ')');
+      ok(!r.bases.includes('999999'), 'gente de outra base não entra na conta');
+      ok(r.retirado && r.retirado.retirado === true && r.retirado.horario === '11:00',
+        'quem foi retirado fica marcado, com o horário que ocupava');
+      ok(r.primeiro === '254562', 'e vem primeiro na lista, que é quem a pessoa acabou de mexer' + '  (veio ' + JSON.stringify(r.primeiro) + ')');
+      ok(/escala-chip-fora/.test(r.chip) && /2<\/span> sem horário/.test(r.chip),
+        'o chip mostra o número na faixa: ' + r.chip.replace(/\s+/g, ' ').slice(0, 90));
+
+      const limpo = await page.evaluate(() => {
+        window._escalaColabs = [
+          { matricula: '250722' }, { matricula: '254562' }, { matricula: '260637' }];
+        return escalaChipSemHorario();
+      });
+      ok(limpo === '', 'com todo mundo alocado, o chip some em vez de mostrar zero' + '  (veio ' + JSON.stringify(limpo) + ')');
+    }
+
+    sec('8f. Folgas por grupo e caixas só dos grupos presentes');
+    {
+      const r = await page.evaluate(() => {
+        window._escalaColabs = [
+          { matricula: '1', nome: 'A', funcao_manual: 'SUPERVISOR' },
+          { matricula: '2', nome: 'B', funcao_manual: 'SUPERVISOR' },
+          { matricula: '3', nome: 'C', funcao_manual: 'ASG LIMPEZA' },
+        ];
+        window.escalaFuncaoGrupoDoColab = (c) =>
+          ({ label: c.funcao_manual === 'SUPERVISOR' ? 'Supervisores' : 'Limpeza' });
+        window.escalaEntradaEfetivaDoColab = () => '06:00';
+        window.escalaAplicarFiltroSituacao = (l) => l;
+        window._escalaGruposVisiveis = null;
+        return { caixas: escalaCaixasDeGrupo(), grade: escalaGradeEnxutaHTML(2026, 11, 30) };
+      });
+      ok(/value="Supervisores"/.test(r.caixas) && /value="Limpeza"/.test(r.caixas),
+        'as caixas trazem os grupos que têm gente');
+      ok(!/value="GSE"/.test(r.caixas) && !/value="PAX"/.test(r.caixas),
+        'e não os que estão zerados no mês, que só ocupavam espaço');
+      ok(/<span class="qtd">2<\/span>/.test(r.caixas) && /<span class="qtd">1<\/span>/.test(r.caixas),
+        'cada grupo mostra quanta gente tem — é por aí que se nota efetivo faltando');
+      ok(/Marcar todos/.test(r.caixas) && /Desmarcar todos/.test(r.caixas),
+        'com atalho para marcar e desmarcar, senão ver um grupo só custa oito cliques');
+
+      ok(/escalaGerarFolgasAuto\('Supervisores'\)/.test(r.grade),
+        'a faixa do grupo chama o gerador só daquele grupo');
+      ok(/escalaGerarFolgasAuto\('Limpeza'\)/.test(r.grade),
+        'cada faixa com o seu');
+    }
+
+    sec('8g. Nenhum ícone chamado sem existir');
+    {
+      /* escalaIcone devolve string vazia para nome desconhecido: o SVG
+         sai em branco, ocupando lugar sem desenhar nada, e ninguém
+         percebe até olhar de perto. Quatro estavam assim. */
+      const faltando = await page.evaluate(() => {
+        const usados = ['sparkles', 'userPlus', 'history', 'barChart', 'sort', 'trash',
+                        'printer', 'sheet', 'download', 'upload', 'calendarPlus', 'check', 'alert'];
+        /* Checar `d="` não serve: calendarPlus e check desenham com
+           <rect> e <polyline>, que não têm esse atributo. O que define
+           ícone vazio é o SVG sem nenhuma forma dentro. */
+        return usados.filter((n) =>
+          !/<(path|rect|circle|polyline|polygon|line)\b/.test(escalaIcone(n)));
+      });
+      ok(faltando.length === 0,
+        'todos os ícones usados desenham de fato' + (faltando.length ? ' — vazios: ' + faltando.join(', ') : ''));
+    }
+
     sec('9. Nenhum erro de script');
     ok(erros.length === 0, 'a página carregou sem exceção' + (erros.length ? ': ' + erros.join(' | ') : ''));
   } finally {

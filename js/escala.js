@@ -12,6 +12,13 @@
 function escalaIcone(nome) {
   const icones = {
     users:  `<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>`,
+    /* Estes quatro eram chamados em botões que já existiam, mas não
+       estavam definidos: o `icones[nome] || ''` devolvia vazio e o SVG
+       saía em branco, ocupando lugar sem desenhar nada. */
+    sparkles: `<path d="M12 3v4M12 17v4M3 12h4M17 12h4"/><path d="M12 8.5 13.3 11l2.7 1-2.7 1-1.3 2.5L10.7 13 8 12l2.7-1z"/>`,
+    userPlus: `<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/>`,
+    history:  `<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/>`,
+    barChart: `<path d="M3 21h18"/><rect x="5" y="11" width="3.5" height="7"/><rect x="10.2" y="6" width="3.5" height="12"/><rect x="15.4" y="14" width="3.5" height="4"/>`,
     zap:    `<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>`,
     calendarPlus: `<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="12" y1="14" x2="12" y2="18"/><line x1="10" y1="16" x2="14" y2="16"/>`,
     trash:  `<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>`,
@@ -1022,14 +1029,18 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
       </div>
       <div id="escala-grupo-organizacao" style="display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;margin-top:10px;padding-bottom:2px">
         <div style="position:relative">
+          <!-- Eram dois passos: escolher "Escolher grupos..." no select e só
+               então ver as caixas. O select oferecia três presets, dos quais
+               um ("Só Supervisores e Líderes") decidia por quem usa o que
+               interessa. Com o menu em largura inteira não falta espaço para
+               mostrar os grupos de uma vez.
+
+               E a lista agora sai do mês carregado, não da constante: um
+               grupo sem ninguém em novembro só ocupava espaço e dava a
+               entender que havia gente escondida por filtro. -->
           <label style="font-size:10.5px;color:var(--text-muted);display:block;margin-bottom:3px">Mostrar grupos</label>
-          <select class="adh-month-select" onchange="escalaSetMostrarGrupos(this.value)">
-            <option value="__todos__" ${!window._escalaGruposVisiveis?'selected':''}>Todos os grupos</option>
-            <option value="__sup_lider__">Só Supervisores e Líderes</option>
-            <option value="__escolher__">Escolher grupos...</option>
-          </select>
-          <div id="escala-grupos-painel" class="escala-grupos-painel" style="display:none">
-            ${ESCALA_GRUPOS.map(g => `<label style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:11.5px;color:var(--text-secondary);white-space:nowrap"><input type="checkbox" value="${g}" onchange="escalaAtualizarGruposEscolhidos()" ${(!window._escalaGruposVisiveis||window._escalaGruposVisiveis.has(g))?'checked':''}>${g}</label>`).join('')}
+          <div id="escala-grupos-painel" class="escala-grupos-painel">
+            ${escalaCaixasDeGrupo()}
           </div>
         </div>
         <!-- Ordenar já existia, mas só clicando no cabeçalho da grade
@@ -1583,8 +1594,8 @@ function escalaChipsFiltros() {
 
   const gv = window._escalaGruposVisiveis;
   if (gv) {
-    const sl = gv.size === 2 && gv.has('Supervisores') && gv.has('Líder de Operações');
-    add(sl ? 'Supervisores e Líderes' : `${gv.size} grupo(s)`, 'Mostrar grupos');
+    // Um grupo só cabe pelo nome no chip; vários, não.
+    add(gv.size === 1 ? [...gv][0] : `${gv.size} grupos`, 'Mostrar grupos');
   }
 
   const crit = typeof escalaCriterioSubBloco === 'function' ? escalaCriterioSubBloco() : null;
@@ -1616,9 +1627,73 @@ function escalaChipsFiltros() {
 
 function escalaChipsHTML() {
   const chips = escalaChipsFiltros();
-  if (!chips.length) return `<span class="escala-chip-vazio">sem filtros</span>`;
-  return chips.map((c) => `<button type="button" class="escala-chip" onclick="escalaToggleFerramentas()"
-    title="${escalaEscapeAttr(c.dica)} — clique para abrir as ferramentas">${escalaEscapeAttr(c.rot)}</button>`).join('');
+  const filtros = chips.length
+    ? chips.map((c) => `<button type="button" class="escala-chip" onclick="escalaToggleFerramentas()"
+        title="${escalaEscapeAttr(c.dica)} — clique para abrir as ferramentas">${escalaEscapeAttr(c.rot)}</button>`).join('')
+    : `<span class="escala-chip-vazio">sem filtros</span>`;
+  return filtros + escalaChipSemHorario();
+}
+
+/* Quem saiu da escala não pode simplesmente sumir da vista.
+
+   Trocar a matrícula de uma linha tira a pessoa anterior da escala. Sem
+   nada que diga isso, dez trocas são dez pessoas que saíram do mês sem
+   deixar rastro — e ninguém percebe até fechar a folha de pagamento. O
+   contador fica na faixa, ao lado dos filtros, e abre a lista. */
+function escalaChipSemHorario() {
+  const fora = escalaSemHorario();
+  if (!fora.length) return '';
+  const retirados = fora.filter((p) => p.retirado).length;
+  const dica = retirados
+    ? `${retirados} retirado(s) agora e ${fora.length - retirados} que nunca entraram na escala`
+    : `${fora.length} pessoa(s) do cadastro de ${window._escalaBase} que não estão nesta escala`;
+  return `<button type="button" class="escala-chip escala-chip-fora"
+    onclick="escalaAbrirSemHorario()" title="${escalaEscapeAttr(dica)} — clique para ver a lista">
+    <span class="n">${fora.length}</span> sem horário</button>`;
+}
+
+/* Quem está no cadastro da base e não está na escala do mês.
+
+   Os retirados nesta sessão vêm marcados e primeiro: são os que a pessoa
+   acabou de mexer e provavelmente quer devolver. O resto é o efetivo que
+   nunca foi alocado — informação útil por si, porque é a distância entre
+   o cadastro e a escala. */
+function escalaSemHorario() {
+  const naEscala = new Set((window._escalaColabs || []).map((c) => c.matricula));
+  const base = String(window._escalaBase || '').toUpperCase();
+  const retirados = escalaRetirados();
+  const fora = [];
+  for (const [mat, r] of (window.eoColabs || new Map())) {
+    if (naEscala.has(mat)) continue;
+    if (base && String(r.station || '').toUpperCase() !== base) continue;
+    fora.push({ matricula: mat, nome: r.nome || '', funcao: r.funcao || '', ch: r.ch || '',
+                retirado: retirados.has(mat), horario: retirados.get(mat) || null });
+  }
+  fora.sort((a, b) => (b.retirado - a.retirado)
+    || String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
+  return fora;
+}
+
+/* Os retirados ficam no localStorage por base+mês+cenário: um F5 no meio
+   do trabalho não pode apagar a lista de quem acabou de sair. */
+function escalaChaveRetirados() {
+  return `gde_escala_retirados_${window._escalaBase}_${window._escalaMes}_${escalaCenario()}`;
+}
+function escalaRetirados() {
+  try {
+    const cru = localStorage.getItem(escalaChaveRetirados());
+    return new Map(cru ? JSON.parse(cru) : []);
+  } catch (_) { return new Map(); }
+}
+function escalaMarcarRetirado(matricula, horario) {
+  const m = escalaRetirados();
+  m.set(matricula, horario || null);
+  try { localStorage.setItem(escalaChaveRetirados(), JSON.stringify([...m])); } catch (_) {}
+}
+function escalaDesmarcarRetirado(matricula) {
+  const m = escalaRetirados();
+  if (!m.delete(matricula)) return;
+  try { localStorage.setItem(escalaChaveRetirados(), JSON.stringify([...m])); } catch (_) {}
 }
 
 function escalaAtualizarChips() {
@@ -1900,14 +1975,45 @@ function escalaOrdenarPorColuna(coluna) {
   escalaGradeAtualiza();
 }
 
-function escalaSetMostrarGrupos(valor) {
-  const painel = document.getElementById('escala-grupos-painel');
-  if (valor === '__escolher__') {
-    if (painel) painel.style.display = painel.style.display === 'none' ? 'block' : 'none';
-    return; // a lista de grupos escolhidos só muda quando marca/desmarca no painel
+/* As caixas dos grupos que existem no mês carregado, com a contagem.
+
+   A contagem ao lado faz trabalho de verdade: é por ela que se percebe
+   um grupo com gente a menos sem precisar abrir a escala. */
+function escalaCaixasDeGrupo() {
+  const colabs = window._escalaColabs || [];
+  const contagem = new Map();
+  for (const c of colabs) {
+    const g = escalaFuncaoGrupoDoColab(c).label || 'Sem função';
+    contagem.set(g, (contagem.get(g) || 0) + 1);
   }
-  if (painel) painel.style.display = 'none';
-  escalaPendente('grupos', valor === '__sup_lider__' ? new Set(['Supervisores', 'Líder de Operações']) : null);
+  // Ordem canônica, para a lista não dançar entre um mês e outro.
+  const presentes = [...contagem.keys()].sort((a, b) => {
+    const ia = ESCALA_GRUPOS.indexOf(a), ib = ESCALA_GRUPOS.indexOf(b);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+  });
+  if (!presentes.length) {
+    return '<div class="escala-grupos-vazio">Nenhum colaborador carregado neste mês.</div>';
+  }
+  const visiveis = window._escalaGruposVisiveis;
+  const linhas = presentes.map((g) => `<label class="escala-grupo-caixa">
+    <input type="checkbox" value="${escalaEscapeAttr(g)}" onchange="escalaAtualizarGruposEscolhidos()"
+      ${(!visiveis || visiveis.has(g)) ? 'checked' : ''}>
+    <span class="nome">${escalaEscapeAttr(g)}</span>
+    <span class="qtd">${contagem.get(g)}</span>
+  </label>`).join('');
+  return `<div class="escala-grupos-acoes">
+      <button type="button" onclick="escalaMarcarTodosGrupos(true)">Marcar todos</button>
+      <button type="button" onclick="escalaMarcarTodosGrupos(false)">Desmarcar todos</button>
+    </div>${linhas}`;
+}
+
+/* Com nove grupos, "quero ver só um" eram oito cliques de desmarcar.
+   Desmarcar todos e marcar um são dois. */
+function escalaMarcarTodosGrupos(marcar) {
+  const painel = document.getElementById('escala-grupos-painel');
+  if (!painel) return;
+  painel.querySelectorAll('input[type="checkbox"]').forEach((cx) => { cx.checked = marcar; });
+  escalaAtualizarGruposEscolhidos();
 }
 
 /* ──────────────────────────────────────────────────────────────
@@ -2602,8 +2708,17 @@ function escalaGradeEnxutaHTML(ano, mesNum, diasNoMes) {
     /* O rótulo gruda, não a célula: com colspan de 39 colunas, prender o
        <td> não adianta — o texto mora no começo dele e some da tela assim
        que se rola para a direita, deixando uma faixa cinza sem nome. */
+    /* O gerador já sabia receber um grupo (escalaFiltrarColabs), mas o
+       único jeito de chamá-lo era pela escala inteira. Rodar só os
+       Supervisores significava recalcular 1.200 pessoas e torcer para
+       que o resto não mudasse. O botão fica na faixa, ao lado da
+       contagem, porque é onde o grupo já está nomeado. */
     html += `<tr class="escala-enx-grupo"><td colspan="${NCOLS}"><span class="rot">
-      ${escalaEscapeAttr(grupo)} <span class="qtd">· ${gente.length} pessoa${gente.length === 1 ? '' : 's'}</span></span></td></tr>`;
+      ${escalaEscapeAttr(grupo)} <span class="qtd">· ${gente.length} pessoa${gente.length === 1 ? '' : 's'}</span>
+      <button type="button" class="escala-grupo-folgas"
+        onclick="escalaGerarFolgasAuto('${escalaEscapeAttr(grupo).replace(/'/g, "\\'")}')"
+        title="Gerar folgas automáticas só deste grupo, sem mexer no resto da escala">
+        ${escalaIcone('sparkles')}Folgas do grupo</button></span></td></tr>`;
 
     for (const c of gente) {
       const info = window.eoColabs?.get(c.matricula);
@@ -2626,7 +2741,12 @@ function escalaGradeEnxutaHTML(ano, mesNum, diasNoMes) {
       const domOk = r.domingos === 1;
 
       html += `<tr class="${i++ % 2 ? 'escala-zebra' : ''}" data-escala-linha="${c.matricula}">
-        <td class="escala-enx-fix col-mat mat" style="border:${BORDA}">${escalaEscapeAttr(c.matricula)}</td>
+        <td class="escala-enx-fix col-mat mat" style="border:${BORDA}"><span
+          class="escala-mat-edit" contenteditable="true" spellcheck="false"
+          data-mat="${escalaEscapeAttr(c.matricula)}"
+          title="Clique para trocar quem ocupa este horário. Enter confirma, Esc cancela."
+          onfocus="escalaMatFoco(this)" onkeydown="escalaMatTecla(event, this)"
+          onblur="escalaMatCommit(this)">${escalaEscapeAttr(c.matricula)}</span></td>
         <td class="escala-enx-fix col-nome nome" style="border:${BORDA}" title="${escalaEscapeAttr(c.nome || '')}">${escalaEscapeAttr(c.nome || '')}</td>
         <td class="fn" style="border:${BORDA}" title="${escalaEscapeAttr(funcao)}">${escalaEscapeAttr(funcao)}</td>
         <td class="n ch" style="border:${BORDA}">${ch ? ch + 'H' : '—'}</td>`;
@@ -3066,6 +3186,7 @@ async function escalaAdicionarColab(matricula) {
   const { data, error } = await db.from('escala_colaborador').upsert(payload, { onConflict: 'base,mes,cenario,matricula' }).select().single();
   if (error) { alert('Erro ao adicionar: ' + error.message); return false; }
   window._escalaColabs = [...(window._escalaColabs||[]), data];
+  escalaDesmarcarRetirado(matricula);
   escalaGradeAtualiza();
   return true;
 }
@@ -3384,6 +3505,219 @@ async function escalaLimparStatus() {
   escalaMsg('Marcações de F/FA/K/CH/J limpas (férias automáticas continuam vindo do cadastro).');
 }
 
+/* ══════════════════════════════════════════════════════
+   Trocar quem ocupa um horário, pela própria matrícula
+
+   O horário pertence à LINHA, não à pessoa: na Capacity a linha é uma
+   posição do dimensionamento. Trocar a matrícula é dizer "quem cobre
+   este horário agora é outro". A pessoa que sai leva as folgas dela
+   junto, porque folga é da pessoa, não do posto — quem entra começa sem
+   folga marcada e precisa de nova distribuição.
+   ══════════════════════════════════════════════════════ */
+
+function escalaMatFoco(el) {
+  el.dataset.orig = el.textContent.trim();
+  // Selecionar tudo: quem clica aqui quer trocar a matrícula inteira,
+  // não emendar um dígito no meio da que já está lá.
+  const r = document.createRange();
+  r.selectNodeContents(el);
+  const sel = window.getSelection();
+  sel.removeAllRanges(); sel.addRange(r);
+}
+
+function escalaMatTecla(ev, el) {
+  if (ev.key === 'Enter') { ev.preventDefault(); el.blur(); return; }
+  if (ev.key === 'Escape') {
+    ev.preventDefault();
+    el.textContent = el.dataset.orig || '';
+    el.classList.remove('duplicada');
+    el.blur();
+    return;
+  }
+  // Matrícula é só dígito. Barrar aqui evita a viagem até o cadastro
+  // para descobrir que "joão" não é matrícula.
+  if (ev.key.length === 1 && !/[0-9]/.test(ev.key) && !ev.ctrlKey && !ev.metaKey) ev.preventDefault();
+}
+
+async function escalaMatCommit(el) {
+  const antiga = el.dataset.orig || '';
+  const nova = el.textContent.replace(/\D/g, '').trim();
+  const voltar = (msg) => {
+    if (msg) escalaMsg(msg, true);
+    el.textContent = antiga;
+    el.classList.remove('duplicada');
+  };
+  if (nova === antiga) { el.classList.remove('duplicada'); el.textContent = antiga; return; }
+  if (!nova) { voltar('Matrícula vazia. Para tirar alguém da escala, use o X da linha.'); return; }
+
+  const reg = window.eoColabs?.get(nova);
+  if (!reg) { voltar(`Matrícula ${nova} não existe no cadastro.`); return; }
+
+  const base = String(window._escalaBase || '').toUpperCase();
+  if (base && String(reg.station || '').toUpperCase() !== base) {
+    voltar(`${reg.nome || nova} é da base ${reg.station || '?'}, não de ${base}.`);
+    return;
+  }
+
+  /* Já está na escala: o banco tem chave única por base+mês+cenário+
+     matrícula, então duas linhas com a mesma pessoa não existem nem por
+     um instante. Em vez de fingir que existem, a tela marca as duas de
+     vermelho e oferece a troca de lugar, que é o que se quer quando se
+     digita alguém que já está em outro horário. */
+  const jaTem = (window._escalaColabs || []).find((c) => c.matricula === nova);
+  if (jaTem) {
+    el.classList.add('duplicada');
+    escalaPiscarLinhaDe(nova);
+    const [ano, mesNum] = window._escalaMes.split('-').map(Number);
+    const D = new Date(ano, mesNum, 0).getDate();
+    const onde = escalaEntradaEfetivaDoColab(jaTem, ano, mesNum, D) || 'sem horário';
+    const trocar = confirm(
+      `${reg.nome || nova} já está nesta escala, entrando ${onde}.\n\n`
+      + `OK troca os dois de lugar (cada um fica com o horário do outro).\n`
+      + `Cancelar desfaz a digitação.`);
+    el.classList.remove('duplicada');
+    if (!trocar) { voltar(); return; }
+    await escalaTrocarDeLugar(antiga, nova);
+    return;
+  }
+
+  await escalaSubstituirNoHorario(antiga, nova);
+}
+
+/* Pisca a linha de quem já está na escala, para a pessoa ver ONDE está o
+   duplicado em vez de só ler que existe. */
+function escalaPiscarLinhaDe(matricula) {
+  const alvo = document.querySelector(`.escala-mat-edit[data-mat="${CSS.escape(matricula)}"]`);
+  if (!alvo) return;
+  alvo.classList.add('duplicada');
+  alvo.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  setTimeout(() => alvo.classList.remove('duplicada'), 2600);
+}
+
+// Os dois estão na escala: cada um fica com o horário do outro.
+async function escalaTrocarDeLugar(a, b) {
+  if (escalaVerificarTravada()) return;
+  const colabs = window._escalaColabs || [];
+  const ca = colabs.find((c) => c.matricula === a);
+  const cb = colabs.find((c) => c.matricula === b);
+  if (!ca || !cb) { escalaGradeAtualiza(); return; }
+
+  const campos = ['entrada_manual', 'saida_manual', 'turno', 'bloco_horario', 'ordem_manual'];
+  const antes = {};
+  campos.forEach((f) => { antes[f] = ca[f] ?? null; });
+
+  const base = window._escalaBase, mes = window._escalaMes, cen = escalaCenario();
+  const upd = async (m, valores) => db.from('escala_colaborador').update(valores)
+    .eq('base', base).eq('mes', mes).eq('cenario', cen).eq('matricula', m);
+
+  const paraA = {}; const paraB = {};
+  campos.forEach((f) => { paraA[f] = cb[f] ?? null; paraB[f] = antes[f]; });
+
+  const r1 = await upd(a, paraA);
+  if (r1.error) { escalaMsg('Erro ao trocar: ' + r1.error.message, true); return; }
+  const r2 = await upd(b, paraB);
+  if (r2.error) {
+    // Desfaz o primeiro, para não deixar os dois no mesmo horário.
+    await upd(a, paraB);
+    escalaMsg('Erro ao trocar: ' + r2.error.message, true);
+    return;
+  }
+  campos.forEach((f) => { ca[f] = paraA[f]; cb[f] = paraB[f]; });
+  escalaGradeAtualiza();
+  escalaMsg(`${ca.nome || a} e ${cb.nome || b} trocaram de horário.`);
+}
+
+/* A pessoa nova assume o horário da linha; a antiga sai da escala e
+   entra na conta de "sem horário". */
+async function escalaSubstituirNoHorario(antiga, nova) {
+  if (escalaVerificarTravada()) return;
+  const base = window._escalaBase, mes = window._escalaMes, cen = escalaCenario();
+  const linha = (window._escalaColabs || []).find((c) => c.matricula === antiga);
+  if (!linha) { escalaGradeAtualiza(); return; }
+  const reg = window.eoColabs.get(nova);
+
+  const payload = {
+    base, mes, cenario: cen, matricula: nova, nome: reg.nome || '',
+    entrada_manual: linha.entrada_manual ?? null,
+    saida_manual: linha.saida_manual ?? null,
+    turno: linha.turno ?? null,
+    bloco_horario: linha.bloco_horario ?? null,
+    ordem_manual: linha.ordem_manual ?? null,
+    created_by: currentUserProfile?.id || currentUser?.id || null,
+  };
+  const { data, error } = await db.from('escala_colaborador')
+    .upsert(payload, { onConflict: 'base,mes,cenario,matricula' }).select().single();
+  if (error) { escalaMsg('Erro ao trocar: ' + error.message, true); escalaGradeAtualiza(); return; }
+
+  /* Só agora o antigo sai. Na ordem inversa, uma falha no insert deixaria
+     o horário vazio e a pessoa fora da escala — perda dos dois lados. */
+  const [ano, mesNum] = mes.split('-').map(Number);
+  const D = new Date(ano, mesNum, 0).getDate();
+  const horario = escalaEntradaEfetivaDoColab(linha, ano, mesNum, D) || null;
+
+  await db.from('escala_dia').delete().match({ base, mes, cenario: cen, matricula: antiga });
+  const del = await db.from('escala_colaborador').delete().match({ base, mes, cenario: cen, matricula: antiga });
+  if (del.error) { escalaMsg('Entrou o novo, mas não consegui tirar o antigo: ' + del.error.message, true); }
+
+  window._escalaColabs = (window._escalaColabs || []).filter((c) => c.matricula !== antiga).concat([data]);
+  for (const k of [...window._escalaDias.keys()]) if (k.startsWith(antiga + '|')) window._escalaDias.delete(k);
+  escalaMarcarRetirado(antiga, horario);
+  escalaDesmarcarRetirado(nova);
+
+  escalaGradeAtualiza();
+  escalaMsg(`${reg.nome || nova} assumiu o horário de ${linha.nome || antiga}. `
+    + `${linha.nome || antiga} saiu da escala e está em "sem horário".`);
+}
+
+/* O card da lista de quem está fora. */
+function escalaAbrirSemHorario() {
+  const fora = escalaSemHorario();
+  const antigo = document.getElementById('escala-fora-card');
+  if (antigo) { antigo.remove(); return; }
+
+  const linha = (p) => `<li>
+    <span class="mat">${escalaEscapeAttr(p.matricula)}</span>
+    <span class="nome">${escalaEscapeAttr(p.nome)}</span>
+    <span class="fn">${escalaEscapeAttr(p.funcao || '')}</span>
+    ${p.retirado ? `<span class="tag">saiu de ${escalaEscapeAttr(p.horario || 'sem horário')}</span>` : ''}
+    <button type="button" onclick="escalaDevolverAEscala('${escalaEscapeAttr(p.matricula)}')"
+      title="Colocar de volta na escala">Devolver</button>
+  </li>`;
+
+  const retirados = fora.filter((p) => p.retirado);
+  const nunca = fora.filter((p) => !p.retirado);
+  const card = document.createElement('div');
+  card.id = 'escala-fora-card';
+  card.className = 'escala-fora-card';
+  card.innerHTML = `
+    <div class="topo">
+      <strong>${fora.length} sem horário</strong>
+      <button type="button" class="fechar" onclick="this.closest('.escala-fora-card').remove()"
+        aria-label="Fechar">×</button>
+    </div>
+    ${retirados.length ? `<div class="secao">Retirados da escala (${retirados.length})</div>
+      <ul>${retirados.map(linha).join('')}</ul>` : ''}
+    ${nunca.length ? `<div class="secao">No cadastro de ${escalaEscapeAttr(window._escalaBase)}, fora da escala (${nunca.length})</div>
+      <ul>${nunca.slice(0, 60).map(linha).join('')}</ul>
+      ${nunca.length > 60 ? `<div class="mais">...e mais ${nunca.length - 60}</div>` : ''}` : ''}`;
+  document.body.appendChild(card);
+  const chip = document.querySelector('.escala-chip-fora');
+  if (chip) {
+    const r = chip.getBoundingClientRect();
+    card.style.top = `${r.bottom + 6}px`;
+    card.style.left = `${Math.max(12, Math.min(r.left, window.innerWidth - 480))}px`;
+  }
+}
+
+async function escalaDevolverAEscala(matricula) {
+  const ok = await escalaAdicionarColab(matricula);
+  if (!ok) return;
+  escalaDesmarcarRetirado(matricula);
+  const card = document.getElementById('escala-fora-card');
+  if (card) { card.remove(); escalaAbrirSemHorario(); }
+  escalaMsg(`${window.eoColabs?.get(matricula)?.nome || matricula} voltou para a escala, sem horário definido.`);
+}
+
 async function escalaRemoverColab(matricula) {
   if (escalaVerificarTravada()) return;
   if (!confirm('Remover esse colaborador dessa escala? Os F/K marcados pra ele nesse mês também somem.')) return;
@@ -3391,6 +3725,12 @@ async function escalaRemoverColab(matricula) {
   await db.from('escala_dia').delete().eq('base', base).eq('mes', mes).eq('cenario', escalaCenario()).eq('matricula', matricula);
   const { error } = await db.from('escala_colaborador').delete().eq('base', base).eq('mes', mes).eq('cenario', escalaCenario()).eq('matricula', matricula);
   if (error) { alert('Erro ao remover: ' + error.message); return; }
+  // Sair pelo X também conta como "sem horário": a conta do rodapé não
+  // pode depender de por qual caminho a pessoa saiu.
+  const [ano0, mes0] = String(mes).split('-').map(Number);
+  const D0 = new Date(ano0, mes0, 0).getDate();
+  const linha0 = (window._escalaColabs || []).find(c => c.matricula === matricula);
+  escalaMarcarRetirado(matricula, linha0 ? (escalaEntradaEfetivaDoColab(linha0, ano0, mes0, D0) || null) : null);
   window._escalaColabs = (window._escalaColabs||[]).filter(c => c.matricula !== matricula);
   for (const k of [...window._escalaDias.keys()]) if (k.startsWith(matricula+'|')) window._escalaDias.delete(k);
   escalaGradeAtualiza();
@@ -7061,78 +7401,106 @@ function escalaAbrirPainelComparacao(d) {
    Por isso ela não tem o marcador: um arquivo que parece reimportável mas
    perdeu a coluna Turno voltaria apagando turno de todo mundo.
    ══════════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════════
+   O Excel da tela — agora uma tabela, não uma foto
+
+   A versão anterior copiava a grade fielmente: faixas de grupo mescladas
+   atravessando as 39 colunas, como na tela. Bonito de olhar e inútil de
+   usar. Célula mesclada quebra o filtro e a ordenação do Excel, e a faixa
+   é uma linha que não é ninguém — ao filtrar por função, ela some ou fica
+   boiando no meio dos dados.
+
+   Então o grupo virou COLUNA, que é como uma planilha representa um
+   atributo repetido. O que se perde em semelhança com a tela se ganha
+   em poder filtrar, ordenar e dinamizar — que é o que se faz com uma
+   escala depois de baixá-la.
+   ══════════════════════════════════════════════════════ */
 function escalaExportarTelaExcel() {
   if (typeof XLSX === 'undefined') { escalaMsg('Biblioteca de Excel não carregou — recarregue a página.', true); return; }
   const base = window._escalaBase, mes = window._escalaMes;
   const [ano, mesNum] = mes.split('-').map(Number);
   const D = new Date(ano, mesNum, 0).getDate();
-  const colabs = window._escalaColabs || [];
+  // A mesma lista da tela: ordenada e filtrada como está sendo vista.
+  const colabs = escalaColabsOrdenados(ano, mesNum, D);
   if (!colabs.length) { escalaMsg('Nada pra exportar — nenhum colaborador nessa escala ainda.', true); return; }
 
-  // O mesmo agrupamento da grade enxuta, para o arquivo sair na ordem que
-  // a pessoa está vendo — e não numa ordem que ela teria que reconferir.
   const porGrupo = new Map();
   for (const c of colabs) {
     const g = escalaFuncaoGrupoDoColab(c).label || 'Sem função';
-    if (!porGrupo.has(g)) porGrupo.set(g, []);
-    porGrupo.get(g).push(c);
+    porGrupo.set(g, (porGrupo.get(g) || 0) + 1);
   }
 
+  /* O cabeçalho do dia sai em UMA linha. Com a quebra, o Excel precisa de
+     "quebrar texto" ligado para mostrar os dois pedaços, e sem isso o dia
+     da semana escondia o número. */
   const diasCab = [];
   for (let d = 1; d <= D; d++) {
-    diasCab.push(`${ESCALA_DIAS_SEMANA[new Date(ano, mesNum - 1, d).getDay()].toUpperCase()}\n${d}`);
+    diasCab.push(`${d} ${ESCALA_DIAS_SEMANA[new Date(ano, mesNum - 1, d).getDay()].toUpperCase()}`);
   }
-  const CAB = ['MATRÍCULA', 'NOME', 'FUNÇÃO', 'CH', ...diasCab,
-    '6 DIAS', 'DOM.', 'FOLGAS', 'ENTRADA', 'SAÍDA'];
+  const CAB = ['MATRÍCULA', 'NOME', 'GRUPO', 'FUNÇÃO', 'CH', 'ENTRADA', 'SAÍDA',
+    '6 DIAS', 'DOM.', 'FOLGAS FEITAS', 'META FOLGAS', ...diasCab];
 
   const titulo = `${ESCALA_TITULO()} · ${base} · ${typeof adhMonthLabel === 'function' ? adhMonthLabel(mes) : mes}`;
   const linhas = [[titulo], [`Gerado em ${new Date().toLocaleString('pt-BR')}`], [], CAB];
-  const linhasGrupo = [];                    // para pintar as faixas depois
 
-  for (const [grupo, gente] of porGrupo) {
-    linhasGrupo.push(linhas.length);
-    linhas.push([`${grupo} · ${gente.length} pessoa${gente.length === 1 ? '' : 's'}`]);
+  for (const c of colabs) {
+    const info = window.eoColabs?.get(c.matricula);
+    const ch = info?.ch || c.ch_manual || '';
+    const entrada = escalaEntradaEfetivaDoColab(c, ano, mesNum, D) || '';
+    const saida = c.saida_manual || escalaSaidaCalculada(entrada, ch) || '';
+    const conteudo = escalaConteudoDoMes(c, ano, mesNum, D);
 
-    for (const c of gente) {
-      const info = window.eoColabs?.get(c.matricula);
-      const ch = info?.ch || c.ch_manual || '';
-      const entrada = escalaEntradaEfetivaDoColab(c, ano, mesNum, D) || '';
-      const saida = c.saida_manual || escalaSaidaCalculada(entrada, ch) || '';
-      const conteudo = escalaConteudoDoMes(c, ano, mesNum, D);
-
-      const folgasDias = escalaFolgasDoColab(c, ano, mesNum, D, window._escalaDias);
-      const agrupadas = new Set();
-      for (let d = 1; d <= D; d++) {
-        if (window._escalaDias.get(`${c.matricula}|${d}`)?.status === 'FA') agrupadas.add(d);
-      }
-      const r = escalaValidarRegrasFolga(folgasDias, ano, mesNum, D, agrupadas);
-      const feitas = conteudo.filter((x) => x.status === 'F' || x.status === 'FA').length;
-      const meta = escalaMetaFolgasDoColab(ch, D);
-
-      linhas.push([
-        c.matricula, c.nome || '', info?.funcao || c.funcao_manual || '', ch ? `${ch}H` : '',
-        ...conteudo.map((i) => i.status || ''),
-        // Texto, não símbolo: ✓ e ✗ viram emoji colorido em algumas
-        // fontes, e a planilha é documento de trabalho.
-        r.maxSequencia <= 6 ? 'OK' : `${r.maxSequencia} dias`,
-        r.domingos === 1 ? 'OK' : `${r.domingos} dom.`,
-        `${feitas}/${meta}`, entrada || '', saida || '',
-      ]);
+    const folgasDias = escalaFolgasDoColab(c, ano, mesNum, D, window._escalaDias);
+    const agrupadas = new Set();
+    for (let d = 1; d <= D; d++) {
+      if (window._escalaDias.get(`${c.matricula}|${d}`)?.status === 'FA') agrupadas.add(d);
     }
+    const r = escalaValidarRegrasFolga(folgasDias, ano, mesNum, D, agrupadas);
+    const feitas = conteudo.filter((x) => x.status === 'F' || x.status === 'FA').length;
+    const meta = escalaMetaFolgasDoColab(ch, D);
+
+    linhas.push([
+      /* Matrícula como TEXTO. Como número, o Excel come o zero à esquerda
+         e a matrícula deixa de bater com a do sistema do DP. */
+      String(c.matricula),
+      c.nome || '',
+      escalaFuncaoGrupoDoColab(c).label || 'Sem função',
+      info?.funcao || c.funcao_manual || '',
+      // CH como número, para somar e filtrar por faixa. "180H" não soma.
+      ch ? Number(String(ch).replace(/\D/g, '')) : '',
+      entrada || '', saida || '',
+      // Texto, não símbolo: ✓ e ✗ viram emoji colorido em algumas fontes.
+      r.maxSequencia <= 6 ? 'OK' : `${r.maxSequencia} dias`,
+      r.domingos === 1 ? 'OK' : `${r.domingos} dom.`,
+      /* Separadas em duas colunas numéricas. Como "5/5", não dá para
+         somar, nem filtrar por quem está devendo folga. */
+      feitas, meta,
+      ...conteudo.map((i) => i.status || ''),
+    ]);
   }
 
   const ws = XLSX.utils.aoa_to_sheet(linhas);
-  ws['!cols'] = [{ wch: 11 }, { wch: 30 }, { wch: 20 }, { wch: 6 },
-    ...Array.from({ length: D }, () => ({ wch: 4.5 })),
-    { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 9 }, { wch: 9 }];
-  // Congela o cabeçalho e as quatro colunas de identificação, como na tela.
-  ws['!freeze'] = { xSplit: 4, ySplit: 4 };
-  ws['!views'] = [{ state: 'frozen', xSplit: 4, ySplit: 4 }];
-  // As faixas de grupo ocupam a linha inteira, como na grade.
-  ws['!merges'] = linhasGrupo.map((r) => ({ s: { r, c: 0 }, e: { r, c: CAB.length - 1 } }));
+  const NC = CAB.length;
+  ws['!cols'] = [{ wch: 11 }, { wch: 32 }, { wch: 17 }, { wch: 28 }, { wch: 6 },
+    { wch: 9 }, { wch: 9 }, { wch: 8 }, { wch: 8 }, { wch: 9 }, { wch: 9 },
+    ...Array.from({ length: D }, () => ({ wch: 5 }))];
+
+  /* Filtro do Excel já ligado no cabeçalho. É a diferença entre abrir o
+     arquivo e usar, ou abrir e primeiro ter que montá-lo. */
+  ws['!autofilter'] = { ref: XLSX.utils.encode_range(
+    { s: { r: 3, c: 0 }, e: { r: linhas.length - 1, c: NC - 1 } }) };
+
+  /* Congela as colunas de identificação e o cabeçalho, como na tela.
+     Onze colunas à esquerda: tudo que diz QUEM é a pessoa fica à vista
+     enquanto se rola pelos 31 dias. */
+  ws['!freeze'] = { xSplit: 11, ySplit: 4 };
+  ws['!views'] = [{ state: 'frozen', xSplit: 11, ySplit: 4 }];
+
+  // Sem mesclagem nenhuma: é o que quebrava filtro e ordenação.
+  delete ws['!merges'];
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Escala');
   XLSX.writeFile(wb, `${ESCALA_TITULO().replace(/\s+/g, '_')}_${base}_${mes}.xlsx`);
-  escalaMsg(`Arquivo baixado: ${colabs.length} pessoa(s) em ${porGrupo.size} grupo(s).`);
+  escalaMsg(`Arquivo baixado: ${colabs.length} pessoa(s) em ${porGrupo.size} grupo(s), com filtro pronto.`);
 }
