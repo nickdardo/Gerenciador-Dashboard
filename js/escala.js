@@ -4043,6 +4043,25 @@ async function escalaAlocarGrupo(grupo) {
   const faltam = Math.max(0, vagas.length - naEscala.length);
   const aTrazer = disponiveis.slice(0, faltam);
 
+  /* Quem sobra precisa de lugar, e o lugar não pode ser arbitrário.
+
+     O horário escolhido é o de MAIOR demanda do próprio grupo — o que a
+     malha pede em maior quantidade. Esse número já saiu da pior semana
+     de voos: é o dimensionamento que o calculou a partir dela. Mandar o
+     excedente para lá reforça o pico em vez de espalhar gente por
+     horários que ninguém pediu. */
+  const sobra = Math.max(0, naEscala.length - vagas.length);
+  let pico = null;
+  if (sobra) {
+    for (const [, h] of malha) {
+      if (!pico || h.pedido > pico.pedido
+          || (h.pedido === pico.pedido
+              && (escalaMinutosDeHora(h.entrada) ?? 0) < (escalaMinutosDeHora(pico.entrada) ?? 0))) {
+        pico = h;
+      }
+    }
+  }
+
   const ok = confirm(
     `ALOCAR ${grupo.toUpperCase()} — ${base} · ${mes}\n\n`
     + `${vagas.length} posição(ões) neste grupo\n`
@@ -4051,7 +4070,13 @@ async function escalaAlocarGrupo(grupo) {
     + (disponiveis.length > aTrazer.length
         ? `\n${disponiveis.length - aTrazer.length} ficam no cadastro: não há posição para elas`
         : '')
+    + (sobra && pico
+        ? `\n\n${sobra} pessoa(s) sobram das posições do arquivo.\n`
+          + `Serão abertas ${sobra} posição(ões) EXTRA das ${pico.entrada} às ${pico.saida},\n`
+          + `que é o horário de maior demanda deste grupo (${pico.pedido} posições).`
+        : '')
     + `\n\nCada pessoa vai para o horário mais próximo do que já faz.\n`
+    + `A saída é a da posição, para a escala bater com o dimensionamento.\n`
     + `Nenhum outro grupo é tocado.\n\nContinuar?`);
   if (!ok) { escalaMsg('Alocação cancelada — nada foi alterado.'); return; }
 
@@ -4069,6 +4094,27 @@ async function escalaAlocarGrupo(grupo) {
       }
       window._escalaColabs = await escalaFetchColaboradores(base, mes, 'created_at');
       escalaMarcarEsvaziada(base, mes, false);
+    }
+
+    /* Abre as extras ANTES de casar, para que elas participem do
+       emparelhamento como qualquer outra posição — e não como remendo
+       aplicado depois, que produziria uma alocação pior. */
+    if (sobra && pico) {
+      const funcao = [...pico.funcoes][0] || grupo;
+      const { error } = await db.from('escala_dimensionamento').insert([{
+        base, mes, setor: ESCALA_SETOR_EXTRA, funcao,
+        entrada: pico.entrada, saida: pico.saida,
+        carga: (pico.jornada || 6) * 30, qtd: sobra,
+        gerado_por: currentUserProfile?.id || currentUser?.id || null,
+      }]);
+      if (error) throw new Error(error.message);
+      window._escalaPosicoesDim = await escalaPaginar(
+        (de, ate) => db.from('escala_dimensionamento').select('*')
+          .eq('base', base).eq('mes', mes).order('entrada').order('funcao').range(de, ate),
+        'escala_dimensionamento');
+      for (let i = 0; i < sobra; i++) {
+        vagas.push({ grupo, jornada: pico.jornada, entrada: pico.entrada, saida: pico.saida });
+      }
     }
 
     const gente = (window._escalaColabs || [])
@@ -4101,9 +4147,17 @@ async function escalaAlocarGrupo(grupo) {
     const semGente = r.porHorario.filter((h) => h.falta > 0);
     const semPosicao = gente.length - comPosicao.size;
     escalaMsg(`${grupo}: ${r.atribuicoes.length} posição(ões) preenchida(s)`
+      + (sobra && pico ? `, ${sobra} em posições extras das ${pico.entrada}` : '')
       + (semGente.length ? `, ${semGente.reduce((n, h) => n + h.falta, 0)} ainda sem gente` : '')
-      + (semPosicao ? `, ${semPosicao} pessoa(s) sem posição` : '') + '.',
-      semGente.length || semPosicao ? 'aviso' : 'ok');
+      + (semPosicao ? `, ${semPosicao} pessoa(s) sem posição` : '')
+      + (r.enxertos.length ? `. ${r.enxertos.length} com jornada diferente da posição — veja no console` : '.'),
+      semGente.length || semPosicao || r.enxertos.length ? 'aviso' : 'ok');
+    if (r.enxertos.length) {
+      console.log([`[escala/${grupo}] jornada diferente da posição (carga mensal a conferir):`,
+        ...r.enxertos.map((e) =>
+          `   ${e.matricula} ${e.nome}: ${e.entrada}–${e.saida} = ${e.jornadaVaga}h na posição, CH de ${e.jornadaPessoa}h/dia`),
+      ].join('\n'));
+    }
     if (semGente.length) {
       console.log([`[escala/${grupo}] horários que não fecham:`,
         ...semGente.map((h) => `   ${h.horario}: pedido ${h.pedido}, atendido ${h.atendido}, faltam ${h.falta}`),
@@ -7904,10 +7958,22 @@ function escalaCasarVagasComPessoas(vagas, colabs, ano, mesNum, diasNoMes) {
     for (let i = 0; i < n; i++) {
       const vaga = v[i], pes = p[i];
       let saida = vaga.saida;
+      /* A SAÍDA é a do dimensionamento, sempre.
+
+         Eu havia decidido o contrário: quando a jornada da pessoa não
+         batia com a da posição, mantinha a entrada da malha e calculava
+         a saída pela CH dela. A intenção era não estourar a carga mensal
+         de quem fosse encaixado — mas o efeito era pôr na escala um
+         horário que o dimensionamento não pede. Uma posição de 06:00 às
+         09:00 virava 06:00 às 12:00 para alguém de CH 180, e a planilha
+         exportada deixava de bater com o arquivo. Era esse o "horário
+         doido".
+
+         A posição manda. A diferença de carga não desaparece por isso —
+         ela passa a ser relatada em vez de silenciosamente compensada,
+         que é onde esse tipo de decisão pertence: à vista de quem
+         responde pela escala. */
       if (pes.jornada && vaga.jornada && pes.jornada !== vaga.jornada) {
-        // Entra na hora que a malha pede; sai pela jornada que a CH dela permite.
-        const ini = escalaMinutosDeHora(vaga.entrada);
-        if (ini !== null) saida = escalaHoraDeMinutos(ini + pes.jornada * 60);
         enxertos.push({
           matricula: pes.matricula, nome: pes.nome, grupo: vaga.grupo,
           entrada: vaga.entrada, saida,

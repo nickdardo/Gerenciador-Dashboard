@@ -407,6 +407,45 @@ const GENTE = [
       await p4.close();
     }
 
+    sec('6e. A saída exportada é a do dimensionamento, não a da CH');
+    {
+      /* Era este o "horário doido". Eu havia decidido que, quando a
+         jornada da pessoa não batia com a da posição, a saída seria
+         calculada pela CH dela — para não estourar a carga mensal de
+         quem fosse encaixado. A intenção era boa e o efeito, péssimo:
+         uma posição de 06:00 às 09:00 virava 06:00 às 12:00 na escala, e
+         a planilha deixava de bater com o arquivo que a originou.
+
+         A posição manda. A diferença de carga continua existindo, mas é
+         relatada em vez de silenciosamente compensada. */
+      const p5 = await browser.newPage();
+      await p5.goto('file://' + tmp, { waitUntil: 'load' });
+      const r = await p5.evaluate(() => {
+        window._escalaBase = 'GRU'; window._escalaMes = '2026-11';
+        window._escalaCenario = 'dimensionada'; currentPage = 'capacity';
+        window.escalaFuncaoGrupoDoColab = () => ({ label: 'Limpeza' });
+        window.escalaEntradaEfetivaDoColab = (c) => c.entrada_manual || '';
+
+        // Posição de 3h; pessoa de CH 180, que é 6h/dia.
+        const vagas = [{ grupo: 'Limpeza', jornada: 3, entrada: '06:00', saida: '09:00' }];
+        const gente = [{ matricula: '1', nome: 'ANA', entrada_manual: '06:00', ch_manual: 180 }];
+        window.eoColabs = new Map([['1', { nome: 'ANA', funcao: 'ASG', ch: 180, station: 'GRU' }]]);
+        const casado = escalaCasarVagasComPessoas(vagas, gente, 2026, 11, 30);
+        return {
+          entrada: casado.atribuicoes[0].entrada,
+          saida: casado.atribuicoes[0].saida,
+          enxertos: casado.enxertos.map((e) => [e.matricula, e.jornadaVaga, e.jornadaPessoa]),
+        };
+      });
+
+      eq(r.entrada, '06:00', 'a entrada é a da posição');
+      eq(r.saida, '09:00',
+        'e a SAÍDA também — não 12:00, que é o que a CH de 6h daria');
+      eq(JSON.stringify(r.enxertos), JSON.stringify([['1', 3, 6]]),
+        'a diferença de jornada é relatada, com a da posição e a da pessoa');
+      await p5.close();
+    }
+
     sec('7. Nenhum erro de script');
     ok(erros.length === 0, 'a página rodou sem exceção' + (erros.length ? ': ' + erros.join(' | ') : ''));
   } finally {

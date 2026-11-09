@@ -1187,8 +1187,20 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaModoColunas: 'essencial
     r4.atribuicoes.length === 3, `${r4.atribuicoes.length} atribuições`);
   ok('a de 7h entra no horário que o dimensionamento pede',
     p1 && p1.entrada === '06:00', p1 && p1.entrada);
-  ok('e sai pela própria CH de 7h, não pelas 6h da posição',
-    p1 && p1.saida === '13:00', p1 && p1.saida);
+  /* A SAÍDA é a da posição, não a da CH da pessoa.
+
+     Esta asserção já disse o contrário, e estava errada. A ideia de
+     calcular a saída pela CH de quem foi encaixado parecia cuidadosa —
+     evitava estourar a carga mensal — mas punha na escala um horário que
+     o dimensionamento não pede: uma posição de 06:00 às 09:00 virava
+     06:00 às 12:00, e a planilha exportada deixava de bater com o
+     arquivo que a originou.
+
+     A diferença de carga continua existindo; ela agora é relatada como
+     enxerto, à vista de quem responde pela escala, em vez de
+     silenciosamente compensada. */
+  ok('e sai no horário da posição, para a escala bater com o dimensionamento',
+    p1 && p1.saida === '12:00', p1 && p1.saida);
   ok('nenhum horário fica descoberto por causa da jornada',
     r4.porHorario.every(h => h.falta === 0));
   ok('o enxerto sai nomeado, para ninguém descobrir depois',
