@@ -94,6 +94,7 @@ function pageGerador(el) {
           <div class="gen3-rp-section">
             <div class="gen3-rp-label">Mês desse dimensionamento</div>
             <select id="gen-mes-select" class="adh-month-select" style="width:100%"></select>
+            <div id="gen-mes-origem" class="gen3-mes-origem"></div>
           </div>
 
           <div class="gen3-actions">
@@ -356,13 +357,35 @@ function genRenderMesSelect() {
   if (!sel) return;
   const hoje = new Date();
   const opts = [];
-  for (let i = 0; i < 4; i++) {
+  for (let i = -2; i < 4; i++) {
     const d = new Date(hoje.getFullYear(), hoje.getMonth()+i, 1);
     opts.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
   }
-  const atual = opts[0];
-  const padrao = window._genMesEscolhido && opts.includes(window._genMesEscolhido) ? window._genMesEscolhido : opts[1];
-  sel.innerHTML = opts.map(m => `<option value="${m}" ${m===padrao?'selected':''}>${typeof adhMonthLabel==='function'?adhMonthLabel(m):m}${m===atual?' (atual)':''}</option>`).join('');
+  const atual = `${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}`;
+
+  /* O mês lido do ARQUIVO manda. Ele não é um palpite como "próximo
+     mês": é o que está escrito em "Período" na planilha que a pessoa
+     acabou de subir. Se o arquivo não disser, aí sim vale o padrão. */
+  const detectado = (typeof gMesDetectado !== 'undefined' && gMesDetectado) || null;
+  if (detectado && !opts.includes(detectado)) opts.push(detectado);
+  opts.sort();
+
+  const padrao = detectado
+    || (window._genMesEscolhido && opts.includes(window._genMesEscolhido) ? window._genMesEscolhido : null)
+    || opts[opts.indexOf(atual) + 1] || atual;
+
+  sel.innerHTML = opts.map(m => `<option value="${m}" ${m===padrao?'selected':''}>${typeof adhMonthLabel==='function'?adhMonthLabel(m):m}${m===atual?' (atual)':''}${m===detectado?' · do arquivo':''}</option>`).join('');
+
+  /* Dizer de onde veio o mês. Um seletor já preenchido não distingue
+     "detectei isto no arquivo" de "este é o padrão" — e foi essa
+     diferença que custou caro. */
+  const aviso = document.getElementById('gen-mes-origem');
+  if (aviso) {
+    aviso.textContent = detectado
+      ? `Mês lido do arquivo (campo "Período").`
+      : `O arquivo não traz o período — confira o mês antes de gerar.`;
+    aviso.className = detectado ? 'gen3-mes-origem ok' : 'gen3-mes-origem alerta';
+  }
 }
 
 // ── History ───────────────────────────────────────────

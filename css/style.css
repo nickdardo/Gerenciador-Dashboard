@@ -4451,3 +4451,16 @@ body.escala-modo-grade .escala-fill { margin-top: 0; }
   :root:not([data-theme="light"]) .escala-chip-residuo { border-color: #fc8181; color: #fc8181; }
   :root:not([data-theme="light"]) .escala-chip-residuo .n { background: #8a1f1f; }
 }
+
+/* De onde veio o mês do dimensionamento. Um seletor já preenchido não
+   distingue "li isto no arquivo" de "este é o padrão" — e foi essa
+   diferença que fez um arquivo de novembro ser salvo como dezembro. */
+.gen3-mes-origem { font-size: 10px; margin-top: 4px; line-height: 1.4; }
+.gen3-mes-origem.ok { color: #1a6b41; }
+.gen3-mes-origem.alerta { color: #8a5f12; }
+[data-theme="dark"] .gen3-mes-origem.ok { color: #72c02c; }
+[data-theme="dark"] .gen3-mes-origem.alerta { color: #f0c870; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .gen3-mes-origem.ok { color: #72c02c; }
+  :root:not([data-theme="light"]) .gen3-mes-origem.alerta { color: #f0c870; }
+}

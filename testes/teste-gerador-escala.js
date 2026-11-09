@@ -51,12 +51,15 @@ window.navigateTo = (p) => { window.__navegou = p; };
 window.genSetStatus = () => {};
 window.currentUserProfile = { id: 'u1' };
 window.currentUser = { id: 'u1' };
+window.gMesDetectado = null;
+window.adhMonthLabel = (m) => m;
 `;
 
 (async () => {
   const tmp = path.join(BASE, 'testes', '.gerador.html');
   fs.writeFileSync(tmp, `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"></head><body>
 <select id="gen-mes-select"><option value="2026-11">Novembro</option><option value="2026-12" selected>Dezembro</option></select>
+<div id="gen-mes-origem"></div>
 <script>${AMBIENTE}<\/script>
 <script src="file://${path.join(BASE, 'js', 'pages.js')}"><\/script></body></html>`);
 
@@ -119,6 +122,37 @@ window.currentUser = { id: 'u1' };
       eq(r.gravado.length, 2, 'duas combinações de função+horário');
       const asg = r.gravado.find((l) => l[2] === 'ASG LIMPEZA I');
       eq(asg && asg[3], 2, 'com a quantidade somada por combinação, não uma linha por posição');
+    }
+
+    sec('1b. O mês detectado no arquivo manda sobre o padrão do seletor');
+    {
+      /* O padrão era "próximo mês". Em novembro, dezembro — e um arquivo
+         de novembro ia parar em dezembro sem ninguém notar, porque o
+         seletor aparecia preenchido e preenchido parece conferido. */
+      const r = await page.evaluate(() => {
+        gMesDetectado = '2026-11';
+        window._genMesEscolhido = null;
+        genRenderMesSelect();
+        const sel = document.getElementById('gen-mes-select');
+        return {
+          valor: sel.value,
+          rotulo: [...sel.options].find((o) => o.selected)?.textContent.trim(),
+          aviso: document.getElementById('gen-mes-origem')?.textContent || '',
+        };
+      });
+      eq(r.valor, '2026-11', 'o seletor abre no mês lido do arquivo');
+      ok(/do arquivo/.test(r.rotulo || ''), 'a opção diz que veio do arquivo: ' + r.rotulo);
+      ok(/Período/.test(r.aviso), 'e o aviso nomeia o campo de onde saiu: ' + r.aviso);
+
+      /* Sem detecção, o aviso tem de ser DIFERENTE — senão "preenchido"
+         continua significando duas coisas. */
+      const sem = await page.evaluate(() => {
+        gMesDetectado = null;
+        genRenderMesSelect();
+        return document.getElementById('gen-mes-origem')?.textContent || '';
+      });
+      ok(/não traz o período/.test(sem) && /confira/.test(sem),
+        'sem período no arquivo, pede conferência em vez de fingir certeza: ' + sem);
     }
 
     sec('2. Sem mês escolhido, não inventa um');

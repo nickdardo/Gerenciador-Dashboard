@@ -7,6 +7,7 @@
 let gFile = null;
 let gRows = [];
 let gBase = null;
+let gMesDetectado = null;   // mês lido do arquivo; manda sobre o padrão do seletor
 
 // ── Wire up drop zone ─────────────────────────────────
 setupDrop('g-drop', 'g-file', file => {
@@ -39,6 +40,10 @@ function gGenerate() {
       try {
         gBase = detectBase(wb) || gBase;
         setBaseBadge(gBase);
+        /* O mês vem do próprio arquivo. Deixar o seletor no padrão
+           "próximo mês" fazia um dimensionamento de novembro ser salvo
+           como dezembro, e o erro só aparecia depois, na escala. */
+        gMesDetectado = (typeof detectMes === 'function' ? detectMes(wb) : null) || null;
         gRows = gParse(wb);
         gRender(gRows);
       } catch (e) {

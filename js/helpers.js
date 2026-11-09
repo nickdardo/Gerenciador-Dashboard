@@ -118,6 +118,89 @@ function setBaseBadge(base) {
  *             return its first data value.
  * Returns string like "GRU" or null if not found.
  */
+/* ══════════════════════════════════════════════════════
+   O mês do dimensionamento está dentro do arquivo
+
+   O Gerador pedia o mês num seletor cujo padrão era o PRÓXIMO mês. Em
+   novembro, isso significa dezembro — então um arquivo de novembro era
+   salvo como dezembro, e a Escala Capacity de novembro ficava sem malha
+   enquanto a de dezembro recebia horários que ninguém pediu. O sintoma
+   aparecia longe da causa: horários "que não existem no dimensionamento".
+
+   O arquivo sempre soube a resposta. Ele traz "Período" com a primeira
+   data do mês e, logo abaixo, "pior semana" no formato 2026-11 {24 a 30}.
+   Lemos os dois, na mesma região de cabeçalho que detectBase já varre.
+
+   O sistema de datas de 1904 é conferido: nesse sistema as seriais ficam
+   1462 dias à frente, e um arquivo feito no Excel para Mac devolveria o
+   mês errado sem dar nenhum sinal.
+   ══════════════════════════════════════════════════════ */
+function detectMes(wb) {
+  if (!wb) return null;
+  const d1904 = !!(wb.Workbook && wb.Workbook.WBProps && wb.Workbook.WBProps.date1904);
+
+  const deSerial = (n) => {
+    if (!(n > 20000 && n < 80000)) return null;   // fora disso não é data
+    /* Arredonda para o DIA inteiro antes de converter. Uma data gravada
+       como 1º do mês às 00:00 em fuso negativo vira serial fracionário
+       (…,875) e, convertida direto, cai no último dia do mês anterior —
+       e "Período" é justamente o primeiro dia do mês, o valor mais
+       provável de aparecer aqui. */
+    const dias = Math.round(n + (d1904 ? 1462 : 0) - 25569);
+    const d = new Date(dias * 86400000);
+    if (isNaN(d.getTime())) return null;
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+  };
+
+  const deTexto = (t) => {
+    const s = String(t);
+    let m = s.match(/(\d{4})-(\d{1,2})\b/);                 // 2026-11 {24 a 30}
+    if (m) return `${m[1]}-${String(+m[2]).padStart(2, '0')}`;
+    m = s.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/);      // 01/11/2026
+    if (m) return `${m[3]}-${String(+m[2]).padStart(2, '0')}`;
+    return null;
+  };
+
+  const valor = (cel) => {
+    if (cel instanceof Date && !isNaN(cel.getTime())) {
+      return `${cel.getFullYear()}-${String(cel.getMonth() + 1).padStart(2, '0')}`;
+    }
+    if (typeof cel === 'number') return deSerial(cel);
+    if (typeof cel === 'string' && cel.trim()) return deTexto(cel);
+    return null;
+  };
+
+  // "Período" é a fonte preferida; "pior semana" confirma e serve de reserva.
+  const rotulos = [/^per[ií]odo$/i, /pior\s+semana/i, /^m[eê]s$/i];
+
+  for (const rot of rotulos) {
+    for (const sheetName of wb.SheetNames) {
+      const ws = wb.Sheets[sheetName];
+      let data;
+      try { data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, range: 0 }); }
+      catch (_) { continue; }
+      for (let ri = 0; ri <= Math.min(14, data.length - 1); ri++) {
+        const row = data[ri];
+        if (!row) continue;
+        for (let ci = 0; ci < Math.min(row.length, 12); ci++) {
+          const cel = row[ci];
+          if (typeof cel !== 'string' || !rot.test(cel.trim())) continue;
+          /* O valor costuma estar na célula ao lado, mas a planilha usa
+             células mescladas e linhas de rótulo alto — por isso olha
+             também as duas seguintes e a linha de baixo. */
+          const candidatos = [row[ci + 1], row[ci + 2], row[ci + 3],
+                              (data[ri + 1] || [])[ci + 1]];
+          for (const c of candidatos) {
+            const m = valor(c);
+            if (m) return m;
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
 function detectBase(wb) {
   if (!wb) return null;
 
