@@ -4337,3 +4337,32 @@ body.escala-modo-grade .escala-fill { margin-top: 0; }
   :root:not([data-theme="light"]) .escala-enx-grupo .qtd.difere { color: #f0c870; }
   :root:not([data-theme="light"]) .escala-enx-grupo .qtd.vazias { color: #fc8181; }
 }
+
+/* Convite para alocar, na Capacity ainda sem gente. Fica acima da malha
+   porque é a resposta à pergunta que a tela provoca: "e as pessoas?". */
+.escala-enx-convite {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--blue, #00a0d2) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--blue, #00a0d2) 28%, transparent);
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+/* Pessoa na escala sem posição na malha. Marcada pela borda à esquerda,
+   não só por cor de fundo: é informação, e informação precisa sobreviver
+   a uma impressão em preto e branco. */
+.escala-enx-sem-posicao td:first-child { box-shadow: inset 3px 0 0 #c08a2a; }
+.escala-enx-sem-posicao .hora { color: #704d0c; font-style: italic; }
+[data-theme="dark"] .escala-enx-sem-posicao td:first-child { box-shadow: inset 3px 0 0 #e0b357; }
+[data-theme="dark"] .escala-enx-sem-posicao .hora { color: #f0c870; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .escala-enx-sem-posicao td:first-child { box-shadow: inset 3px 0 0 #e0b357; }
+  :root:not([data-theme="light"]) .escala-enx-sem-posicao .hora { color: #f0c870; }
+}

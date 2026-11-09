@@ -835,6 +835,75 @@ function paginaDeTeste() {
         'e as posições continuam todas lá, só em outro grupo');
     }
 
+    sec('8m. Alocar staff é um ato só, e os dois excessos aparecem');
+    {
+      /* Eram dois passos e duas confirmações: trazer a base, depois casar
+         os horários. Entre um e outro a Capacity ficava num estado que
+         não serve para nada — gente dentro, horário nenhum — e quem
+         parava ali achava que o painel tinha feito metade do serviço.
+
+         E os dois excessos são a mesma resposta vista de lados opostos:
+         posição sem gente é contratação; gente sem posição é alguém que
+         a malha não pediu. Os dois precisam aparecer. */
+      const r = await page.evaluate(() => {
+        window._escalaBase = 'GRU'; window._escalaMes = '2026-11';
+        window._escalaCenario = 'dimensionada';
+        window._escalaDias = new Map(); window._escalaFeriados = new Map();
+        window._escalaGruposVisiveis = null; window._escalaOrdemColuna = null;
+        window.escalaAplicarFiltroSituacao = (l) => l;
+        window.escalaEntradaEfetivaDoColab = (c) => c.entrada_manual || '';
+        window.escalaFuncaoGrupoDoColab = () => ({ label: 'Limpeza' });
+        window.escalaCarregarMapaDim = () => ({ 'ASG LIMPEZA I': 'Limpeza' });
+        // A malha pede 2 posições às 07:00.
+        window._escalaPosicoesDim = [
+          { funcao: 'ASG LIMPEZA I', entrada: '07:00', saida: '13:00', carga: 180, qtd: 2 },
+        ];
+        // Três pessoas: duas casadas, uma que a malha não pediu.
+        window._escalaColabs = [
+          { matricula: '1', nome: 'ANA', ch_manual: 180, entrada_manual: '07:00' },
+          { matricula: '2', nome: 'BIA', ch_manual: 180, entrada_manual: '07:00' },
+          { matricula: '3', nome: 'CAIO', ch_manual: 180, entrada_manual: null },
+        ];
+        window.eoColabs = new Map(window._escalaColabs.map((c) =>
+          [c.matricula, { nome: c.nome, funcao: 'ASG LIMPEZA I', ch: 180, station: 'GRU' }]));
+        return escalaGradeEnxutaHTML(2026, 11, 30);
+      });
+
+      ok(/escala-enx-sem-posicao/.test(r),
+        'quem ficou sem posição é marcado na linha, não some nem vira "--:--" sem explicação');
+      ok(/não recebeu posição no dimensionamento/.test(r),
+        'com o motivo dito por extenso ao passar o cursor');
+      ok(!/escala-enx-vaga/.test(r),
+        'e, com as 2 posições cobertas, não sobra vaga em branco');
+      ok(/2 horários dimensionados/.test(r) && /3 pessoas/.test(r),
+        'a faixa mostra os dois números, e é por eles que se vê o excesso');
+      ok(/class="qtd difere"/.test(r),
+        'marcando que eles não batem');
+    }
+
+    sec('8n. O convite para alocar aparece onde a pessoa está olhando');
+    {
+      const r = await page.evaluate(() => {
+        window._escalaCenario = 'dimensionada';
+        window._escalaColabs = []; window.eoColabs = new Map();
+        window._escalaPosicoesDim = [
+          { funcao: 'ASG LIMPEZA I', entrada: '07:00', saida: '13:00', carga: 180, qtd: 2 },
+        ];
+        window.escalaCarregarMapaDim = () => ({ 'ASG LIMPEZA I': 'Limpeza' });
+        const comMalha = escalaGradeEnxutaHTML(2026, 11, 30);
+        window._escalaColabs = [{ matricula: '1', nome: 'ANA', entrada_manual: '07:00' }];
+        window.eoColabs = new Map([['1', { nome: 'ANA', funcao: 'ASG LIMPEZA I', ch: 180, station: 'GRU' }]]);
+        const comGente = escalaGradeEnxutaHTML(2026, 11, 30);
+        return { comMalha, comGente };
+      });
+      ok(/escala-enx-convite/.test(r.comMalha),
+        'malha desenhada e ninguém dentro: o convite para alocar aparece');
+      ok(/escalaAlocarStaffNosHorarios\(\)/.test(r.comMalha),
+        'levando ao ato inteiro, não ao meio dele');
+      ok(!/escala-enx-convite/.test(r.comGente),
+        'com gente alocada, o convite sai da frente');
+    }
+
     sec('9. Nenhum erro de script');
     ok(erros.length === 0, 'a página carregou sem exceção' + (erros.length ? ': ' + erros.join(' | ') : ''));
   } finally {

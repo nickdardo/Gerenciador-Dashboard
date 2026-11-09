@@ -857,7 +857,13 @@ async function escalaRenderGrade(el) {
      naquele momento, em vez de um erro pedindo "Preencher com Staff". */
   if (window._escalaAplicarDimAoAbrir && escalaEhCapacity()) {
     window._escalaAplicarDimAoAbrir = false;
-    if (colabs.length) setTimeout(() => escalaAplicarDimensionamento(true), 0);
+    /* Vindo do Gerador com a escala vazia, o ato é alocar — trazer o
+       efetivo E casar os horários. Só aplicar, como antes, parava no
+       aviso "use Preencher com Staff primeiro", que é mandar a pessoa
+       fazer à mão o passo que o botão existia para fazer. */
+    setTimeout(() => (colabs.length
+      ? escalaAplicarDimensionamento(true)
+      : escalaAlocarStaffNosHorarios()), 0);
   }
   window._escalaDias = new Map((dias||[]).map(d => [`${d.matricula}|${d.dia}`, d]));
 
@@ -1032,6 +1038,11 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
         </div>
 
         <button class="adh-refresh-btn" ${dis} style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600" onclick="escalaGerarFolgasAuto()">${escalaIcone('zap')}Gerar folgas automáticas</button>
+        ${escalaEhCapacity()
+          ? `<button class="adh-refresh-btn" ${dis} onclick="escalaAlocarStaffNosHorarios()"
+               style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600"
+               title="Traz o efetivo da base e aloca cada pessoa no horário mais próximo do que o dimensionamento pede, de uma vez"
+               >${escalaIcone('userPlus')}Alocar staff nos horários</button>` : ''}
         <button class="adh-refresh-btn" ${dis} onclick="escalaPreencherTodoStaff()">${escalaIcone('users')}Preencher com Staff</button>
         <button class="adh-refresh-btn" ${dis} onclick="escalaPreencherHorarioMesAnterior()">${escalaIcone('calclock')}Horário do mês anterior</button>
         ${escalaCenario() !== 'planejada' ? `
@@ -2791,6 +2802,15 @@ function escalaGradeEnxutaHTML(ano, mesNum, diasNoMes) {
      existe nesse momento — diz exatamente quantas pessoas, e em que
      horários, faltam. Sair aqui escondia justamente isso. */
   const temMalha = escalaEhCapacity() && escalaMalhaDoDimensionamento().size > 0;
+  // Capacity com malha e sem ninguém: a grade desenha as posições, e o
+  // convite para alocar fica onde a pessoa está olhando.
+  const convite = temMalha && !colabs.length
+    ? `<div class="escala-enx-convite">
+         <span>Nenhum colaborador alocado ainda. As posições abaixo são as que o dimensionamento pede.</span>
+         <button type="button" class="adh-refresh-btn" onclick="escalaAlocarStaffNosHorarios()"
+           style="background:var(--blue);color:#0b0f1a;border:none;font-weight:600"
+           >${escalaIcone('userPlus')}Alocar staff nos horários</button>
+       </div>` : '';
   if (!colabs.length && !temMalha) {
     /* Se foi esvaziada de propósito, a tela diz isso. Senão, a pessoa que
        limpou e recarregou fica sem saber se funcionou ou se quebrou. */
@@ -2863,7 +2883,7 @@ function escalaGradeEnxutaHTML(ano, mesNum, diasNoMes) {
 
      O número de dias vai num custom property porque é ele que define a
      largura mínima da tabela, e o mês tem 28, 29, 30 ou 31. */
-  let html = `<table class="escala-enx" style="--enx-dias:${diasNoMes}">
+  let html = convite + `<table class="escala-enx" style="--enx-dias:${diasNoMes}">
     <colgroup>
       <col class="c-mat"><col class="c-nome"><col class="c-fn"><col class="c-ch">
       ${'<col class="c-dia">'.repeat(diasNoMes)}
@@ -2938,7 +2958,12 @@ function escalaGradeEnxutaHTML(ano, mesNum, diasNoMes) {
       const seqOk = r.maxSequencia <= 6;
       const domOk = r.domingos === 1;
 
-      html += `<tr class="${i++ % 2 ? 'escala-zebra' : ''}" data-escala-linha="${c.matricula}">
+      /* Na Capacity, pessoa sem horário é pessoa sem posição na malha —
+         não é dado faltando. A linha diz isso, senão o "--:--" parece
+         erro de carregamento e alguém vai tentar "consertar". */
+      const semPosicao = capacity && !entrada;
+      html += `<tr class="${i++ % 2 ? 'escala-zebra' : ''}${semPosicao ? ' escala-enx-sem-posicao' : ''}"
+        data-escala-linha="${c.matricula}"${semPosicao ? ' title="Esta pessoa não recebeu posição no dimensionamento"' : ''}>
         <td class="escala-enx-fix col-mat mat" style="border:${BORDA}"><span
           class="escala-mat-edit" contenteditable="true" spellcheck="false"
           data-mat="${escalaEscapeAttr(c.matricula)}"
@@ -3710,7 +3735,7 @@ function escalaLoadingAtualiza(feito, total) {
 // mesmo filtro de "escala revezada" já combinado (fora Gerente/Coordenador/
 // Administrativo/Especialista/Analista/ADM, que continuam podendo ser
 // adicionados manualmente). Não duplica quem já está na lista.
-async function escalaPreencherTodoStaff() {
+async function escalaPreencherTodoStaff(semPerguntar) {
   if (escalaVerificarTravada()) return;
   const base = window._escalaBase;
   if (!window.eoColabs?.size) { escalaMsg('Cadastro de colaboradores ainda não carregado.', true); return; }
@@ -3725,9 +3750,12 @@ async function escalaPreencherTodoStaff() {
 
   const jaNaLista = new Set((window._escalaColabs||[]).map(c => c.matricula));
   const novos = candidatos.filter(c => !jaNaLista.has(c.matricula));
-  if (!novos.length) { escalaMsg('Todo mundo já está nessa escala.'); return; }
+  if (!novos.length) { if (!semPerguntar) escalaMsg('Todo mundo já está nessa escala.'); return; }
 
-  if (!confirm(`Preencher a escala de ${base} com todo o efetivo ativo (${novos.length} colaborador${novos.length===1?'':'es'})? Você poderá remover quem não for necessário depois.`)) return;
+  // Como etapa de "Alocar staff nos horários", a pergunta já foi feita
+  // uma vez, pelo ato inteiro. Perguntar de novo aqui seria duas.
+  if (!semPerguntar
+      && !confirm(`Preencher a escala de ${base} com todo o efetivo ativo (${novos.length} colaborador${novos.length===1?'':'es'})? Você poderá remover quem não for necessário depois.`)) return;
 
   escalaMostrarLoading(`Preenchendo ${novos.length} colaborador${novos.length===1?'':'es'}...`);
 
@@ -3745,7 +3773,65 @@ async function escalaPreencherTodoStaff() {
   window._escalaColabs = await escalaFetchColaboradores(base, window._escalaMes, 'created_at');
   escalaMarcarEsvaziada(base, window._escalaMes, false);
   escalaGradeAtualiza();
-  escalaMsg(`${novos.length} colaborador${novos.length===1?'':'es'} adicionado${novos.length===1?'':'s'} — organizados por função e horário de entrada.`);
+  if (!semPerguntar) {
+    escalaMsg(`${novos.length} colaborador${novos.length===1?'':'es'} adicionado${novos.length===1?'':'s'} — organizados por função e horário de entrada.`);
+  }
+  return novos.length;
+}
+
+/* ══════════════════════════════════════════════════════
+   Alocar staff nos horários — o ato inteiro, de uma vez
+
+   Eram dois passos e duas confirmações: "Preencher com Staff" trazia a
+   base e "Aplicar horário Dimensionamento" casava os horários. Entre um
+   e outro a Capacity ficava num estado que não serve para nada — gente
+   dentro, horário nenhum — e quem parava ali achava que o painel tinha
+   feito só metade do serviço.
+
+   São um ato só porque é uma decisão só: encher a malha com quem existe.
+   O cruzamento é por horário mais próximo, o que sobra de posição fica
+   em branco à espera de contratação, e o que sobra de gente fica sem
+   posição — os dois aparecem, porque os dois são a mesma resposta vista
+   de lados opostos.
+   ══════════════════════════════════════════════════════ */
+async function escalaAlocarStaffNosHorarios() {
+  if (!escalaEhCapacity()) {
+    escalaMsg('Esta alocação é da Escala Capacity — os horários vêm do dimensionamento.', true);
+    return;
+  }
+  if (escalaVerificarTravada()) return;
+
+  const malha = escalaMalhaDoDimensionamento();
+  if (!malha.size) {
+    escalaMsg('Não há dimensionamento carregado para este mês. Suba o arquivo no Gerador primeiro.', true);
+    return;
+  }
+  let posicoes = 0;
+  for (const [, g] of malha) for (const [, h] of g) posicoes += h.pedido;
+
+  const base = window._escalaBase;
+  const naEscala = new Set((window._escalaColabs || []).map((c) => c.matricula));
+  let aTrazer = 0;
+  for (const [mat, r] of (window.eoColabs || new Map())) {
+    if (String(r.station || '').toUpperCase() !== String(base || '').toUpperCase()) continue;
+    if (typeof hcIsDesligado === 'function' && hcIsDesligado(mat)) continue;
+    if (!naEscala.has(mat)) aTrazer++;
+  }
+
+  const ok = confirm(
+    `ALOCAR STAFF NOS HORÁRIOS — ${base} · ${window._escalaMes}\n\n`
+    + `${posicoes} posição(ões) no dimensionamento\n`
+    + `${naEscala.size} pessoa(s) já na escala`
+    + (aTrazer ? `\n${aTrazer} pessoa(s) do efetivo ainda fora, que serão trazidas` : '')
+    + `\n\nCada pessoa vai para o horário mais próximo do que ela já faz.\n`
+    + `Posição sem gente fica em branco; gente sem posição fica sem horário.\n\n`
+    + `Continuar?`);
+  if (!ok) { escalaMsg('Alocação cancelada — nada foi alterado.'); return; }
+
+  if (aTrazer) await escalaPreencherTodoStaff(true);
+  escalaMarcarEsvaziada(base, window._escalaMes, false);
+  // O casamento e o relatório horário a horário já vivem aqui.
+  await escalaAplicarDimensionamento(true);
 }
 
 /* A decisão de repovoar, isolada para poder ser conferida sozinha. */
