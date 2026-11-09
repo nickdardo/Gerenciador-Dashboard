@@ -788,6 +788,23 @@ async function escalaRenderGrade(el) {
   // anterior a consultar.
   await escalaCarregarHistoricoFA();
 
+  /* As posições do dimensionamento, carregadas AQUI.
+
+     Estavam sendo lidas só em escalaRenderDash — o dashboard —, que é
+     outra função e outro caminho. A grade nunca passa por lá, então
+     _escalaPosicoesDim chegava vazio e a Capacity desenhava "nenhum
+     colaborador" em cima de um dimensionamento que existia no banco.
+     Quem abrisse o dashboard antes via a malha; quem fosse direto do
+     Gerador, não — e o sintoma dependia do caminho percorrido, que é o
+     tipo de bug que não se reproduz contando o que se fez.
+
+     A Base também carrega: é barato, e o Comparador lê deste mesmo
+     lugar. */
+  window._escalaPosicoesDim = await escalaPaginar(
+    (de, ate) => db.from('escala_dimensionamento').select('*')
+      .eq('base', base).eq('mes', mes).order('entrada').order('funcao').range(de, ate),
+    'escala_dimensionamento');
+
   // Veio do Gerador clicando em "Escala Online": aplica os horários assim
   // que a grade abrir, sem exigir um segundo clique num menu.
   escalaAtualizarBotaoComparar();

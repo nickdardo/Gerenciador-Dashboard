@@ -1003,6 +1003,45 @@ function paginaDeTeste() {
         'e na Capacity o caminho é alocar na malha');
     }
 
+    sec('8r. Quem desenha a grade carrega o dimensionamento');
+    {
+      /* O bug mais escorregadio desta série: a leitura das posições
+         estava em escalaRenderDash — o DASHBOARD —, e a grade é desenhada
+         por escalaRenderGrade. São funções e caminhos diferentes.
+
+         _escalaPosicoesDim chegava vazio e a Capacity escrevia "nenhum
+         colaborador" em cima de um dimensionamento que existia no banco.
+         Quem abrisse o dashboard antes via a malha; quem fosse direto do
+         Gerador, não. O sintoma dependia do caminho percorrido, que é o
+         tipo de defeito que não se reproduz contando o que se fez — por
+         isso a guarda é sobre QUEM carrega, não sobre o resultado. */
+      const fonte = fs.readFileSync(path.join(BASE, 'js', 'escala.js'), 'utf8');
+      const corpo = (nome) => {
+        const i = fonte.indexOf(`async function ${nome}(`);
+        if (i < 0) return '';
+        // Até a próxima função de topo de arquivo.
+        const j = fonte.indexOf('\nasync function ', i + 10);
+        const k = fonte.indexOf('\nfunction ', i + 10);
+        const fim = Math.min(j < 0 ? fonte.length : j, k < 0 ? fonte.length : k);
+        return fonte.slice(i, fim);
+      };
+
+      const grade = corpo('escalaRenderGrade');
+      ok(grade.length > 0, 'escalaRenderGrade existe e foi localizada');
+      ok(/_escalaPosicoesDim\s*=/.test(grade),
+        'ela carrega as posições do dimensionamento, em vez de contar com outra tela');
+      ok(/escala_dimensionamento/.test(grade),
+        'lendo a tabela diretamente');
+      ok(grade.indexOf('_escalaPosicoesDim') < grade.indexOf('escalaGradeHTML')
+         || grade.indexOf('escalaGradeHTML') < 0,
+        'e carrega antes de montar o HTML, não depois');
+
+      /* E a leitura é paginada: 1.000 posições num mês grande não é
+         hipótese remota, e o corte do PostgREST é silencioso. */
+      ok(/escalaPaginar\([\s\S]{0,300}escala_dimensionamento/.test(grade),
+        'a leitura é paginada, como toda tabela que pode passar de mil linhas');
+    }
+
     sec('9. Nenhum erro de script');
     ok(erros.length === 0, 'a página carregou sem exceção' + (erros.length ? ': ' + erros.join(' | ') : ''));
   } finally {
