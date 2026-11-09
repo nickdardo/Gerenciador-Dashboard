@@ -267,13 +267,47 @@ async function escalaFetchMalha(base, mesInicioStr, mesFimStr, campos) {
    linha e omitir outra. */
 async function escalaPaginar(consulta, rotulo) {
   const PAGE = 1000;
-  const todas = [];
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await consulta(from, from + PAGE - 1);
-    if (error) { console.warn(`[escala] ${rotulo}:`, error.message); break; }
-    if (!data || !data.length) break;
-    todas.push(...data);
-    if (data.length < PAGE) break;
+  const MAX_ONDA = 6;   // o mesmo teto que o Admin já usa para não afogar o banco
+
+  /* A primeira página vai sozinha. A maioria das escalas cabe nela, e
+     nesse caso não se paga nada além do que se pagava antes. */
+  const primeira = await consulta(0, PAGE - 1);
+  if (primeira.error) { console.warn(`[escala] ${rotulo}:`, primeira.error.message); return []; }
+  const todas = [...(primeira.data || [])];
+  if (todas.length < PAGE) return todas;
+
+  /* Veio cheia: há mais. Daqui em diante as páginas vão em ondas
+     paralelas, dobrando até seis.
+
+     Uma de cada vez, o mês de 1.500 pessoas custa 47 idas ao servidor
+     esperando uma pela outra — alguns segundos de tela parada. As ondas
+     levam isso a cerca de dez. E dobrar em vez de já começar com seis
+     evita o contrário: pedir seis páginas para uma base que só tinha
+     mais duzentas linhas.
+
+     Não dá para contar antes e dividir o trabalho: contar primeiro
+     reabre a janela em que uma gravação no meio da leitura some. Parar
+     quando a onda vem incompleta não tem esse buraco. */
+  /* Laço `while`, e não `for`: num for, o incremento roda DEPOIS do
+     corpo e usaria a onda já dobrada, pulando as páginas do meio. Aqui
+     `from` anda exatamente o que a onda leu, e só então ela cresce. */
+  let onda = 1;
+  let from = PAGE;
+  while (true) {
+    const pedidos = [];
+    for (let i = 0; i < onda; i++) {
+      pedidos.push(consulta(from + i * PAGE, from + (i + 1) * PAGE - 1));
+    }
+    const respostas = await Promise.all(pedidos);
+    let fim = false;
+    for (const r of respostas) {
+      if (r.error) { console.warn(`[escala] ${rotulo}:`, r.error.message); fim = true; break; }
+      if (r.data && r.data.length) todas.push(...r.data);
+      if (!r.data || r.data.length < PAGE) fim = true;
+    }
+    if (fim) break;
+    from += onda * PAGE;
+    onda = Math.min(MAX_ONDA, onda * 2);
   }
   return todas;
 }

@@ -31,6 +31,8 @@ const sec = (t) => console.log('\n\x1b[36m── ' + t + '\x1b[0m');
    range, registra o que foi pedido e jamais devolve erro por corte. */
 const BANCO = `
 window.__consultas = [];
+window.__idas = 0;
+window.__vivos = 0;
 window.__linhas = {};
 window.db = {
   from(tabela) {
@@ -42,10 +44,17 @@ window.db = {
       range(de, ate) {
         q.faixa = [de, ate];
         window.__consultas.push(JSON.parse(JSON.stringify(q)));
+        /* Pedidos disparados juntos custam UMA espera, não várias: é
+           disso que trata a onda. O contador separa as duas coisas. */
+        if (window.__vivos === 0) window.__idas++;
+        window.__vivos++;
         const todas = window.__linhas[tabela] || [];
         const TETO = 1000;                       // o corte do PostgREST
         const fim = Math.min(ate, de + TETO - 1);
-        return Promise.resolve({ data: todas.slice(de, fim + 1), error: null });
+        return new Promise((r) => setTimeout(() => {
+          window.__vivos--;
+          r({ data: todas.slice(de, fim + 1), error: null });
+        }, 0));
       },
       then(res) {
         // Consulta SEM range: é aqui que o corte mordia.
@@ -73,6 +82,7 @@ window.db = {
 
   const semear = (tabela, n, molde) => page.evaluate(([t, qtd, m]) => {
     window.__consultas = [];
+    window.__idas = 0;
     window.__linhas[t] = Array.from({ length: qtd }, (_, i) => {
       const linha = {};
       for (const k of Object.keys(m)) linha[k] = m[k] === '#' ? String(1000 + i) : m[k];
@@ -95,6 +105,9 @@ window.db = {
       eq(r.n, 1200, 'a lista inteira volta, não só os primeiros mil');
       eq(r.unicos, 1200, 'e sem linha repetida entre as páginas');
       eq(r.consultas, 2, 'em duas páginas — 1.000 e depois 200');
+      /* A primeira página vai sozinha, e a onda só dobra depois de vir
+         cheia. Sem isso, uma base com 1.200 pediria seis páginas para
+         buscar duzentas linhas. */
     }
 
     sec('2. A paginação para quando a página vem curta');
@@ -157,13 +170,49 @@ window.db = {
          gráfico saía parecendo certo. */
       await semear('escala_dia', 36000, { matricula: '#', dia: 1, status: 'F' });
       const r = await page.evaluate(async () => {
+        window.__idas = 0;
         const d = await escalaFetchDias('GRU', '2026-11');
-        return { n: d.length, consultas: window.__consultas.length };
+        return { n: d.length, consultas: window.__consultas.length,
+                 ondas: window.__idas, mats: d.map((x) => x.matricula) };
       });
       eq(r.n, 36000, 'as 36 mil marcações voltam inteiras');
-      // 36.000 é múltiplo exato de 1.000: a 37ª página é a vazia que
-      // prova o fim, pela mesma regra da seção 2.
-      eq(r.consultas, 37, 'em 36 páginas cheias mais a que confirma o fim');
+      /* A prova de que as ondas não deixam buraco nem repetem: cada
+         linha semeada tem matrícula própria, então o conjunto tem de ter
+         o mesmo tamanho da lista, e a primeira e a última têm de estar
+         lá. Foi exatamente aqui que o `for` com incremento dobrado
+         aparecia — ele pulava blocos inteiros do meio. */
+      eq(new Set(r.mats).size, 36000, 'cada linha aparece uma vez só, sem repetir entre ondas');
+      ok(r.mats[0] === '1000' && r.mats[r.mats.length - 1] === String(1000 + 35999),
+        'a primeira e a última linha estão lá — nenhum bloco do meio foi pulado');
+      /* Uma página de cada vez, esperando a anterior, são 37 idas ao
+         servidor: com 90ms de rede cada, uns três segundos e meio de
+         tela parada. Em ondas de até seis, caem para cerca de nove. O
+         teto de 6 é o mesmo que o Admin já usa. */
+      ok(r.ondas <= 12 && r.ondas >= 2,
+        `em ${r.ondas} idas ao servidor, não 37 — as páginas vão em ondas`);
+      ok(r.consultas >= 36, `sem deixar página para trás (${r.consultas} pedidas)`);
+    }
+
+    sec('4b. A onda cresce, mas não passa de seis');
+    {
+      /* Sem teto, uma base muito grande dispararia centenas de pedidos
+         simultâneos e o banco recusaria por excesso. Seis é o mesmo
+         limite que o Admin já aplica nas cargas dele. */
+      await semear('escala_dia', 60000, { matricula: '#', dia: 1 });
+      const maior = await page.evaluate(async () => {
+        const antes = window.__consultas.length;
+        window.__maxJuntos = 0;
+        const orig = window.__vivos;
+        const vigia = setInterval(() => {
+          window.__maxJuntos = Math.max(window.__maxJuntos, window.__vivos);
+        }, 0);
+        const d = await escalaFetchDias('GRU', '2026-11');
+        clearInterval(vigia);
+        return { n: d.length, juntos: window.__maxJuntos, pedidas: window.__consultas.length - antes };
+      });
+      eq(maior.n, 60000, 'sessenta mil linhas voltam inteiras');
+      ok(maior.juntos <= 6, `nunca mais de seis pedidos ao mesmo tempo (pico ${maior.juntos})`);
+      ok(maior.pedidas >= 60, `e nenhuma página fica para trás (${maior.pedidas} pedidas)`);
     }
 
     sec('5. O Comparador lê os dois cenários por inteiro');
