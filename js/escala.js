@@ -254,19 +254,69 @@ async function escalaFetchMalha(base, mesInicioStr, mesFimStr, campos) {
 // resto sem avisar — a marcação continua salva no banco, só não volta na
 // consulta. Achado ao investigar folgas que "sumiam" mesmo depois de
 // confirmadas salvas direto na tabela.
-async function escalaFetchDias(base, mes) {
-  const { count } = await db.from('escala_dia').select('*', { count: 'exact', head: true })
-    .eq('base', base).eq('mes', mes).eq('cenario', escalaCenario());
-  const todas = [];
+/* Lê uma tabela inteira em páginas de 1.000.
+
+   O PostgREST corta em 1.000 linhas por consulta e NÃO devolve erro:
+   devolve menos. Por isso o sintoma é sempre o mesmo — dado que existe no
+   banco e não aparece na tela, sem nada no console. Toda consulta que
+   possa passar de mil linhas passa por aqui.
+
+   Duas regras que vêm junto: parar quando a página vem curta (contar
+   antes abre uma janela para perder linhas gravadas no meio) e sempre
+   pedir ORDER BY estável na consulta, senão as páginas podem repetir uma
+   linha e omitir outra. */
+async function escalaPaginar(consulta, rotulo) {
   const PAGE = 1000;
-  for (let from = 0; from < (count || 0); from += PAGE) {
-    const { data, error } = await db.from('escala_dia').select('*')
-      .eq('base', base).eq('mes', mes).eq('cenario', escalaCenario())
-      .range(from, from + PAGE - 1);
-    if (error) { console.warn('[escala] escala_dia:', error.message); break; }
-    if (data) todas.push(...data);
+  const todas = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await consulta(from, from + PAGE - 1);
+    if (error) { console.warn(`[escala] ${rotulo}:`, error.message); break; }
+    if (!data || !data.length) break;
+    todas.push(...data);
+    if (data.length < PAGE) break;
   }
   return todas;
+}
+
+async function escalaFetchDias(base, mes, cenario) {
+  /* Duas correções sobre a versão anterior, que contava antes de ler:
+
+     — contar e depois paginar pula linhas se alguém gravar no intervalo.
+       Parar quando a página vem curta não tem essa janela.
+     — sem ORDER BY, o PostgREST não garante a mesma ordem entre páginas:
+       a mesma linha pode vir duas vezes e outra nenhuma. Com 36 mil
+       linhas (1.200 pessoas × 30 dias) isso deixa de ser teórico. */
+  const cen = cenario || escalaCenario();
+  return await escalaPaginar(
+    (from, ate) => db.from('escala_dia').select('*')
+      .eq('base', base).eq('mes', mes).eq('cenario', cen)
+      .order('matricula').order('dia').range(from, ate),
+    'escala_dia');
+}
+
+/* Mesma armadilha do escala_dia, na tabela de colaboradores.
+
+   O comentário acima já documentava o corte silencioso do PostgREST em
+   1000 linhas, mas a paginação foi aplicada só aos dias. As três
+   consultas de escala_colaborador continuaram cruas: numa base com 1.200
+   pessoas, 200 sumiam da escala sem erro nenhum — e o gerador de folgas
+   anunciava "1000 colaboradores" como se fosse o efetivo inteiro.
+
+   Aqui a parada é por página curta, não por contagem prévia: se alguém
+   inserir gente entre o count e a leitura, contar antes faria pular
+   linhas. A ordenação é obrigatória porque, sem ORDER BY estável, duas
+   páginas podem repetir e omitir as mesmas linhas. */
+async function escalaFetchColaboradores(base, mes, ordenarPor = 'created_at', cenario) {
+  const cen = cenario || escalaCenario();
+  /* A matrícula entra como segundo critério para a ordem ser total: se
+     muita gente compartilha o mesmo created_at — e compartilha, porque o
+     preenchimento grava em lotes de 200 — o desempate fica a cargo do
+     banco, e aí as páginas podem repetir e omitir linhas. */
+  return await escalaPaginar(
+    (from, ate) => db.from('escala_colaborador').select('*')
+      .eq('base', base).eq('mes', mes).eq('cenario', cen)
+      .order(ordenarPor).order('matricula').range(from, ate),
+    'escala_colaborador');
 }
 
 async function escalaRenderDash(el) {
@@ -307,8 +357,13 @@ async function escalaRenderDash(el) {
   // ── Reserva: dimensionamento estático do Gerador (só se o motor real não tiver dado) ──
   let linhasEstaticas = [];
   if (!demandaPorDia) {
-    const { data } = await db.from('escala_dimensionamento').select('*').eq('base', base).eq('mes', mes).order('entrada');
-    linhasEstaticas = data || [];
+    /* Uma linha por função × horário × carga. Numa base grande isso
+       passa de 1.000 sem aviso, e a reserva do dimensionamento voltaria
+       incompleta — pior que vazia, porque parece certa. */
+    linhasEstaticas = await escalaPaginar(
+      (from, ate) => db.from('escala_dimensionamento').select('*')
+        .eq('base', base).eq('mes', mes).order('entrada').order('funcao').range(from, ate),
+      'escala_dimensionamento');
   }
 
   window._escalaDemandaPorDia = demandaPorDia;
@@ -659,8 +714,7 @@ async function escalaPopularAutomaticamente(base, mes) {
     if (error) { console.warn('[escala] erro ao pré-popular:', error.message); break; }
   }
 
-  const { data } = await db.from('escala_colaborador').select('*').eq('base', base).eq('mes', mes).eq('cenario', escalaCenario()).order('nome');
-  return data || [];
+  return await escalaFetchColaboradores(base, mes, 'nome');
 }
 
 async function escalaRenderGrade(el) {
@@ -713,8 +767,8 @@ async function escalaRenderGrade(el) {
     }
   }
 
-  const [{ data: colabsIniciais }, dias, { data: travaRow }] = await Promise.all([
-    db.from('escala_colaborador').select('*').eq('base', base).eq('mes', mes).eq('cenario', escalaCenario()).order('created_at'),
+  const [colabsIniciais, dias, { data: travaRow }] = await Promise.all([
+    escalaFetchColaboradores(base, mes, 'created_at'),
     escalaFetchDias(base, mes),
     db.from('escala_trava').select('*').eq('base', base).eq('mes', mes).eq('cenario', escalaCenario()).maybeSingle(),
   ]);
@@ -3267,8 +3321,7 @@ async function escalaPreencherTodoStaff() {
     escalaLoadingAtualiza(Math.min(i + BATCH, linhas.length), linhas.length);
   }
 
-  const { data } = await db.from('escala_colaborador').select('*').eq('base', base).eq('mes', window._escalaMes).eq('cenario', escalaCenario());
-  window._escalaColabs = data || [];
+  window._escalaColabs = await escalaFetchColaboradores(base, window._escalaMes, 'created_at');
   escalaGradeAtualiza();
   escalaMsg(`${novos.length} colaborador${novos.length===1?'':'es'} adicionado${novos.length===1?'':'s'} — organizados por função e horário de entrada.`);
 }
@@ -6758,13 +6811,17 @@ function escalaIrParaComparador() {
 // Lê um cenário SEM trocar o que está na tela.
 async function escalaLerCenario(cenario) {
   const base = window._escalaBase, mes = window._escalaMes;
-  const [{ data: colabs }, { data: dias }] = await Promise.all([
-    db.from('escala_colaborador').select('*').eq('base', base).eq('mes', mes).eq('cenario', cenario),
-    db.from('escala_dia').select('*').eq('base', base).eq('mes', mes).eq('cenario', cenario),
+  /* As duas consultas eram cruas. Em escala_dia isso é 1.200 pessoas ×
+     30 dias = 36 mil linhas cortadas em 1.000: o gráfico comparava menos
+     de 3% da escala e parecia funcionar, porque corte do PostgREST não
+     levanta erro — só devolve menos. */
+  const [colabs, dias] = await Promise.all([
+    escalaFetchColaboradores(base, mes, 'created_at', cenario),
+    escalaFetchDias(base, mes, cenario),
   ]);
   return {
-    colabs: colabs || [],
-    dias: new Map((dias || []).map(d => [`${d.matricula}|${d.dia}`, d])),
+    colabs,
+    dias: new Map(dias.map(d => [`${d.matricula}|${d.dia}`, d])),
   };
 }
 
