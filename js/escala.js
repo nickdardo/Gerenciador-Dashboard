@@ -2185,21 +2185,49 @@ function escalaCaixasDeGrupo() {
     const g = escalaFuncaoGrupoDoColab(c).label || 'Sem função';
     contagem.set(g, (contagem.get(g) || 0) + 1);
   }
+
+  const visiveis = window._escalaGruposVisiveis;
+
+  /* A lista vinha só dos COLABORADORES, e isso prendia quem filtrasse.
+
+     Numa Capacity recém-montada não há ninguém: só posições vazias. A
+     lista saía vazia, e quem tivesse marcado um grupo não tinha caixa
+     nenhuma para desmarcar — o filtro ficava preso naquele grupo, sem
+     saída pela própria tela que o criou.
+
+     Agora a lista é a união de três coisas: quem está na escala, o que a
+     malha pede, e o que está marcado agora. A última parcela é a que
+     garante a saída: um grupo escolhido sempre aparece para poder ser
+     desescolhido, mesmo que tenha deixado de existir no mês. */
+  const chaves = new Set(contagem.keys());
+  if (escalaEhCapacity()) {
+    for (const [g] of escalaMalhaDoDimensionamento()) chaves.add(g);
+  }
+  if (visiveis) for (const g of visiveis) chaves.add(g);
+
   // Ordem canônica, para a lista não dançar entre um mês e outro.
-  const presentes = [...contagem.keys()].sort((a, b) => {
+  const presentes = [...chaves].sort((a, b) => {
     const ia = ESCALA_GRUPOS.indexOf(a), ib = ESCALA_GRUPOS.indexOf(b);
     return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
   });
   if (!presentes.length) {
-    return '<div class="escala-grupos-vazio">Nenhum colaborador carregado neste mês.</div>';
+    return '<div class="escala-grupos-vazio">Nenhum grupo neste mês — nem na escala, nem no dimensionamento.</div>';
   }
-  const visiveis = window._escalaGruposVisiveis;
-  const linhas = presentes.map((g) => `<label class="escala-grupo-caixa">
-    <input type="checkbox" value="${escalaEscapeAttr(g)}" onchange="escalaAtualizarGruposEscolhidos()"
-      ${(!visiveis || visiveis.has(g)) ? 'checked' : ''}>
-    <span class="nome">${escalaEscapeAttr(g)}</span>
-    <span class="qtd">${contagem.get(g)}</span>
-  </label>`).join('');
+  const pedido = (g) => (escalaEhCapacity() ? escalaPedidosDoGrupo(g).total : 0);
+  const linhas = presentes.map((g) => {
+    const pessoas = contagem.get(g) || 0;
+    const vagas = pedido(g);
+    /* Mostra gente E posições: num grupo só com vagas, "0" sozinho
+       pareceria grupo inexistente — e é justamente o que falta
+       preencher. */
+    const n = vagas ? `${pessoas}/${vagas}` : String(pessoas);
+    return `<label class="escala-grupo-caixa">
+      <input type="checkbox" value="${escalaEscapeAttr(g)}" onchange="escalaAtualizarGruposEscolhidos()"
+        ${(!visiveis || visiveis.has(g)) ? 'checked' : ''}>
+      <span class="nome">${escalaEscapeAttr(g)}</span>
+      <span class="qtd" title="${pessoas} pessoa(s)${vagas ? ` de ${vagas} posição(ões) no dimensionamento` : ''}">${n}</span>
+    </label>`;
+  }).join('');
   return `<div class="escala-grupos-acoes">
       <button type="button" onclick="escalaMarcarTodosGrupos(true)">Marcar todos</button>
       <button type="button" onclick="escalaMarcarTodosGrupos(false)">Desmarcar todos</button>
@@ -2296,8 +2324,13 @@ function escalaMarcarPendencia() {
 function escalaAtualizarGruposEscolhidos() {
   const painel = document.getElementById('escala-grupos-painel');
   if (!painel) return;
-  const marcados = [...painel.querySelectorAll('input[type="checkbox"]:checked')].map(i => i.value);
-  escalaPendente('grupos', marcados.length ? new Set(marcados) : null);
+  const caixas = [...painel.querySelectorAll('input[type="checkbox"]')];
+  const marcados = caixas.filter((i) => i.checked).map((i) => i.value);
+  /* Tudo marcado é "sem filtro", não "filtro com todos". A diferença
+     aparece depois: com um conjunto fixo, um grupo que surgir no mês
+     seguinte nasce escondido, e ninguém liga uma coisa à outra. */
+  const todos = marcados.length === caixas.length;
+  escalaPendente('grupos', (!marcados.length || todos) ? null : new Set(marcados));
 }
 
 function escalaAplicarFiltrosMenu() {

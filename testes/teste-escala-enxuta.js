@@ -597,7 +597,9 @@ function paginaDeTeste() {
         'as caixas trazem os grupos que têm gente');
       ok(!/value="GSE"/.test(r.caixas) && !/value="PAX"/.test(r.caixas),
         'e não os que estão zerados no mês, que só ocupavam espaço');
-      ok(/<span class="qtd">2<\/span>/.test(r.caixas) && /<span class="qtd">1<\/span>/.test(r.caixas),
+      // A contagem ganhou um title explicando o número; a asserção olha o
+      // conteúdo, não o formato exato da tag.
+      ok(/class="qtd"[^>]*>2</.test(r.caixas) && /class="qtd"[^>]*>1</.test(r.caixas),
         'cada grupo mostra quanta gente tem — é por aí que se nota efetivo faltando');
       ok(/Marcar todos/.test(r.caixas) && /Desmarcar todos/.test(r.caixas),
         'com atalho para marcar e desmarcar, senão ver um grupo só custa oito cliques');
@@ -1040,6 +1042,78 @@ function paginaDeTeste() {
          hipótese remota, e o corte do PostgREST é silencioso. */
       ok(/escalaPaginar\([\s\S]{0,300}escala_dimensionamento/.test(grade),
         'a leitura é paginada, como toda tabela que pode passar de mil linhas');
+    }
+
+    sec('8s. O filtro de grupos sempre tem saída');
+    {
+      /* O bug: a lista de caixas vinha só dos COLABORADORES. Numa
+         Capacity recém-montada não há ninguém — só posições vazias — e a
+         lista saía vazia. Quem tivesse marcado "Limpeza" não tinha caixa
+         nenhuma para desmarcar: o filtro ficava preso, sem saída pela
+         própria tela que o criou. */
+      const r = await page.evaluate(() => {
+        window._escalaCenario = 'dimensionada';
+        window._escalaBase = 'GRU'; window._escalaMes = '2026-11';
+        window._escalaColabs = [];            // ninguém na escala
+        window.eoColabs = new Map();
+        window.escalaCarregarMapaDim = () => ({ 'ASG LIMPEZA I': 'Limpeza' });
+        window._escalaPosicoesDim = [
+          { funcao: 'ASG LIMPEZA I', entrada: '07:00', saida: '13:00', carga: 180, qtd: 3 },
+        ];
+        window._escalaGruposVisiveis = new Set(['Limpeza']);
+        const presa = escalaCaixasDeGrupo();
+
+        // Um grupo escolhido que nem existe mais no mês: ainda assim
+        // precisa aparecer, senão não há como desescolhê-lo.
+        window._escalaGruposVisiveis = new Set(['GSE']);
+        const sumido = escalaCaixasDeGrupo();
+        return { presa, sumido };
+      });
+
+      ok(/value="Limpeza"/.test(r.presa),
+        'com ninguém na escala, o grupo da malha ainda aparece para ser desmarcado');
+      ok(!/Nenhum colaborador carregado/.test(r.presa),
+        'e a lista não vem vazia, que era o que prendia o filtro');
+      ok(/Marcar todos/.test(r.presa) && /Desmarcar todos/.test(r.presa),
+        'com os atalhos de saída sempre à mão');
+      ok(/value="GSE"/.test(r.sumido),
+        'grupo escolhido que sumiu do mês continua listado — senão não há como largá-lo');
+      ok(/0\/3/.test(r.presa),
+        'a contagem mostra gente e posições: "0" sozinho pareceria grupo inexistente');
+    }
+
+    sec('8t. Marcar todos é o mesmo que não filtrar');
+    {
+      /* Guardar um conjunto com todos os grupos parece igual a não ter
+         filtro, e não é: um grupo que aparecer no mês seguinte nasce
+         escondido, e ninguém liga uma coisa à outra. */
+      const r = await page.evaluate(() => {
+        document.body.insertAdjacentHTML('beforeend',
+          `<div id="escala-grupos-painel-teste"></div>`);
+        const painel = document.createElement('div');
+        painel.id = 'escala-grupos-painel';
+        painel.innerHTML = ['Limpeza', 'Operadores', 'PAX']
+          .map((g) => `<label><input type="checkbox" value="${g}" checked></label>`).join('');
+        document.body.appendChild(painel);
+        window._escalaPendentes = {};
+        window._escalaFerrMenu = true;          // menu aberto: acumula em vez de aplicar
+
+        escalaAtualizarGruposEscolhidos();
+        const todosMarcados = window._escalaPendentes.grupos;
+
+        painel.querySelectorAll('input')[0].checked = false;
+        escalaAtualizarGruposEscolhidos();
+        const umFora = window._escalaPendentes.grupos;
+
+        painel.remove();
+        window._escalaFerrMenu = false;
+        return {
+          todos: todosMarcados === null,
+          parcial: umFora ? [...umFora].sort().join() : null,
+        };
+      });
+      ok(r.todos === true, 'todas as caixas marcadas guarda "sem filtro", não um conjunto cheio');
+      ok(r.parcial === 'Operadores,PAX', 'e desmarcar uma guarda exatamente as outras · ' + r.parcial);
     }
 
     sec('9. Nenhum erro de script');
