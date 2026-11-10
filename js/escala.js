@@ -4177,13 +4177,46 @@ async function escalaAlocarGrupo(grupo) {
     escalaGradeAtualiza();
     const semGente = r.porHorario.filter((h) => h.falta > 0);
     const semPosicao = gente.length - comPosicao.size;
+
+    /* Com a regra estrita, saber QUANTAS posições ficaram vazias não
+       basta: o que resolve é saber de que CARGA falta gente, e de que
+       carga sobra. É essa a lista que vira contratação ou remanejamento
+       — e sem ela a vaga em branco é só uma reclamação. */
+    const faltaPorJornada = new Map();
+    const pedidoJ = new Map(), atendidoJ = new Map();
+    vagas.forEach((v) => pedidoJ.set(v.jornada || '?', (pedidoJ.get(v.jornada || '?') || 0) + 1));
+    gente.filter((c) => comPosicao.has(c.matricula)).forEach((c) => {
+      const j = escalaJornadaDoColab(c.matricula, c) || '?';
+      atendidoJ.set(j, (atendidoJ.get(j) || 0) + 1);
+    });
+    const sobraJ = new Map();
+    gente.filter((c) => !comPosicao.has(c.matricula)).forEach((c) => {
+      const j = escalaJornadaDoColab(c.matricula, c) || '?';
+      sobraJ.set(j, (sobraJ.get(j) || 0) + 1);
+    });
+    for (const [j, n] of pedidoJ) {
+      const d = n - (atendidoJ.get(j) || 0);
+      if (d > 0) faltaPorJornada.set(j, d);
+    }
+    if (faltaPorJornada.size || sobraJ.size) {
+      console.log([`[escala/${grupo}] onde a carga horária não fecha:`,
+        ...[...faltaPorJornada.entries()].sort((a, b) => b[1] - a[1])
+          .map(([j, n]) => `   faltam ${n} pessoa(s) de ${j}h/dia para posições de ${j}h`),
+        ...[...sobraJ.entries()].sort((a, b) => b[1] - a[1])
+          .map(([j, n]) => `   sobram ${n} pessoa(s) de ${j}h/dia sem posição dessa carga`),
+      ].join('\n'));
+    }
     escalaMsg(`${grupo}: ${r.atribuicoes.length} posição(ões) preenchida(s)`
       + (sobra && pico ? `, ${sobra} em posições extras das ${pico.entrada}` : '')
       + (semGente.length ? `, ${semGente.reduce((n, h) => n + h.falta, 0)} ainda sem gente` : '')
       + (semPosicao ? `, ${semPosicao} pessoa(s) sem posição` : '')
-      + (r.trocasDeFuncao.length ? `. ${r.trocasDeFuncao.length} cobrindo posição de OUTRA função` : '')
-      + (r.enxertos.length ? `. ${r.enxertos.length} com jornada diferente da posição — veja no console` : '.'),
-      semGente.length || semPosicao || r.enxertos.length || r.trocasDeFuncao.length ? 'aviso' : 'ok');
+      + (faltaPorJornada.size
+          ? `. Falta gente com a CH certa: `
+            + [...faltaPorJornada.entries()].sort((a, b) => b[1] - a[1])
+                .map(([j, n]) => `${n}× ${j}h`).join(', ')
+          : '')
+      + ` — detalhe no console.`,
+      semGente.length || semPosicao ? 'aviso' : 'ok');
     if (r.trocasDeFuncao.length) {
       console.log([`[escala/${grupo}] posição coberta por função diferente:`,
         ...r.trocasDeFuncao.map((t) =>
@@ -8077,6 +8110,10 @@ function escalaCasarVagasComPessoas(vagas, colabs, ano, mesNum, diasNoMes) {
          ela passa a ser relatada em vez de silenciosamente compensada,
          que é onde esse tipo de decisão pertence: à vista de quem
          responde pela escala. */
+      /* Estas duas listas só se enchem quando a posição não declara
+         função — o único caso em que o balde é curinga. Ficam porque o
+         relatório que as consome continua existindo, e porque uma lista
+         vazia é a prova de que a regra está valendo. */
       const famV = escalaFamiliaDaFuncao(vaga.funcaoDim || '');
       const famP = escalaFamiliaDaFuncao(pes.funcao || '');
       if (famV && famP && famV !== famP) {
@@ -8142,36 +8179,49 @@ function escalaCasarVagasComPessoas(vagas, colabs, ano, mesNum, diasNoMes) {
        dimensionamento não disse. Aqui a função é a restrição, e o
        horário decide DENTRO dela, que é o único lugar onde ele deve
        decidir. */
-    const familiaDaVaga = (v) => escalaFamiliaDaFuncao(v.funcaoDim || '');
-    const familiaDaPessoa = (p) => escalaFamiliaDaFuncao(p.funcao || '');
+    /* Posição só é preenchida por quem serve: mesma FUNÇÃO e mesma
+       JORNADA. Não havendo, fica em branco.
 
-    const porFamilia = new Map();
+       Esta regra já foi o contrário duas vezes, e vale registrar por
+       quê. Primeiro a jornada era parede, e posições ficavam vazias com
+       gente parada ao lado — parecia desperdício porque a vaga vazia não
+       aparecia em lugar nenhum. Daí eu afrouxei: encaixava assim mesmo e
+       ajustava a saída pela CH da pessoa, o que pôs na escala horários
+       que o dimensionamento não pedia. Depois a saída voltou a ser a da
+       posição, e aí o encaixe virou mentira pior ainda — uma pessoa de
+       CH 180 numa posição de 3H, escrita como se cumprisse 3H.
+
+       O que mudou entre a primeira versão e esta não foi a regra: foi a
+       tela. A posição vazia agora é uma LINHA, com horário, função e
+       jornada, e entra nos contadores da faixa. Deixar em branco deixou
+       de ser esconder o problema e passou a ser enunciá-lo: esta posição
+       precisa de alguém com esta CH, e não temos.
+
+       Quando a posição não declara função — extras antigas —, a função
+       deixa de ser exigida; a jornada continua sendo. */
+    const chaveVaga = (v) => `${escalaFamiliaDaFuncao(v.funcaoDim || '') || '*'}|${v.jornada || '?'}`;
+    const chavePessoa = (p) => `${escalaFamiliaDaFuncao(p.funcao || '')}|${p.jornada || '?'}`;
+
+    const baldes = new Map();
     vg.forEach((v) => {
-      const k = familiaDaVaga(v);
-      if (!k) return;
-      if (!porFamilia.has(k)) porFamilia.set(k, { v: [], p: [] });
-      porFamilia.get(k).v.push(v);
+      const k = chaveVaga(v);
+      if (!baldes.has(k)) baldes.set(k, { v: [], p: [] });
+      baldes.get(k).v.push(v);
     });
     pg.forEach((x) => {
-      const k = familiaDaPessoa(x);
-      if (!porFamilia.has(k)) return;   // sem posição dessa família: vai para o resto
-      porFamilia.get(k).p.push(x);
+      const k = chavePessoa(x);
+      if (baldes.has(k)) { baldes.get(k).p.push(x); return; }
+      // Posição sem função declarada aceita qualquer função da mesma jornada.
+      const curinga = `*|${x.jornada || '?'}`;
+      if (baldes.has(curinga)) baldes.get(curinga).p.push(x);
     });
 
-    const usadasV = new Set(), usadasP = new Set();
-    for (const [, par] of porFamilia) {
+    let sobraramPessoas = pg.length;
+    for (const [, par] of baldes) {
       const r = emparelhar(par.v, par.p, true);
-      par.v.forEach((v) => { if (!r.vagasRestantes.includes(v)) usadasV.add(v); });
-      par.p.forEach((x) => { if (!r.pessoasRestantes.includes(x)) usadasP.add(x); });
+      sobraramPessoas -= (par.p.length - r.pessoasRestantes.length);
     }
-
-    /* Rede de segurança: o que não casou por família é emparelhado no
-       grupo, e cada caso desses sai nomeado — é decisão de operação, não
-       de algoritmo. */
-    const sobramV = vg.filter((v) => !usadasV.has(v));
-    const sobramP = pg.filter((x) => !usadasP.has(x));
-    const r = emparelhar(sobramV, sobramP, true);
-    if (r.pessoasRestantes.length) pessoasSobrando.set(grupo, r.pessoasRestantes.length);
+    if (sobraramPessoas > 0) pessoasSobrando.set(grupo, sobraramPessoas);
   }
 
   /* Relatório por horário: o que a malha pediu, o que conseguiu gente e o

@@ -1170,43 +1170,38 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaModoColunas: 'essencial
   ok('pessoa sem posição é reportada', [...r3.pessoasSobrando.values()][0] === 1);
   ok('quem sobra não recebe horário inventado', r3.atribuicoes.length === 2);
 
-  /* Jornada diferente ENXERTA, em vez de deixar a posição vazia.
+  /* Jornada diferente NÃO ocupa a posição — a vaga fica em branco.
 
-     Esta asserção era o contrário: a jornada era parede, e 12 posições de
-     6h com 10 pessoas de CH 180 e 2 de CH 210 deixavam 2 posições
-     descobertas com 2 pessoas do mesmo grupo paradas ao lado. Era isso
-     que aparecia na grade como "dimensionei 12 e vieram 10".
+     Esta asserção já disse as duas coisas opostas, e o percurso vale
+     ficar registrado.
 
-     O enxerto guarda o ENTRADA que a malha pede e calcula a SAÍDA pela
-     jornada da própria pessoa — 7h de CH 210 sai 13:00, não 12:00. Honra
-     o horário sem estourar a carga de ninguém. */
+     Primeiro a jornada era parede: 12 posições de 6h com 10 pessoas de
+     CH 180 e 2 de CH 210 deixavam 2 posições vazias com 2 pessoas
+     paradas ao lado. Parecia desperdício, e eu afrouxei — encaixava e
+     calculava a saída pela CH da pessoa.
+
+     Isso pôs na escala horários que o dimensionamento não pedia. Corrigi
+     a saída para ser a da posição, e aí o encaixe virou uma afirmação
+     falsa: alguém de CH 180 escrito como se cumprisse uma posição de 3H.
+
+     Agora a posição só aceita quem tem a função E a jornada dela. O que
+     mudou entre a primeira versão e esta não foi a regra, foi a tela: a
+     posição vazia virou LINHA, com horário e jornada, contada na faixa.
+     Deixar em branco deixou de esconder o problema e passou a enunciá-lo. */
   sandbox.window.eoColabs.set('P1', { nome: 'CEDO', funcao: 'AUXILIAR DE RAMPA I', ch: '210' });
   const r4 = sandbox.escalaCasarVagasComPessoas(vagas, pessoas, 2026, 10, 31);
   const p1 = r4.atribuicoes.find(a => a.matricula === 'P1');
-  ok('as 3 posições fecham, mesmo com uma jornada diferente no grupo',
-    r4.atribuicoes.length === 3, `${r4.atribuicoes.length} atribuições`);
-  ok('a de 7h entra no horário que o dimensionamento pede',
-    p1 && p1.entrada === '06:00', p1 && p1.entrada);
-  /* A SAÍDA é a da posição, não a da CH da pessoa.
-
-     Esta asserção já disse o contrário, e estava errada. A ideia de
-     calcular a saída pela CH de quem foi encaixado parecia cuidadosa —
-     evitava estourar a carga mensal — mas punha na escala um horário que
-     o dimensionamento não pede: uma posição de 06:00 às 09:00 virava
-     06:00 às 12:00, e a planilha exportada deixava de bater com o
-     arquivo que a originou.
-
-     A diferença de carga continua existindo; ela agora é relatada como
-     enxerto, à vista de quem responde pela escala, em vez de
-     silenciosamente compensada. */
-  ok('e sai no horário da posição, para a escala bater com o dimensionamento',
-    p1 && p1.saida === '12:00', p1 && p1.saida);
-  ok('nenhum horário fica descoberto por causa da jornada',
-    r4.porHorario.every(h => h.falta === 0));
-  ok('o enxerto sai nomeado, para ninguém descobrir depois',
-    r4.enxertos.length === 1 && r4.enxertos[0].matricula === 'P1'
-      && r4.enxertos[0].jornadaVaga === 6 && r4.enxertos[0].jornadaPessoa === 7,
-    JSON.stringify(r4.enxertos));
+  ok('quem tem jornada diferente da posição não é alocado',
+    !p1, p1 && `${p1.entrada}–${p1.saida}`);
+  ok('e a posição dele fica descoberta, em vez de receber a carga errada',
+    r4.porHorario.reduce((n, h) => n + h.falta, 0) === 1,
+    JSON.stringify(r4.porHorario.filter(h => h.falta > 0)));
+  ok('as outras duas, com a jornada certa, continuam preenchidas',
+    r4.atribuicoes.length === 2, `${r4.atribuicoes.length} atribuições`);
+  ok('nenhum enxerto acontece, porque enxerto deixou de existir',
+    r4.enxertos.length === 0, JSON.stringify(r4.enxertos));
+  ok('e a pessoa aparece como sem posição, do outro lado da conta',
+    [...r4.pessoasSobrando.values()].reduce((a, b) => a + b, 0) === 1);
   sandbox.window.eoColabs.set('P1', { nome: 'CEDO', funcao: 'AUXILIAR DE RAMPA I', ch: '180' });
 
   /* Faltando gente, o buraco é escolhido, não é sobra do algoritmo: cai

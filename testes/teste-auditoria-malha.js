@@ -287,22 +287,62 @@ const TOTAL = DIMENSIONAMENTO.reduce((n, l) => n + l[4], 0);
       eq(r.trocas, 0, 'sem ninguém cobrindo posição de outra função');
     }
 
-    sec('9c. O grupo ainda é rede de segurança, mas nomeada');
+    sec('9c. Sem gente certa, a vaga fica em branco');
     {
-      /* Quando não há gente da família, o grupo cobre — senão a posição
-         ficaria vazia com gente parada ao lado. Mas isso é decisão de
-         operação, e tem de sair com nome. */
+      /* Esta asserção já pediu o contrário: que o grupo cobrisse a
+         posição quando não houvesse gente da família, para não deixar
+         vaga vazia com gente parada ao lado.
+
+         A regra mudou por decisão de quem usa, e com razão. Encaixar
+         alguém de CH 180 numa posição de 3H não resolve nada: escreve na
+         escala que aquela pessoa cumpre 3H, o que é falso, e some com a
+         informação de que falta gente com aquela carga.
+
+         O que tornou a vaga em branco aceitável não foi a regra — foi a
+         tela. A posição vazia agora é uma LINHA, com horário, função e
+         jornada, contada na faixa. Deixar em branco passou de esconder o
+         problema a enunciá-lo. */
       const r = await page.evaluate(() => {
         const vagas = [{ grupo: 'Limpeza', funcaoDim: 'ENC. LIMPEZA II', jornada: 6, entrada: '05:00', saida: '11:00' }];
         const gente = [{ matricula: '1', nome: 'ASG UM', entrada_manual: '05:00' }];
         window.eoColabs = new Map([['1', { nome: 'ASG UM', funcao: 'ASG LIMPEZA I', ch: 90, station: 'GRU' }]]);
         const c = escalaCasarVagasComPessoas(vagas, gente, 2026, 11, 30);
-        return { n: c.atribuicoes.length, trocas: c.trocasDeFuncao };
+        return { n: c.atribuicoes.length, trocas: c.trocasDeFuncao.length,
+                 falta: c.porHorario.filter((h) => h.falta > 0).length,
+                 sobrando: [...c.pessoasSobrando.values()].reduce((a, b) => a + b, 0) };
       });
-      eq(r.n, 1, 'sem gente da família, o grupo cobre a posição');
-      eq(r.trocas.length, 1, 'e a cobertura por outra função é registrada');
-      eq(r.trocas[0].funcaoVaga, 'ENC. LIMPEZA II', 'dizendo de que função era a posição');
-      eq(r.trocas[0].funcaoPessoa, 'ASG LIMPEZA I', 'e qual a da pessoa que entrou nela');
+      eq(r.n, 0, 'ninguém é encaixado numa posição de outra função');
+      eq(r.trocas, 0, 'e não há troca de função a relatar, porque não houve troca');
+      eq(r.falta, 1, 'a posição é reportada como descoberta');
+      eq(r.sobrando, 1, 'e a pessoa, como sem posição — os dois lados ficam visíveis');
+    }
+
+    sec('9d. Jornada errada também deixa a vaga em branco');
+    {
+      /* O caso do print: posição de 3H às 05:00, e uma ASG de CH 180
+         (6h/dia). A função casa, a jornada não. Antes ela entrava e a
+         escala afirmava que cumpria 3H. */
+      const r = await page.evaluate(() => {
+        const vagas = [
+          { grupo: 'Limpeza', funcaoDim: 'ASG LIMPEZA', jornada: 3, entrada: '05:00', saida: '08:00' },
+          { grupo: 'Limpeza', funcaoDim: 'ASG LIMPEZA', jornada: 3, entrada: '05:00', saida: '08:00' },
+        ];
+        const gente = [
+          { matricula: '1', nome: 'DE 3H', entrada_manual: '05:00' },
+          { matricula: '2', nome: 'DE 6H', entrada_manual: '05:00' },
+        ];
+        window.eoColabs = new Map([
+          ['1', { nome: 'DE 3H', funcao: 'ASG LIMPEZA I', ch: 90, station: 'GRU' }],
+          ['2', { nome: 'DE 6H', funcao: 'ASG LIMPEZA I', ch: 180, station: 'GRU' }],
+        ]);
+        const c = escalaCasarVagasComPessoas(vagas, gente, 2026, 11, 30);
+        return { alocados: c.atribuicoes.map((a) => a.matricula),
+                 enxertos: c.enxertos.length,
+                 falta: c.porHorario.reduce((n, h) => n + h.falta, 0) };
+      });
+      eq(r.alocados.join(), '1', 'só quem tem a CH da posição entra');
+      eq(r.enxertos, 0, 'nenhum encaixe de jornada diferente acontece');
+      eq(r.falta, 1, 'a segunda posição continua pedindo alguém de 3h');
     }
 
     sec('9. Nenhum erro de script');
