@@ -4464,3 +4464,17 @@ body.escala-modo-grade .escala-fill { margin-top: 0; }
   :root:not([data-theme="light"]) .gen3-mes-origem.ok { color: #72c02c; }
   :root:not([data-theme="light"]) .gen3-mes-origem.alerta { color: #f0c870; }
 }
+
+/* Função classificada por palpite: não é erro, é um chute que merece
+   conferência — e que antes nem existia, porque a posição sumia. */
+.escala-chip-palpite { border-color: #4a5a8a; color: #39466b; display: inline-flex; align-items: center; gap: 5px; }
+.escala-chip-palpite .n {
+  font-weight: 700; font-variant-numeric: tabular-nums;
+  background: #39466b; color: #fff; border-radius: 9px; padding: 0 6px;
+}
+[data-theme="dark"] .escala-chip-palpite { border-color: #9db2e8; color: #9db2e8; }
+[data-theme="dark"] .escala-chip-palpite .n { background: #3b4a78; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .escala-chip-palpite { border-color: #9db2e8; color: #9db2e8; }
+  :root:not([data-theme="light"]) .escala-chip-palpite .n { background: #3b4a78; }
+}

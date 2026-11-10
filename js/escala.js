@@ -1803,7 +1803,22 @@ function escalaChipsHTML() {
     ? chips.map((c) => `<button type="button" class="escala-chip" onclick="escalaToggleFerramentas()"
         title="${escalaEscapeAttr(c.dica)} — clique para abrir as ferramentas">${escalaEscapeAttr(c.rot)}</button>`).join('')
     : `<span class="escala-chip-vazio">sem filtros</span>`;
-  return filtros + escalaChipSemHorario() + escalaChipForaDaMalha();
+  return filtros + escalaChipSemHorario() + escalaChipForaDaMalha() + escalaChipSemRegra();
+}
+
+/* Avisa quando uma função do dimensionamento foi classificada por
+   palpite. Antes essas posições simplesmente não existiam na tela, e a
+   soma da faixa passava a discordar do Gerador sem explicar por quê. */
+function escalaChipSemRegra() {
+  if (!escalaEhCapacity()) return '';
+  const sem = escalaFuncoesSemRegra();
+  if (!sem.length) return '';
+  const total = sem.reduce((n, f) => n + f.qtd, 0);
+  const lista = sem.slice(0, 6).map((f) => `${f.funcao} (${f.qtd}) → ${f.grupo}`).join('\n');
+  return `<button type="button" class="escala-chip escala-chip-palpite"
+    onclick="escalaAplicarDimensionamento()"
+    title="Classificadas pelas regras do cadastro, sem regra própria do dimensionamento:&#10;${escalaEscapeAttr(lista)}${sem.length > 6 ? '\n…' : ''}&#10;&#10;Clique para abrir o mapeamento e confirmar.">
+    <span class="n">${total}</span> por classificar</button>`;
 }
 
 /* Resíduo de horário, avisado na faixa. Ele não aparece mais na grade,
@@ -2895,11 +2910,23 @@ function escalaMalhaDoDimensionamento() {
        corrige ao aplicar; a ausência não aparece. */
     const grupo = mapa[p.funcao] || escalaGrupoDaFuncaoDim(p.funcao);
     if (!grupo || grupo === '__ignorar__') continue;
-    const chave = `${p.entrada || '?'}–${p.saida || '?'}`;
+    /* A chave inclui a FUNÇÃO, e isso não é detalhe.
+
+       Ela era só entrada–saída. Quando duas funções do mesmo grupo
+       partilham um horário — 12 ASG LIMPEZA e 1 ENC. LIMPEZA II, ambos
+       00:00 às 06:00 — as duas caíam no mesmo balde: 13 posições, todas
+       rotuladas com a primeira função que aparecesse. O total do grupo
+       continuava certo (por isso a faixa dizia 136, que confere), mas a
+       divisão por função ficava errada, e é por ela que se confere
+       contra o Gerador.
+
+       A jornada sofria o mesmo: o balde guardava a da primeira linha,
+       então um horário com 6H e 3H juntos mostrava uma só. */
+    const chave = `${p.funcao || '?'}|${p.entrada || '?'}–${p.saida || '?'}`;
     if (!porGrupo.has(grupo)) porGrupo.set(grupo, new Map());
     const g = porGrupo.get(grupo);
     if (!g.has(chave)) {
-      g.set(chave, { entrada: p.entrada || '', saida: p.saida || '',
+      g.set(chave, { funcao: p.funcao || '', entrada: p.entrada || '', saida: p.saida || '',
                      pedido: 0, extra: 0, jornada: escalaChDiariaDaPosicao(p.carga), funcoes: new Set() });
     }
     const h = g.get(chave);
@@ -2967,7 +2994,7 @@ function escalaVagasVaziasDoGrupo(grupo, gente, ano, mesNum, diasNoMes) {
     cobertas.set(h.entrada, (cobertas.get(h.entrada) || 0) - tem);
     for (let i = 0; i < h.pedido - tem; i++) {
       vazias.push({ entrada: h.entrada, saida: h.saida, jornada: h.jornada,
-                    funcao: [...h.funcoes][0] || '', grupo });
+                    funcao: h.funcao || [...h.funcoes][0] || '', grupo });
     }
   }
   return vazias;
@@ -4100,11 +4127,15 @@ async function escalaAlocarGrupo(grupo) {
        emparelhamento como qualquer outra posição — e não como remendo
        aplicado depois, que produziria uma alocação pior. */
     if (sobra && pico) {
-      const funcao = [...pico.funcoes][0] || grupo;
+      const funcao = pico.funcao || [...pico.funcoes][0] || grupo;
       const { error } = await db.from('escala_dimensionamento').insert([{
         base, mes, setor: ESCALA_SETOR_EXTRA, funcao,
         entrada: pico.entrada, saida: pico.saida,
-        carga: (pico.jornada || 6) * 30, qtd: sobra,
+        /* A carga aqui é DIÁRIA, como o Gerador grava ("6H" → 6). Eu
+           havia escrito jornada * 30, convertendo para mensal: o leitor
+           descarta tudo acima de 12, e a posição extra nascia com
+           jornada nula. */
+        carga: pico.jornada || 6, qtd: sobra,
         gerado_por: currentUserProfile?.id || currentUser?.id || null,
       }]);
       if (error) throw new Error(error.message);
@@ -4238,10 +4269,10 @@ async function escalaCriarPosicaoExtra(grupo) {
   /* A função guardada é a primeira do grupo, só para o extra ter nome
      no relatório. O que importa é o grupo, a entrada e a saída. */
   const funcoes = [...(escalaMalhaDoDimensionamento().get(grupo) || new Map()).values()]
-    .flatMap((h) => [...h.funcoes]);
+    .map((h) => h.funcao).filter(Boolean);
   const { error } = await db.from('escala_dimensionamento').insert([{
     base: window._escalaBase, mes: window._escalaMes, setor: ESCALA_SETOR_EXTRA,
-    funcao: funcoes[0] || grupo, entrada, saida, carga: jornada * 30, qtd,
+    funcao: funcoes[0] || grupo, entrada, saida, carga: jornada, qtd,
     gerado_por: currentUserProfile?.id || currentUser?.id || null,
   }]);
   if (error) { escalaMsg('Erro ao criar a posição extra: ' + error.message, true); return; }
@@ -7620,9 +7651,44 @@ function escalaGrupoDaFuncaoDim(funcaoRaw) {
   // APRENDIZ LOG = aprendiz de logística = rampa. Mesma regra do cadastro.
   if (f.includes('APRENDIZ') && f.includes('LOG')) return 'Auxiliar de Rampa';
 
-  // Não reconhecido: devolve null pra tela de mapeamento perguntar em vez
-  // de chutar "Administração" e gravar horário errado em cima disso.
-  return null;
+  /* O que as regras acima não pegam cai nas regras do CADASTRO.
+
+     Devolver null aqui era deliberado — a ideia era deixar a tela de
+     mapeamento perguntar em vez de chutar. Fazia sentido quando o
+     dimensionamento só servia para aplicar horários. Deixou de fazer
+     quando a malha passou a desenhar a Capacity inteira: null virou
+     "some da tela", e sumir é a pior resposta possível.
+
+     O caso real: AUX. DE ESTEIRA, 84 posições. Nenhuma regra daqui a
+     reconhece, então as 84 desapareciam — enquanto as PESSOAS dessa
+     função iam para Administração, porque o cadastro nunca devolve null,
+     tem a Administração como destino final. Posições num grupo, gente em
+     outro: exatamente o que o comentário de escalaGrupoDaFuncao avisa
+     que não pode acontecer.
+
+     Delegar o resto ao cadastro garante que os dois lados concordem
+     sempre, inclusive em funções que ninguém previu. Quando a dedução
+     cair aqui, escalaFuncoesSemRegra() conta e a faixa avisa, para a
+     classificação poder ser corrigida no mapeamento. */
+  return escalaGrupoDaFuncao(funcaoRaw);
+}
+
+/* Funções do dimensionamento que nenhuma regra específica reconhece e
+   que caíram no destino final do cadastro. Não é erro — é um palpite que
+   merece conferência, e que precisa ser visível para poder ser
+   conferido. */
+function escalaFuncoesSemRegra() {
+  const especificas = /\bASA\b|PAX|PASSAGEIRO|\bASG\b|LIMPEZA|SUPERVISOR|LIDER|OPERADOR|APRENDIZ/;
+  const mapa = escalaCarregarMapaDim(window._escalaBase) || {};
+  const por = new Map();
+  for (const p of (window._escalaPosicoesDim || [])) {
+    if (mapa[p.funcao]) continue;              // já classificada à mão
+    const f = String(p.funcao || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    if (especificas.test(f)) continue;
+    por.set(p.funcao, (por.get(p.funcao) || 0) + (p.qtd || 1));
+  }
+  return [...por.entries()].map(([funcao, qtd]) => ({ funcao, qtd, grupo: escalaGrupoDaFuncao(funcao) }))
+    .sort((a, b) => b.qtd - a.qtd);
 }
 
 function escalaChaveMapaDim(base) { return `gde_dim_mapa_${base}`; }

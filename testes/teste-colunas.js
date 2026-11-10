@@ -1279,9 +1279,25 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaModoColunas: 'essencial
 
   ok('"APRENDIZ LOG" vai para Auxiliar de Rampa', g('APRENDIZ LOG') === 'Auxiliar de Rampa', g('APRENDIZ LOG'));
 
-  // Não reconhecido tem que PERGUNTAR, não chutar Administração e gravar
-  // horário de gente em cima de um palpite.
-  ok('função desconhecida devolve nulo pra tela perguntar', g('XPTO') === null);
+  /* Função sem regra própria cai nas regras do CADASTRO, e não em nulo.
+
+     Esta asserção pedia nulo, com a intenção de fazer a tela perguntar
+     em vez de chutar. Era defensável enquanto o dimensionamento só
+     servia para aplicar horários. Deixou de ser quando a malha passou a
+     desenhar a Capacity inteira: nulo virou "a posição some da tela".
+
+     O caso real foi AUX. DE ESTEIRA, 84 posições em GRU — sumiam da
+     escala enquanto as PESSOAS dessa função iam para Administração,
+     porque o cadastro nunca devolve nulo. Posições num grupo e gente em
+     outro é precisamente o que o comentário de escalaGrupoDaFuncao
+     adverte que não pode acontecer.
+
+     O palpite continua sendo palpite: escalaFuncoesSemRegra() o conta e
+     a faixa avisa, para ser confirmado no mapeamento. */
+  ok('função sem regra cai no mesmo destino do cadastro, em vez de sumir',
+    g('XPTO') === sandbox.escalaGrupoDaFuncao('XPTO'), g('XPTO'));
+  ok('e esse destino é Administração, como no cadastro', g('XPTO') === 'Administração', g('XPTO'));
+  ok('AUX. DE ESTEIRA deixou de ser descartada', g('AUX. DE ESTEIRA') !== null, g('AUX. DE ESTEIRA'));
 
   // ── Os dois lados TÊM que concordar ───────────────────────────────
   // Se o dimensionamento manda a posição pra um grupo e o cadastro manda a
