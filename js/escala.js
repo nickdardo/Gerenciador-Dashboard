@@ -3174,6 +3174,54 @@ function escalaGradeEnxutaHTML(ano, mesNum, diasNoMes) {
         title="Gerar folgas automáticas só deste grupo, sem mexer no resto da escala">
         ${escalaIcone('sparkles')}Folgas do grupo</button></span></td></tr>`;
 
+    /* As posições que o dimensionamento pede e ninguém cobre vêm no
+       TOPO do grupo.
+
+       Estavam no fim, depois de todo mundo — e no fim é onde não se
+       olha. O que falta contratar ou remanejar é a pergunta aberta do
+       mês; a escala já montada é a parte resolvida. A pergunta vem
+       primeiro.
+
+       Fica acima inclusive de quem está sem horário, que é a outra
+       metade da mesma conta: posição sem gente em cima, gente sem
+       posição logo abaixo, e o que está resolvido depois. */
+    for (const v of vazias) {
+      html += `<tr class="${i++ % 2 ? 'escala-zebra' : ''} escala-enx-vaga">
+        <td class="escala-enx-fix col-mat mat" style="border:${BORDA}"><span
+          class="escala-mat-edit escala-mat-vaga" contenteditable="true" spellcheck="false"
+          data-vaga-entrada="${escalaEscapeAttr(v.entrada)}"
+          data-vaga-saida="${escalaEscapeAttr(v.saida)}"
+          title="Posição do dimensionamento sem ninguém. Digite uma matrícula para preenchê-la neste horário."
+          onfocus="escalaMatFoco(this)" onkeydown="escalaMatTecla(event, this)"
+          onblur="escalaVagaCommit(this)"></span></td>
+        <td class="escala-enx-fix col-nome nome vazia" style="border:${BORDA}">— posição sem colaborador —</td>
+        <td class="fn" style="border:${BORDA}" title="${escalaEscapeAttr(v.funcao || grupo)}">${escalaEscapeAttr(v.funcao || grupo)}</td>
+        <td class="n ch" style="border:${BORDA}">${v.jornada ? v.jornada + 'H' : '—'}</td>
+        ${(() => {
+          /* As células de dia saem com a MESMA estrutura das de uma
+             pessoa: mesma classe, mesmo tingimento de domingo, sábado e
+             feriado. Antes eram células lisas de outra classe, e a linha
+             de vaga quebrava o alinhamento visual das colunas bem no
+             lugar onde se compara uma linha com a outra. */
+          let dias = '';
+          for (let d = 1; d <= diasNoMes; d++) {
+            const dow = new Date(ano, mesNum - 1, d).getDay();
+            const dataISO = `${ano}-${String(mesNum).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+            const fer = window._escalaFeriados?.get(dataISO);
+            const cls = fer ? ' fer' : dow === 0 ? ' dom' : dow === 6 ? ' sab' : '';
+            dias += `<td class="cel${cls}" style="border:${BORDA}"`
+              + ` title="${escalaEscapeAttr(fer ? fer.nome : '')}"></td>`;
+          }
+          return dias;
+        })()}
+        <td class="n sel" style="border:${BORDA}"></td>
+        <td class="n sel" style="border:${BORDA}"></td>
+        <td class="n cont" style="border:${BORDA}"></td>
+        <td class="n hora" style="border:${BORDA}">${escalaEscapeAttr(v.entrada || '--:--')}</td>
+        <td class="n hora" style="border:${BORDA}">${escalaEscapeAttr(v.saida || '--:--')}</td>
+      </tr>`;
+    }
+
     for (const c of gente) {
       const info = window.eoColabs?.get(c.matricula);
       const funcao = info?.funcao || c.funcao_manual || '—';
@@ -3231,32 +3279,6 @@ function escalaGradeEnxutaHTML(ano, mesNum, diasNoMes) {
       </tr>`;
     }
 
-    /* As posições que o dimensionamento pede e ninguém cobre.
-
-       Linha vazia não é falta de informação: é a vaga a contratar ou
-       remanejar, com o horário que a malha exige. Digitar uma matrícula
-       aqui preenche a posição com aquele horário, sem precisar passar
-       pelo "Preencher com Staff". */
-    for (const v of vazias) {
-      html += `<tr class="${i++ % 2 ? 'escala-zebra' : ''} escala-enx-vaga">
-        <td class="escala-enx-fix col-mat mat" style="border:${BORDA}"><span
-          class="escala-mat-edit escala-mat-vaga" contenteditable="true" spellcheck="false"
-          data-vaga-entrada="${escalaEscapeAttr(v.entrada)}"
-          data-vaga-saida="${escalaEscapeAttr(v.saida)}"
-          title="Posição do dimensionamento sem ninguém. Digite uma matrícula para preenchê-la neste horário."
-          onfocus="escalaMatFoco(this)" onkeydown="escalaMatTecla(event, this)"
-          onblur="escalaVagaCommit(this)"></span></td>
-        <td class="escala-enx-fix col-nome nome vazia" style="border:${BORDA}">— posição sem colaborador —</td>
-        <td class="escala-enx-fix col-fn fn" style="border:${BORDA}">${escalaEscapeAttr(v.funcao || grupo)}</td>
-        <td class="escala-enx-fix col-ch n" style="border:${BORDA}">${v.jornada ? v.jornada + 'h' : ''}</td>
-        ${'<td class="dia vazia" style="border:' + BORDA + '"></td>'.repeat(diasNoMes)}
-        <td class="n sel" style="border:${BORDA}"></td>
-        <td class="n sel" style="border:${BORDA}"></td>
-        <td class="n cont" style="border:${BORDA}"></td>
-        <td class="n hora" style="border:${BORDA}">${escalaEscapeAttr(v.entrada || '--:--')}</td>
-        <td class="n hora" style="border:${BORDA}">${escalaEscapeAttr(v.saida || '--:--')}</td>
-      </tr>`;
-    }
   }
   return html + '</tbody></table>';
 }

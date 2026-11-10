@@ -1116,6 +1116,61 @@ function paginaDeTeste() {
       ok(r.parcial === 'Operadores,PAX', 'e desmarcar uma guarda exatamente as outras · ' + r.parcial);
     }
 
+    sec('8u. A vaga vem no topo e com o mesmo desenho da linha de gente');
+    {
+      /* Duas coisas que pareciam estéticas e não eram.
+
+         As vagas ficavam no fim do grupo, depois de todo mundo — e o fim
+         é onde não se olha. O que falta contratar é a pergunta aberta do
+         mês; a escala montada é a parte resolvida.
+
+         E as células de dia da vaga eram de outra classe, lisas, sem o
+         tingimento de domingo, sábado e feriado. A linha quebrava o
+         alinhamento visual das colunas bem no lugar onde se compara uma
+         linha com a outra. */
+      const r = await page.evaluate(() => {
+        window._escalaCenario = 'dimensionada';
+        window._escalaBase = 'GRU'; window._escalaMes = '2026-11';
+        window._escalaDias = new Map();
+        window._escalaFeriados = new Map([['2026-11-15', { nome: 'Proclamação da República' }]]);
+        window._escalaGruposVisiveis = null; window._escalaOrdemColuna = null;
+        window.escalaAplicarFiltroSituacao = (l) => l;
+        window.escalaEntradaEfetivaDoColab = (c) => c.entrada_manual || '';
+        window.escalaFuncaoGrupoDoColab = () => ({ label: 'Limpeza' });
+        window.escalaCarregarMapaDim = () => ({ 'ASG LIMPEZA': 'Limpeza' });
+        window._escalaPosicoesDim = [
+          { funcao: 'ASG LIMPEZA', entrada: '07:00', saida: '13:00', carga: 6, qtd: 2 },
+        ];
+        window._escalaColabs = [
+          { matricula: '1', nome: 'COM HORARIO', ch_manual: 180, entrada_manual: '07:00' },
+          { matricula: '2', nome: 'SEM HORARIO', ch_manual: 180, entrada_manual: null },
+        ];
+        window.eoColabs = new Map(window._escalaColabs.map((c) =>
+          [c.matricula, { nome: c.nome, funcao: 'ASG LIMPEZA I', ch: 180, station: 'GRU' }]));
+        return escalaGradeEnxutaHTML(2026, 11, 30);
+      });
+
+      const posVaga = r.indexOf('escala-enx-vaga');
+      const posSem = r.indexOf('SEM HORARIO');
+      const posCom = r.indexOf('COM HORARIO');
+      ok(posVaga > 0 && posVaga < posSem,
+        'a vaga vem antes de quem está sem horário');
+      ok(posSem < posCom,
+        'e quem está sem horário, antes de quem já está alocado');
+
+      /* O tingimento do feriado e do domingo precisa existir também na
+         linha de vaga, senão as colunas deixam de se corresponder. */
+      const linhaVaga = r.slice(posVaga, r.indexOf('</tr>', posVaga));
+      ok(/class="cel fer"/.test(linhaVaga),
+        'a célula do feriado na linha de vaga tem a mesma classe da linha de gente');
+      ok(/class="cel dom"/.test(linhaVaga) && /class="cel sab"/.test(linhaVaga),
+        'domingo e sábado também');
+      ok((linhaVaga.match(/class="cel/g) || []).length === 30,
+        'uma célula por dia do mês, como qualquer outra linha');
+      ok(!/class="dia vazia"/.test(linhaVaga),
+        'sem a classe própria antiga, que não se alinhava com nada');
+    }
+
     sec('9. Nenhum erro de script');
     ok(erros.length === 0, 'a página carregou sem exceção' + (erros.length ? ': ' + erros.join(' | ') : ''));
   } finally {

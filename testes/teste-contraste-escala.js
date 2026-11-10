@@ -254,6 +254,40 @@ sec('8. A faixa âmbar de "sem horário" e a matrícula duplicada');
     'e a preferência do sistema coberta também');
 }
 
+sec('9. A barra de rolagem dá para agarrar');
+{
+  /* Era de 4px. Fica discreta e é quase impossível de pegar: num alvo
+     de 4px o ponteiro precisa parar e mirar, e a escala é justamente a
+     tela onde mais se rola — 31 dias na horizontal.
+
+     Não deu para medir a largura real aqui: o Chromium deste ambiente
+     usa barras sobrepostas, que não reservam espaço no layout, e uma
+     página mínima com a regra padrão também devolve 0px. Então a
+     conferência é sobre a regra declarada, e a confirmação visual fica
+     para quem abrir o painel. */
+  const larg = /::-webkit-scrollbar\s*\{[^}]*width:\s*(\d+)px/.exec(css);
+  const alt = /::-webkit-scrollbar\s*\{[^}]*height:\s*(\d+)px/.exec(css);
+  ok(larg && Number(larg[1]) >= 12,
+    `a barra tem ao menos 12px de largura (declarado: ${larg ? larg[1] + 'px' : 'nada'})`);
+  ok(alt && Number(alt[1]) >= 12,
+    `e a horizontal também (declarado: ${alt ? alt[1] + 'px' : 'nada'})`);
+  ok(!/::-webkit-scrollbar\s*\{[^}]*width:\s*[0-9]px[^0-9]/.test(css),
+    'sem nenhuma regra de um dígito sobrando, que anularia a mudança');
+
+  /* A borda transparente afina o polegar aos olhos sem encolher o alvo
+     do ponteiro — é o truque que deixa a barra discreta e pegável ao
+     mesmo tempo. Só funciona com background-clip: padding-box. */
+  const thumb = /::-webkit-scrollbar-thumb\s*\{[^}]*\}/.exec(css);
+  ok(thumb && /border:\s*\d+px solid transparent/.test(thumb[0]),
+    'o polegar afina pela borda transparente, não pela largura');
+  ok(thumb && /background-clip:\s*padding-box/.test(thumb[0]),
+    'com background-clip padding-box, sem o qual a borda não afina nada');
+
+  ok(/scrollbar-color:/.test(css), 'o Firefox também recebe cor própria, em vez do padrão do sistema');
+  ok(/#escala-grade-wrap::-webkit-scrollbar[\s\S]{0,120}width:\s*1[4-9]px/.test(css),
+    'e a grade da escala, que é a superfície principal, ganha alvo ainda maior');
+}
+
 function resumo() {
   console.log('\n' + '─'.repeat(58));
   if (!fail) console.log('\x1b[32m✓ ' + pass + ' verificações passaram\x1b[0m');

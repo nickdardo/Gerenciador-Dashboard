@@ -704,10 +704,36 @@ html, body:has(#app-shell) { overflow-x: auto; overflow-y: hidden; }
 .placeholder-sub   { font-size: 12px; }
 
 /* ── Scrollbar ─────────────────────────────────────── */
-::-webkit-scrollbar       { width: 4px; height: 4px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
-::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+/* ── Barras de rolagem ────────────────────────────────────────────────
+   Eram de 4px. Fica elegante e é quase impossível de agarrar: para
+   acertar o ponteiro num alvo de 4px é preciso parar e mirar, e a escala
+   é justamente a tela onde mais se rola, nas duas direções.
+
+   12px é o mínimo confortável para arrastar com o mouse; a trilha
+   visível diz onde a barra está e qual a extensão do que não se vê. */
+::-webkit-scrollbar       { width: 12px; height: 12px; }
+::-webkit-scrollbar-track { background: color-mix(in srgb, var(--border) 25%, transparent); border-radius: 6px; }
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 6px;
+  /* A borda transparente afina o polegar visualmente sem reduzir a área
+     que o ponteiro acerta — o alvo continua com os 12px inteiros. */
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+::-webkit-scrollbar-corner { background: transparent; }
+* { scrollbar-color: var(--border-strong) color-mix(in srgb, var(--border) 25%, transparent); }
+
+/* A grade da escala é a superfície de rolagem principal do painel, e a
+   horizontal percorre 31 dias: ali vale um alvo ainda maior. */
+#escala-grade-wrap::-webkit-scrollbar,
+.escala-enx-wrap::-webkit-scrollbar { width: 14px; height: 14px; }
+#escala-grade-wrap, .escala-enx-wrap { scrollbar-width: auto; }
 
 /* ══════════════════════════════════════════════════════
    GERADOR — 3 colunas
@@ -4314,12 +4340,19 @@ body.escala-modo-grade .escala-fill { margin-top: 0; }
    Linha vazia aqui é informação, não ausência dela: é a vaga a
    contratar, com o horário que a malha exige. Listrada para não ser
    confundida com linha de gente, mas legível — ela vai ser lida. */
-.escala-enx-vaga td { background: repeating-linear-gradient(
-  135deg, transparent, transparent 6px,
-  color-mix(in srgb, var(--text-muted) 9%, transparent) 6px,
-  color-mix(in srgb, var(--text-muted) 9%, transparent) 12px); }
+/* A listra diagonal cobria a linha inteira e matava o tingimento de
+   domingo, sábado e feriado — justamente as referências que fazem a
+   grade ser lida de relance. A vaga agora se distingue pela barra à
+   esquerda e pelo texto em itálico, e as colunas continuam alinhadas
+   com as das pessoas. */
+.escala-enx-vaga td:first-child { box-shadow: inset 3px 0 0 #0b7093; }
+[data-theme="dark"] .escala-enx-vaga td:first-child { box-shadow: inset 3px 0 0 #4fc3e8; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .escala-enx-vaga td:first-child { box-shadow: inset 3px 0 0 #4fc3e8; }
+}
 .escala-enx-vaga .nome.vazia { color: var(--text-secondary); font-style: italic; }
 .escala-enx-vaga .hora { font-weight: 700; }
+.escala-enx-vaga .fn, .escala-enx-vaga .ch { color: var(--text-secondary); }
 .escala-mat-vaga:empty::before {
   content: '+ matrícula';
   color: var(--text-secondary);
