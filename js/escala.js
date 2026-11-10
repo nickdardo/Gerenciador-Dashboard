@@ -1111,6 +1111,14 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
              dentro de cada bloco: ninguém tinha onde pedir outra ordem.
              Aqui está o mesmo mecanismo, acessível de onde se olha. -->
         <div>
+          <label style="font-size:10.5px;color:var(--text-muted);display:block;margin-bottom:3px">Agrupar por</label>
+          <select class="adh-month-select" onchange="escalaSetAgrupamento(this.value)"
+            title="Por função responde 'tenho ASG suficiente?'. Por turno responde 'tenho gente bastante na madrugada do dia 14?'">
+            <option value="funcao" ${escalaAgrupamento() === 'funcao' ? 'selected' : ''}>Função</option>
+            <option value="turno" ${escalaAgrupamento() === 'turno' ? 'selected' : ''}>Turno (pelo horário)</option>
+          </select>
+        </div>
+        <div>
           <label style="font-size:10.5px;color:var(--text-muted);display:block;margin-bottom:3px">Organizar por</label>
           <select class="adh-month-select" onchange="escalaSetOrdemColuna(this.value)"
             title="Ordena a lista dentro de cada bloco. 'Automático' volta ao padrão: função, depois horário, depois nome.">
@@ -1193,6 +1201,7 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
           escalaAcaoItem('calendarPlus', 'Adicionar feriado dessa base', 'escalaAdicionarFeriado()', travada),
         ])}
         ${escalaBlocoAcoes('Organização e limpeza', [
+          escalaAcaoItem('check', 'Conferir escala', 'escalaAbrirConferencia()'),
           escalaAcaoItem('sort', 'Ordenar automático', 'escalaLimparOrdemManual()', travada),
           escalaAcaoItem('trash', 'Limpar folgas e status', 'escalaLimparStatus()', travada, true),
           escalaAcaoItem('trash', 'Limpar colaboradores', 'escalaLimparColaboradores()', travada, true),
@@ -2124,6 +2133,11 @@ function escalaGrupoDaFuncao(funcaoRaw) {
   // — senão as posições vão pra um grupo e as pessoas pra outro, e o
   // casamento acusa vaga descoberta com gente sobrando ao lado.
   if (f.includes('APRENDIZ') && f.includes('LOG')) return 'Auxiliar de Rampa';
+  /* Esteira é trabalho de bagagem e carga, como ASA rampa e ASA triagem.
+     Ficava em Administração só porque nenhuma regra a reconhecia e esse
+     é o destino final — 84 posições e as pessoas delas no grupo errado,
+     ainda que coerentes entre si. */
+  if (f.includes('ESTEIRA')) return 'Auxiliar de Rampa';
   if (f.includes('LIDER')) return 'Líder de Operações';
   if (f.includes('OPERADOR')) return 'Operadores';
   if (f.includes('MECANIC') || f.includes('MANUTEN') || f.includes('SERRALHEIRO') || f.includes('PINTOR') || f.includes('ELETRIC')) return 'GSE';
@@ -2299,6 +2313,13 @@ const ESCALA_PENDENTES = {
                 const c = ESCALA_ORDENACOES.find((o) => o.valor === ((v && v.coluna) || ''));
                 return `ordenar por ${(c ? c.label : 'automático').toLowerCase()}`;
               } },
+  agrupamento: { lê: () => escalaAgrupamento(),
+              grava: (v) => {
+                window._escalaAgrupamento = v;
+                try { localStorage.setItem('gde_escala_agrupamento', v); } catch (_) {}
+              },
+              compara: (v) => String(v || 'funcao'),
+              rotulo: (v) => (v === 'turno' ? 'agrupar por turno' : 'agrupar por função') },
   blocos:   { lê: () => !!window._escalaBlocosRecolhidos,
               grava: (v) => { window._escalaBlocosRecolhidos = !!v;
                               try { localStorage.setItem('gde_escala_blocos_recolhidos', v ? '1' : '0'); } catch (_) {} },
@@ -2439,6 +2460,19 @@ const ESCALA_MODOS_COLUNA = {
   completo:  { rotulo: 'Colunas: completas',  proximo: 'enxuto',
                desc: 'Tudo, inclusive turno e os dois intervalos' },
 };
+/* Por que agrupar: por função (o padrão) ou por turno.
+
+   São duas perguntas diferentes feitas à mesma escala. Por função:
+   "tenho ASG suficiente?". Por turno: "tenho gente bastante na
+   madrugada do dia 14?". A segunda é a que decide se a operação roda, e
+   até agora não havia como fazê-la sem contar linha a linha. */
+const escalaAgrupamento = () =>
+  (window._escalaAgrupamento === 'turno' ? 'turno' : 'funcao');
+
+function escalaSetAgrupamento(valor) {
+  escalaPendente('agrupamento', valor === 'turno' ? 'turno' : 'funcao');
+}
+
 const escalaModoColunas = () =>
   (ESCALA_MODOS_COLUNA[window._escalaModoColunas] ? window._escalaModoColunas : 'enxuto');
 // O layout enxuto vale para as duas escalas; o botão Colunas devolve as
@@ -2893,6 +2927,16 @@ function escalaColabsOrdenados(ano, mesNum, diasNoMes) {
    novo recomeça a conversa. */
 const ESCALA_SETOR_EXTRA = '__extra__';
 
+/* Quem não cobre operação naquele dia: a pessoa existe na escala, mas
+   não está no posto.
+
+   Os códigos saem de ESCALA_LEGENDA, que é a lista real — escrevi este
+   conjunto de memória na primeira versão e inventei metade ('FE', 'A',
+   'AF', 'ATE'), além de esquecer férias ('L') e folga compensa ('CH'),
+   que são justamente duas das mais comuns. Derivar da legenda impede
+   que as duas listas divirjam de novo. */
+const ESCALA_STATUS_AUSENTE = new Set(ESCALA_LEGENDA.map(([cod]) => cod));
+
 function escalaMalhaDoDimensionamento() {
   const posicoes = window._escalaPosicoesDim || [];
   const mapa = escalaCarregarMapaDim(window._escalaBase) || {};
@@ -3057,10 +3101,17 @@ function escalaGradeEnxutaHTML(ano, mesNum, diasNoMes) {
        critério. A ordem canônica de ESCALA_GRUPOS mantém a escala
        reconhecível: muda o que está DENTRO do bloco, não onde ele está. */
   const visiveis = window._escalaGruposVisiveis;
+  /* O filtro de grupos continua sendo por FUNÇÃO mesmo quando a grade
+     está agrupada por turno: "ver só a Limpeza, separada por turno" é um
+     pedido legítimo, e seria impossível se o filtro mudasse junto. */
+  const porTurno = escalaAgrupamento() === 'turno';
   const porGrupo = new Map();
   for (const c of colabs) {
-    const g = escalaFuncaoGrupoDoColab(c).label || 'Sem função';
-    if (visiveis && visiveis.size && !visiveis.has(g)) continue;
+    const gFuncao = escalaFuncaoGrupoDoColab(c).label || 'Sem função';
+    if (visiveis && visiveis.size && !visiveis.has(gFuncao)) continue;
+    const g = porTurno
+      ? escalaSetorDoTurno(escalaEntradaEfetivaDoColab(c, ano, mesNum, diasNoMes))
+      : gFuncao;
     if (!porGrupo.has(g)) porGrupo.set(g, []);
     porGrupo.get(g).push(c);
   }
@@ -3075,9 +3126,11 @@ function escalaGradeEnxutaHTML(ano, mesNum, diasNoMes) {
     }
   }
 
+  const ORDEM_TURNO = ['Turno Alpha', 'Turno Bravo', 'Turno Charlie', 'Turno Delta', '—'];
   const posGrupo = (g) => {
-    const i = ESCALA_GRUPOS.indexOf(g);
-    return i < 0 ? ESCALA_GRUPOS.length : i; // "Sem função" vai para o fim
+    const lista = porTurno ? ORDEM_TURNO : ESCALA_GRUPOS;
+    const i = lista.indexOf(g);
+    return i < 0 ? lista.length : i;   // "Sem função" / sem horário vão para o fim
   };
   const ordenados = [...porGrupo.entries()].sort((a, b) => posGrupo(a[0]) - posGrupo(b[0]));
   porGrupo.clear();
@@ -3176,6 +3229,52 @@ function escalaGradeEnxutaHTML(ano, mesNum, diasNoMes) {
         onclick="escalaGerarFolgasAuto('${g1}')"
         title="Gerar folgas automáticas só deste grupo, sem mexer no resto da escala">
         ${escalaIcone('sparkles')}Folgas do grupo</button></span></td></tr>`;
+
+    /* Quantas pessoas deste bloco trabalham em cada dia do mês.
+
+       É a conta que não se conseguia fazer sem contar linha a linha, e é
+       a que decide se a operação roda: não adianta ter 40 pessoas no
+       turno se 18 folgam no mesmo sábado. A linha fica logo abaixo da
+       faixa, antes das pessoas, porque é resumo — e resumo lido depois
+       da lista já não resume nada.
+
+       Conta quem TRABALHA: folga, férias, afastamento e curso saem da
+       conta, porque nenhum deles cobre operação. */
+    if (gente.length) {
+      const porDia = new Array(diasNoMes).fill(0);
+      for (const c of gente) {
+        const conteudo = escalaConteudoDoMes(c, ano, mesNum, diasNoMes);
+        for (let d = 0; d < diasNoMes; d++) {
+          if (!ESCALA_STATUS_AUSENTE.has(conteudo[d].status || '')) porDia[d]++;
+        }
+      }
+      const menor = Math.min(...porDia), maior = Math.max(...porDia);
+      let celulas = '';
+      for (let d = 1; d <= diasNoMes; d++) {
+        const n = porDia[d - 1];
+        const dow = new Date(ano, mesNum - 1, d).getDay();
+        const dataISO = `${ano}-${String(mesNum).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        const fer = window._escalaFeriados?.get(dataISO);
+        const cls = fer ? ' fer' : dow === 0 ? ' dom' : dow === 6 ? ' sab' : '';
+        /* O dia mais fraco do bloco é o que interessa achar de relance —
+           é onde a cobertura quebra primeiro. */
+        const marca = (n === menor && menor !== maior) ? ' magro' : '';
+        celulas += `<td class="cel${cls} escala-cob-cel${marca}" style="border:${BORDA}"`
+          + ` title="${n} de ${gente.length} trabalhando no dia ${d}">${n}</td>`;
+      }
+      html += `<tr class="escala-enx-cobertura">
+        <td class="escala-enx-fix col-mat" style="border:${BORDA}"></td>
+        <td class="escala-enx-fix col-nome rot" style="border:${BORDA}">Trabalhando por dia</td>
+        <td class="fn" style="border:${BORDA}"></td>
+        <td class="n ch" style="border:${BORDA}">${gente.length}</td>
+        ${celulas}
+        <td class="n sel" style="border:${BORDA}"></td>
+        <td class="n sel" style="border:${BORDA}"></td>
+        <td class="n cont" style="border:${BORDA}" title="menor e maior cobertura do mês">${menor}–${maior}</td>
+        <td class="n hora" style="border:${BORDA}"></td>
+        <td class="n hora" style="border:${BORDA}"></td>
+      </tr>`;
+    }
 
     /* As posições que o dimensionamento pede e ninguém cobre vêm no
        TOPO do grupo.
@@ -4430,6 +4529,152 @@ function escalaMarcarEsvaziada(base, mes, valor) {
    Depois disto a Capacity fica em branco de verdade, e só volta a
    desenhar quando um dimensionamento for lido de novo no Gerador.
    ══════════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════════
+   Conferir a escala
+
+   As regras sempre foram verificadas por PESSOA: cada linha tem o seu
+   "6 dias", o seu "domingo", a sua contagem de folgas. O que nunca
+   existiu foi a pergunta do mês inteiro — "esta escala está pronta?" —
+   e, sem ela, responder exigia percorrer 1.200 linhas procurando cruz
+   vermelha.
+
+   A conferência devolve uma LISTA de pendências, não um veredito
+   solitário. Veredito sozinho ("faltam 8 coisas") não ajuda ninguém a
+   agir; a lista nomeia quem e permite ir até a linha.
+   ══════════════════════════════════════════════════════ */
+function escalaConferir() {
+  const base = window._escalaBase, mes = window._escalaMes;
+  const [ano, mesNum] = String(mes || '').split('-').map(Number);
+  if (!ano || !mesNum) return { pendencias: [], pronta: false, motivo: 'Mês não definido.' };
+  const D = new Date(ano, mesNum, 0).getDate();
+  const colabs = window._escalaColabs || [];
+
+  const pend = [];
+  const add = (tipo, rotulo, pessoas) => {
+    if (pessoas.length) pend.push({ tipo, rotulo, pessoas });
+  };
+
+  const semHorario = [], folgaFaltando = [], coladas = [], domingo = [], semSeis = [], faRuim = [];
+  for (const c of colabs) {
+    const entrada = escalaEntradaEfetivaDoColab(c, ano, mesNum, D);
+    const nome = c.nome || c.matricula;
+    if (!entrada) { semHorario.push({ matricula: c.matricula, nome, detalhe: 'sem horário' }); }
+
+    const diasFolga = escalaFolgasDoColab(c, ano, mesNum, D, window._escalaDias);
+    const agrupadas = new Set();
+    for (let d = 1; d <= D; d++) {
+      if (window._escalaDias.get(`${c.matricula}|${d}`)?.status === 'FA') agrupadas.add(d);
+    }
+    const r = escalaValidarRegrasFolga(diasFolga, ano, mesNum, D, agrupadas);
+    const ch = window.eoColabs?.get(c.matricula)?.ch || c.ch_manual || '';
+    const meta = escalaMetaFolgasDoColab(ch, D);
+    const feitas = diasFolga.size;
+
+    /* Os nomes e as direções saem de escalaValidarRegrasFolga, que é o
+       validador único das regras duras. Escrevi esta parte de memória na
+       primeira versão e inverti uma: pus "nenhum domingo de folga" como
+       problema, quando a regra é NO MÁXIMO um — dois domingos é que
+       quebram. Também inventei um campo `tresSeguidas` que não existe; o
+       que existe é `coladas`, que conta folgas emendadas fora do par
+       válido com domingo. */
+    if (feitas < meta) {
+      folgaFaltando.push({ matricula: c.matricula, nome, detalhe: `${feitas} de ${meta} folgas` });
+    }
+    if (r.maxSequencia > 6) {
+      semSeis.push({ matricula: c.matricula, nome, detalhe: `${r.maxSequencia} dias seguidos` });
+    }
+    if (r.domingos > 1) {
+      domingo.push({ matricula: c.matricula, nome, detalhe: `${r.domingos} domingos de folga` });
+    }
+    if (r.coladas > 0) {
+      coladas.push({ matricula: c.matricula, nome, detalhe: `${r.coladas} folga(s) emendada(s)` });
+    }
+    if (r.faInvalidas.length) {
+      faRuim.push({ matricula: c.matricula, nome, detalhe: r.faInvalidas[0].motivo });
+    }
+  }
+
+  add('semHorario', 'Sem horário', semHorario);
+  add('folgas', 'Folgas abaixo da meta', folgaFaltando);
+  add('seisDias', 'Mais de 6 dias seguidos trabalhados', semSeis);
+  add('domingo', 'Mais de um domingo de folga', domingo);
+  add('coladas', 'Folgas emendadas fora do par com domingo', coladas);
+  add('faAgrupada', 'Folga agrupada marcada em dia inválido', faRuim);
+
+  /* Na Capacity, posição sem gente também é pendência — e é a que custa
+     dinheiro. Não entra na conta de "pronta" porque pode ser gap real de
+     efetivo, que a escala não resolve sozinha; entra na lista para ser
+     vista. */
+  let posicoesVazias = 0;
+  if (escalaEhCapacity()) {
+    const porGrupo = new Map();
+    for (const c of colabs) {
+      const g = escalaFuncaoGrupoDoColab(c).label || 'Sem função';
+      if (!porGrupo.has(g)) porGrupo.set(g, []);
+      porGrupo.get(g).push(c);
+    }
+    for (const [grupo] of escalaMalhaDoDimensionamento()) {
+      posicoesVazias += escalaVagasVaziasDoGrupo(grupo, porGrupo.get(grupo) || [], ano, mesNum, D).length;
+    }
+  }
+
+  /* "Pronta" é: ninguém sem horário e todas as folgas fechadas. Os
+     outros apontamentos aparecem na lista, mas não trancam — uma escala
+     pode legitimamente ter alguém com 7 dias seguidos por acordo. */
+  const pronta = colabs.length > 0 && !semHorario.length && !folgaFaltando.length;
+  return { pendencias: pend, pronta, posicoesVazias, total: colabs.length, base, mes };
+}
+
+/* O painel da conferência. Cada pendência leva à linha: uma lista que
+   só informa obriga a procurar a pessoa de novo, e procurar entre 1.200
+   linhas é o trabalho que a lista existia para poupar. */
+function escalaAbrirConferencia() {
+  document.getElementById('escala-conf-card')?.remove();
+  const r = escalaConferir();
+
+  const bloco = (p) => `
+    <div class="secao">${escalaEscapeAttr(p.rotulo)} <span class="n">${p.pessoas.length}</span></div>
+    <ul>${p.pessoas.slice(0, 50).map((x) => `<li>
+      <button type="button" onclick="escalaIrParaLinha('${escalaEscapeAttr(x.matricula)}')">
+        <span class="mat">${escalaEscapeAttr(x.matricula)}</span>
+        <span class="nome">${escalaEscapeAttr(x.nome)}</span>
+        <span class="det">${escalaEscapeAttr(x.detalhe)}</span>
+      </button></li>`).join('')}</ul>
+    ${p.pessoas.length > 50 ? `<div class="mais">...e mais ${p.pessoas.length - 50}</div>` : ''}`;
+
+  const total = r.pendencias.reduce((n, p) => n + p.pessoas.length, 0);
+  const card = document.createElement('div');
+  card.id = 'escala-conf-card';
+  card.className = 'escala-fora-card escala-conf-card';
+  card.innerHTML = `
+    <div class="topo">
+      <strong>${r.pronta ? 'Escala pronta' : `${total} pendência${total === 1 ? '' : 's'}`}</strong>
+      <button type="button" class="fechar" onclick="this.closest('.escala-conf-card').remove()"
+        aria-label="Fechar">×</button>
+    </div>
+    <div class="veredito ${r.pronta ? 'ok' : 'pendente'}">
+      ${r.pronta
+        ? `${r.total} pessoa(s), todas com horário e com as folgas fechadas.`
+        : `De ${r.total} pessoa(s) na escala. Travam a escala: quem está sem horário e quem está com folgas abaixo da meta.`}
+      ${r.posicoesVazias
+        ? `<br>${r.posicoesVazias} posição(ões) do dimensionamento sem ninguém — isso é efetivo, não marcação.`
+        : ''}
+    </div>
+    ${r.pendencias.length ? r.pendencias.map(bloco).join('') : ''}`;
+  document.body.appendChild(card);
+}
+
+/* Fecha o painel, rola até a linha e a acende por um instante. */
+function escalaIrParaLinha(matricula) {
+  document.getElementById('escala-conf-card')?.remove();
+  escalaToggleMenuFerramentas(false);
+  const linha = document.querySelector(`tr[data-escala-linha="${CSS.escape(matricula)}"]`);
+  if (!linha) { escalaMsg(`${matricula} não está visível com os filtros atuais.`, true); return; }
+  linha.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  linha.classList.add('escala-linha-achada');
+  setTimeout(() => linha.classList.remove('escala-linha-achada'), 2400);
+}
+
 async function escalaLimparDimensionamento() {
   if (!escalaEhCapacity()) {
     escalaMsg('O dimensionamento pertence à Escala Capacity.', true);

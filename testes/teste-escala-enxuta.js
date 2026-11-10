@@ -1246,6 +1246,135 @@ function paginaDeTeste() {
         'a mensagem diz como montar a malha de novo: ' + r.msg);
     }
 
+    sec('8w. Agrupar por turno e contar quem trabalha em cada dia');
+    {
+      /* São duas perguntas diferentes feitas à mesma escala. Por função:
+         "tenho ASG suficiente?". Por turno: "tenho gente bastante na
+         madrugada do dia 14?". A segunda decide se a operação roda, e
+         até agora só dava para respondê-la contando linha a linha. */
+      const r = await page.evaluate(() => {
+        window._escalaCenario = 'planejada';
+        window._escalaBase = 'GRU'; window._escalaMes = '2026-11';
+        window._escalaFeriados = new Map();
+        window._escalaGruposVisiveis = null; window._escalaOrdemColuna = null;
+        window._escalaPosicoesDim = [];
+        window.escalaAplicarFiltroSituacao = (l) => l;
+        window.escalaEntradaEfetivaDoColab = (c) => c.entrada_manual || '';
+        window.escalaFuncaoGrupoDoColab = () => ({ label: 'Limpeza' });
+
+        // Três na madrugada, uma à tarde. Duas folgam no dia 1.
+        window._escalaColabs = [
+          { matricula: '1', nome: 'A', ch_manual: 180, entrada_manual: '00:00' },
+          { matricula: '2', nome: 'B', ch_manual: 180, entrada_manual: '05:00' },
+          { matricula: '3', nome: 'C', ch_manual: 180, entrada_manual: '03:00' },
+          { matricula: '4', nome: 'D', ch_manual: 180, entrada_manual: '14:00' },
+        ];
+        window.eoColabs = new Map(window._escalaColabs.map((c) =>
+          [c.matricula, { nome: c.nome, funcao: 'ASG LIMPEZA I', ch: 180, station: 'GRU' }]));
+        // 'L' é férias; 'FE' não existe na legenda. Escrevi 'FE' na
+        // primeira versão deste teste e ele acusou — a contagem veio 2.
+        window._escalaDias = new Map([['1|1', { status: 'F' }], ['2|1', { status: 'L' }]]);
+
+        window._escalaAgrupamento = 'turno';
+        const turno = escalaGradeEnxutaHTML(2026, 11, 30);
+        window._escalaAgrupamento = 'funcao';
+        const funcao = escalaGradeEnxutaHTML(2026, 11, 30);
+        return { turno, funcao };
+      });
+
+      ok(/Turno Alpha/.test(r.turno) && /Turno Charlie/.test(r.turno),
+        'agrupado por turno, as faixas são os turnos');
+      ok(!/Turno Alpha/.test(r.funcao) && /Limpeza/.test(r.funcao),
+        'e por função continuam sendo as funções');
+
+      const alpha = r.turno.slice(r.turno.indexOf('Turno Alpha'));
+      // Fatia até o fim DAQUELA linha: sem isso o recorte engolia a
+      // linha de cobertura do bloco seguinte e contava 60 células.
+      const cobIni = alpha.indexOf('escala-enx-cobertura');
+      const cob = alpha.slice(cobIni, alpha.indexOf('</tr>', cobIni));
+      ok(/Trabalhando por dia/.test(cob), 'cada bloco ganha a linha de cobertura');
+
+      /* No dia 1 duas das três da madrugada estão fora: uma de folga,
+         outra de férias. Sobra uma. Nos outros dias, três. */
+      const celulas = [...cob.matchAll(/escala-cob-cel[^>]*>(\d+)</g)].map((m) => Number(m[1]));
+      ok(celulas[0] === 1, 'no dia 1 sobra uma trabalhando das três  (veio ' + celulas[0] + ')');
+      ok(celulas[1] === 3, 'no dia 2, as três  (veio ' + celulas[1] + ')');
+      ok(celulas.length === 30, 'uma contagem por dia do mês  (veio ' + celulas.length + ')');
+
+      ok(/escala-cob-cel magro[^>]*>1</.test(cob),
+        'o dia mais fraco do bloco é destacado — é onde a cobertura quebra primeiro');
+      ok(/title="menor e maior cobertura do mês">1–3</.test(cob),
+        'e o resumo do bloco diz o mínimo e o máximo do mês');
+
+      /* Férias e folga pesam igual aqui: nenhuma das duas cobre posto. */
+      ok(!/escala-cob-cel[^>]*>0</.test(cob),
+        'nenhum dia aparece zerado neste exemplo, que teria outra causa');
+    }
+
+    sec('8x. Conferir a escala — a pergunta do mês inteiro');
+    {
+      /* As regras sempre foram verificadas por PESSOA: cada linha tem o
+         seu "6 dias", o seu "domingo", a sua contagem de folgas. O que
+         não existia era a pergunta do mês — "esta escala está pronta?" —
+         e respondê-la exigia percorrer 1.200 linhas atrás de cruz
+         vermelha. */
+      const r = await page.evaluate(() => {
+        window._escalaCenario = 'planejada';
+        window._escalaBase = 'GRU'; window._escalaMes = '2026-11';
+        window._escalaFeriados = new Map();
+        window.escalaFuncaoGrupoDoColab = () => ({ label: 'Limpeza' });
+        window.escalaEntradaEfetivaDoColab = (c) => c.entrada_manual || '';
+        window.escalaEstaDeFerias = () => false;
+        window._escalaColabs = [
+          { matricula: '1', nome: 'SEM HORARIO', ch_manual: 180, entrada_manual: null },
+          { matricula: '2', nome: 'POUCAS FOLGAS', ch_manual: 180, entrada_manual: '06:00' },
+          { matricula: '3', nome: 'DOIS DOMINGOS', ch_manual: 180, entrada_manual: '06:00' },
+        ];
+        window.eoColabs = new Map(window._escalaColabs.map((c) =>
+          [c.matricula, { nome: c.nome, funcao: 'ASG LIMPEZA I', ch: 180, station: 'GRU' }]));
+
+        // Domingos de novembro/2026: 1, 8, 15, 22, 29.
+        const dias = new Map();
+        [1, 8, 15, 22, 29].forEach((d) => dias.set(`3|${d}`, { status: 'F' }));
+        window._escalaDias = dias;
+        const conf = escalaConferir();
+        return {
+          pronta: conf.pronta,
+          tipos: conf.pendencias.map((p) => p.tipo),
+          porTipo: Object.fromEntries(conf.pendencias.map((p) =>
+            [p.tipo, p.pessoas.map((x) => x.matricula).join()])),
+        };
+      });
+
+      ok(r.pronta === false, 'com gente sem horário, a escala não está pronta');
+      ok((r.porTipo.semHorario || '') === '1', 'a pessoa sem horário é nomeada');
+      ok(/2/.test(r.porTipo.folgas || ''), 'quem está abaixo da meta de folgas também');
+
+      /* A direção desta regra eu já inverti uma vez: escrevi "nenhum
+         domingo de folga" como problema, quando a regra do validador é
+         NO MÁXIMO um — dois é que quebram. */
+      ok((r.porTipo.domingo || '') === '3',
+        'e dois domingos de folga é que são problema, não a ausência deles · ' + (r.porTipo.domingo || 'ninguém'));
+      ok(!r.tipos.includes('tresSeguidas'),
+        'sem campo inventado: o validador chama isto de "coladas", não de "três seguidas"');
+
+      const pronta = await page.evaluate(() => {
+        window._escalaColabs = [{ matricula: '1', nome: 'OK', ch_manual: 180, entrada_manual: '06:00' }];
+        window.eoColabs = new Map([['1', { nome: 'OK', funcao: 'ASG LIMPEZA I', ch: 180, station: 'GRU' }]]);
+        // Meta de folgas de CH 180 em 30 dias, cumprida sem emendar nem
+        // repetir domingo.
+        const meta = escalaMetaFolgasDoColab(180, 30);
+        const dias = new Map();
+        let posto = 0;
+        for (let d = 2; d <= 30 && posto < meta; d += 3) { dias.set(`1|${d}`, { status: 'F' }); posto++; }
+        window._escalaDias = dias;
+        const c = escalaConferir();
+        return { pronta: c.pronta, meta, postas: posto, pend: c.pendencias.map((p) => p.tipo) };
+      });
+      ok(pronta.pronta === true,
+        `com horário e folgas fechadas, a escala fica pronta (meta ${pronta.meta}, postas ${pronta.postas}, pendências: ${pronta.pend.join() || 'nenhuma'})`);
+    }
+
     sec('9. Nenhum erro de script');
     ok(erros.length === 0, 'a página carregou sem exceção' + (erros.length ? ': ' + erros.join(' | ') : ''));
   } finally {

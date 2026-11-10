@@ -1108,6 +1108,21 @@ tudoOk &= rodar('agrupado, colunas essenciais', { _escalaModoColunas: 'essencial
     if (t.includes('ESCALA_SETOR_EXTRA')) continue;
     if (t.includes('cenario') || t.includes('escala_ultima_base') || t.includes('escalaPopularAutomaticamente')) continue;
     if (chamada.test(t)) continue;
+
+    /* Nem todo objeto com `base` e `mes` é gravação: um `return { base,
+       mes, ... }` de função de diagnóstico não escreve nada, e acusá-lo
+       é alarme falso — guarda que dá alarme falso acaba desligada por
+       quem está com pressa, que é quando ela mais faria falta.
+
+       Tentei antes o contrário: aceitar só o que estivesse logo depois
+       de insert/upsert/update. Ficou estreito demais e deixou passar uma
+       gravação de verdade, montada dentro de um `.map()`. Numa guarda,
+       errar para o lado do alarme custa uma linha de exceção; errar para
+       o lado do silêncio custa o bug inteiro.
+
+       Então a rede continua ampla e a exceção é só esta, nomeada. */
+    if (/\breturn\s*$/.test(fonte.slice(Math.max(0, m.index - 12), m.index))) continue;
+
     semCampo.push(t.split('\n')[0].trim().slice(0, 70));
   }
   ok('toda gravação carrega o cenário', semCampo.length === 0, semCampo.slice(0, 3).join(' | '));

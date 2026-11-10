@@ -4511,3 +4511,71 @@ body.escala-modo-grade .escala-fill { margin-top: 0; }
   :root:not([data-theme="light"]) .escala-chip-palpite { border-color: #9db2e8; color: #9db2e8; }
   :root:not([data-theme="light"]) .escala-chip-palpite .n { background: #3b4a78; }
 }
+
+/* ── Linha de cobertura: quanta gente trabalha em cada dia ───────────── */
+.escala-enx-cobertura td {
+  background: color-mix(in srgb, var(--blue, #00a0d2) 7%, var(--bg-surface));
+  font-weight: 600;
+  border-bottom: 2px solid color-mix(in srgb, var(--blue, #00a0d2) 30%, transparent) !important;
+}
+.escala-enx-cobertura .rot {
+  font-size: 10px;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.escala-cob-cel { text-align: center; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+/* O dia mais fraco do bloco: é onde a cobertura quebra primeiro, e achá-lo
+   contando com o dedo é o que se quer evitar. */
+.escala-cob-cel.magro { color: #a01f1f; font-weight: 800; }
+[data-theme="dark"] .escala-cob-cel.magro { color: #fc8181; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .escala-cob-cel.magro { color: #fc8181; }
+}
+
+/* ── Conferência da escala ───────────────────────────────────────────── */
+.escala-conf-card { width: 520px; left: 50%; transform: translateX(-50%); top: 72px; }
+.escala-conf-card .veredito {
+  padding: 10px 12px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+.escala-conf-card .veredito.ok { color: #1a6b41; }
+.escala-conf-card .veredito.pendente { color: #8a5f12; }
+[data-theme="dark"] .escala-conf-card .veredito.ok { color: #72c02c; }
+[data-theme="dark"] .escala-conf-card .veredito.pendente { color: #f0c870; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .escala-conf-card .veredito.ok { color: #72c02c; }
+  :root:not([data-theme="light"]) .escala-conf-card .veredito.pendente { color: #f0c870; }
+}
+.escala-conf-card .secao .n {
+  background: var(--bg-hover);
+  border-radius: 9px;
+  padding: 1px 6px;
+  font-variant-numeric: tabular-nums;
+}
+.escala-conf-card li button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 6px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font-size: 12px;
+  color: inherit;
+}
+.escala-conf-card li button:hover { background: var(--bg-hover); }
+.escala-conf-card .det { color: var(--text-secondary); font-size: 10.5px; white-space: nowrap; }
+.escala-conf-card .nome { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* A linha encontrada acende por um instante: rolar até ela sem marcá-la
+   deixa a pessoa procurando qual das trinta visíveis era. */
+@keyframes escalaAchou { from { background: color-mix(in srgb, var(--blue, #00a0d2) 38%, transparent); } }
+.escala-linha-achada > td { animation: escalaAchou 2.4s ease-out; }
