@@ -4056,7 +4056,7 @@ async function escalaAlocarGrupo(grupo) {
   const vagas = [];
   for (const [, h] of malha) {
     for (let i = 0; i < h.pedido; i++) {
-      vagas.push({ grupo, jornada: h.jornada, entrada: h.entrada, saida: h.saida });
+      vagas.push({ grupo, jornada: h.jornada, entrada: h.entrada, saida: h.saida, funcaoDim: h.funcao });
     }
   }
 
@@ -4144,7 +4144,7 @@ async function escalaAlocarGrupo(grupo) {
           .eq('base', base).eq('mes', mes).order('entrada').order('funcao').range(de, ate),
         'escala_dimensionamento');
       for (let i = 0; i < sobra; i++) {
-        vagas.push({ grupo, jornada: pico.jornada, entrada: pico.entrada, saida: pico.saida });
+        vagas.push({ grupo, jornada: pico.jornada, entrada: pico.entrada, saida: pico.saida, funcaoDim: pico.funcao });
       }
     }
 
@@ -4181,8 +4181,15 @@ async function escalaAlocarGrupo(grupo) {
       + (sobra && pico ? `, ${sobra} em posições extras das ${pico.entrada}` : '')
       + (semGente.length ? `, ${semGente.reduce((n, h) => n + h.falta, 0)} ainda sem gente` : '')
       + (semPosicao ? `, ${semPosicao} pessoa(s) sem posição` : '')
+      + (r.trocasDeFuncao.length ? `. ${r.trocasDeFuncao.length} cobrindo posição de OUTRA função` : '')
       + (r.enxertos.length ? `. ${r.enxertos.length} com jornada diferente da posição — veja no console` : '.'),
-      semGente.length || semPosicao || r.enxertos.length ? 'aviso' : 'ok');
+      semGente.length || semPosicao || r.enxertos.length || r.trocasDeFuncao.length ? 'aviso' : 'ok');
+    if (r.trocasDeFuncao.length) {
+      console.log([`[escala/${grupo}] posição coberta por função diferente:`,
+        ...r.trocasDeFuncao.map((t) =>
+          `   ${t.matricula} ${t.nome} (${t.funcaoPessoa}) → posição de ${t.funcaoVaga} às ${t.entrada}`),
+      ].join('\n'));
+    }
     if (r.enxertos.length) {
       console.log([`[escala/${grupo}] jornada diferente da posição (carga mensal a conferir):`,
         ...r.enxertos.map((e) =>
@@ -7981,6 +7988,35 @@ async function escalaExecutarAplicacaoDim(posicoes, mapa) {
       horários com MAIS posições. Um horário de 12 perder 1 é diferente de
       um horário de 2 ser zerado.
    ══════════════════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════════
+   Famílias de função — o casamento não mistura quem não se mistura
+
+   O emparelhamento era feito por GRUPO. Em Limpeza convivem ASG
+   LIMPEZA, ENC. LIMPEZA II e SUPERVISOR LIMPEZA IV: todos caíam na mesma
+   fila, e uma posição de ASG das 05:00 às 08:00 (3H) podia receber um
+   encarregado de CH 180. O horário batia, a função não — e a escala
+   passava a afirmar que havia encarregado num horário que o
+   dimensionamento não pede para encarregado nenhum.
+
+   O obstáculo é que os dois lados escrevem a mesma função de jeitos
+   diferentes: o arquivo diz "ENC. LIMPEZA II", o cadastro diz "ENC. DE
+   LIMPEZA II". Comparar cruas nunca casa. Reduzidas à FAMÍLIA — sem
+   acentos, sem artigos, sem o nível romano, sem pontuação — as duas
+   viram "ENC LIMPEZA" e se reconhecem.
+
+   O grupo continua valendo como rede de segurança: o que não casar por
+   família é emparelhado dentro do grupo, e sai nomeado no relatório.
+   ══════════════════════════════════════════════════════ */
+function escalaFamiliaDaFuncao(f) {
+  return String(f || '')
+    .toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[.,/\-]/g, ' ')
+    .replace(/\b(DE|DA|DO|DAS|DOS)\b/g, ' ')
+    .replace(/\b(I{1,3}|IV|V|VI{0,3}|IX|X)\b/g, ' ')   // nível: I, II, III, IV…
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function escalaCasarVagasComPessoas(vagas, colabs, ano, mesNum, diasNoMes) {
   const minutos = (h) => escalaMinutosDeHora(h) ?? 9999;
   const horarioDe = (v) => `${v.entrada || '?'}–${v.saida || '?'}`;
@@ -8005,6 +8041,7 @@ function escalaCasarVagasComPessoas(vagas, colabs, ano, mesNum, diasNoMes) {
     if (!pessoasPorGrupo.has(grupo)) pessoasPorGrupo.set(grupo, []);
     pessoasPorGrupo.get(grupo).push({
       matricula: c.matricula, nome: c.nome,
+      funcao: window.eoColabs?.get(c.matricula)?.funcao || c.funcao_manual || '',
       jornada: escalaJornadaDoColab(c.matricula, c),
       entradaAtual: escalaEntradaEfetivaDoColab(c, ano, mesNum, diasNoMes) || '',
     });
@@ -8012,6 +8049,7 @@ function escalaCasarVagasComPessoas(vagas, colabs, ano, mesNum, diasNoMes) {
 
   const atribuicoes = [];
   const enxertos = [];                 // quem entrou por jornada diferente
+  const trocasDeFuncao = [];           // quem cobriu posição de outra função
   const atendido = new Map();          // horário → quantos conseguiram gente
   const pessoasSobrando = new Map();   // grupo → quantos ficaram sem posição
 
@@ -8039,6 +8077,15 @@ function escalaCasarVagasComPessoas(vagas, colabs, ano, mesNum, diasNoMes) {
          ela passa a ser relatada em vez de silenciosamente compensada,
          que é onde esse tipo de decisão pertence: à vista de quem
          responde pela escala. */
+      const famV = escalaFamiliaDaFuncao(vaga.funcaoDim || '');
+      const famP = escalaFamiliaDaFuncao(pes.funcao || '');
+      if (famV && famP && famV !== famP) {
+        trocasDeFuncao.push({
+          matricula: pes.matricula, nome: pes.nome, grupo: vaga.grupo,
+          entrada: vaga.entrada, saida: vaga.saida,
+          funcaoVaga: vaga.funcaoDim || '', funcaoPessoa: pes.funcao || '',
+        });
+      }
       if (pes.jornada && vaga.jornada && pes.jornada !== vaga.jornada) {
         enxertos.push({
           matricula: pes.matricula, nome: pes.nome, grupo: vaga.grupo,
@@ -8082,16 +8129,48 @@ function escalaCasarVagasComPessoas(vagas, colabs, ano, mesNum, diasNoMes) {
       vg = vg.filter((v) => !descartar.has(v));
     }
 
-    /* Uma única passada por grupo, ordenando os dois lados pelo horário.
+    /* Primeiro por FAMÍLIA de função, depois o resto no grupo.
 
-       Tentei antes casar primeiro as jornadas exatas e só depois enxertar
-       o que sobrasse. Erra: a primeira passada toma os horários da ponta
-       antes de os enxertos entrarem na conta, e quem entra às 21:00 vai
-       para a vaga das 06:00 enquanto o enxerto fica com as 22:00. Aqui a
-       proximidade de horário decide tudo de uma vez — que é justamente o
-       que foi pedido — e a jornada diferente deixa de ser parede: vira
-       ressalva nomeada, com a saída calculada pela CH da pessoa. */
-    const r = emparelhar(vg, pg, true);
+       Já tentei fazer isto por JORNADA e dei para trás: a primeira
+       passada tomava os horários da ponta antes de os enxertos entrarem
+       na conta, e quem entrava às 21:00 ia parar na vaga das 06:00.
+       Jornada é característica da pessoa; o horário devia decidir.
+
+       Função é outra coisa. Um encarregado não cobre posição de ASG por
+       estar livre no mesmo horário — a posição existe para uma função
+       determinada, e preenchê-la com outra faz a escala afirmar o que o
+       dimensionamento não disse. Aqui a função é a restrição, e o
+       horário decide DENTRO dela, que é o único lugar onde ele deve
+       decidir. */
+    const familiaDaVaga = (v) => escalaFamiliaDaFuncao(v.funcaoDim || '');
+    const familiaDaPessoa = (p) => escalaFamiliaDaFuncao(p.funcao || '');
+
+    const porFamilia = new Map();
+    vg.forEach((v) => {
+      const k = familiaDaVaga(v);
+      if (!k) return;
+      if (!porFamilia.has(k)) porFamilia.set(k, { v: [], p: [] });
+      porFamilia.get(k).v.push(v);
+    });
+    pg.forEach((x) => {
+      const k = familiaDaPessoa(x);
+      if (!porFamilia.has(k)) return;   // sem posição dessa família: vai para o resto
+      porFamilia.get(k).p.push(x);
+    });
+
+    const usadasV = new Set(), usadasP = new Set();
+    for (const [, par] of porFamilia) {
+      const r = emparelhar(par.v, par.p, true);
+      par.v.forEach((v) => { if (!r.vagasRestantes.includes(v)) usadasV.add(v); });
+      par.p.forEach((x) => { if (!r.pessoasRestantes.includes(x)) usadasP.add(x); });
+    }
+
+    /* Rede de segurança: o que não casou por família é emparelhado no
+       grupo, e cada caso desses sai nomeado — é decisão de operação, não
+       de algoritmo. */
+    const sobramV = vg.filter((v) => !usadasV.has(v));
+    const sobramP = pg.filter((x) => !usadasP.has(x));
+    const r = emparelhar(sobramV, sobramP, true);
     if (r.pessoasRestantes.length) pessoasSobrando.set(grupo, r.pessoasRestantes.length);
   }
 
@@ -8109,7 +8188,7 @@ function escalaCasarVagasComPessoas(vagas, colabs, ano, mesNum, diasNoMes) {
   const vagasSobrando = new Map();
   porHorario.filter((h) => h.falta > 0).forEach((h) => vagasSobrando.set(h.horario, h.falta));
 
-  return { atribuicoes, vagasSobrando, pessoasSobrando, porHorario, enxertos };
+  return { atribuicoes, vagasSobrando, pessoasSobrando, porHorario, enxertos, trocasDeFuncao };
 }
 
 // O botão "Comparar" só faz sentido quando existem os DOIS cenários com

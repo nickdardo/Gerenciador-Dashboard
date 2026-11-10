@@ -231,6 +231,80 @@ const TOTAL = DIMENSIONAMENTO.reduce((n, l) => n + l[4], 0);
         'funções que têm regra própria não entram no aviso');
     }
 
+    sec('9b. Encarregado não ocupa posição de ASG');
+    {
+      /* O caso real: às 05:00 o arquivo pede 3 ASG LIMPEZA de 3H
+         (05:00–08:00) e 3 ENC. LIMPEZA II de 6H (05:00–11:00). O
+         emparelhamento era por GRUPO, e em Limpeza convivem ASG, ENC e
+         SUPERVISOR — todos na mesma fila. Um encarregado de CH 180 caía
+         numa vaga de ASG de 3H: o horário batia, a função não, e a
+         escala passava a afirmar que havia encarregado num horário que o
+         dimensionamento não pede para encarregado nenhum.
+
+         Os dois lados escrevem diferente — "ENC. LIMPEZA II" no arquivo,
+         "ENC. DE LIMPEZA II" no cadastro — e é por isso que a comparação
+         é por família, não por igualdade de texto. */
+      const r = await page.evaluate(() => {
+        window.escalaFuncaoGrupoDoColab = () => ({ label: 'Limpeza' });
+        window.escalaEntradaEfetivaDoColab = (c) => c.entrada_manual || '';
+        const vagas = [
+          { grupo: 'Limpeza', funcaoDim: 'ASG LIMPEZA', jornada: 3, entrada: '05:00', saida: '08:00' },
+          { grupo: 'Limpeza', funcaoDim: 'ENC. LIMPEZA II', jornada: 6, entrada: '05:00', saida: '11:00' },
+        ];
+        /* A encarregada vem PRIMEIRO na lista. Com o emparelhamento por
+           grupo, as duas filas são ordenadas só pelo horário — e, com
+           empate, a ordem de entrada decide. Assim a encarregada caía na
+           primeira vaga, que é a de ASG. Era esta a coincidência que
+           fazia a versão anterior deste teste passar nos dois casos e
+           não provar nada. */
+        const gente = [
+          { matricula: '2', nome: 'ENCARREGADA', entrada_manual: '05:00' },
+          { matricula: '1', nome: 'ASG UM', entrada_manual: '05:00' },
+        ];
+        window.eoColabs = new Map([
+          ['1', { nome: 'ASG UM', funcao: 'ASG LIMPEZA I', ch: 90, station: 'GRU' }],
+          ['2', { nome: 'ENCARREGADA', funcao: 'ENC. DE LIMPEZA II', ch: 180, station: 'GRU' }],
+        ]);
+        const c = escalaCasarVagasComPessoas(vagas, gente, 2026, 11, 30);
+        return {
+          porMatricula: Object.fromEntries(c.atribuicoes.map((a) => [a.matricula, `${a.entrada}–${a.saida}`])),
+          trocas: c.trocasDeFuncao.length,
+          familias: [escalaFamiliaDaFuncao('ENC. LIMPEZA II'),
+                     escalaFamiliaDaFuncao('ENC. DE LIMPEZA II'),
+                     escalaFamiliaDaFuncao('ASG LIMPEZA I')],
+        };
+      });
+
+      eq(r.familias[0], r.familias[1],
+        'as duas grafias de encarregado reduzem à mesma família: ' + r.familias[0]);
+      ok(r.familias[0] !== r.familias[2],
+        'e ASG é outra família, para não se confundirem: ' + r.familias[2]);
+
+      eq(r.porMatricula['2'], '05:00–11:00',
+        'a encarregada vai para a posição de ENC, de 6h — não para a de ASG');
+      eq(r.porMatricula['1'], '05:00–08:00',
+        'e a ASG fica com a de ASG, de 3h');
+      eq(r.trocas, 0, 'sem ninguém cobrindo posição de outra função');
+    }
+
+    sec('9c. O grupo ainda é rede de segurança, mas nomeada');
+    {
+      /* Quando não há gente da família, o grupo cobre — senão a posição
+         ficaria vazia com gente parada ao lado. Mas isso é decisão de
+         operação, e tem de sair com nome. */
+      const r = await page.evaluate(() => {
+        const vagas = [{ grupo: 'Limpeza', funcaoDim: 'ENC. LIMPEZA II', jornada: 6, entrada: '05:00', saida: '11:00' }];
+        const gente = [{ matricula: '1', nome: 'ASG UM', entrada_manual: '05:00' }];
+        window.eoColabs = new Map([['1', { nome: 'ASG UM', funcao: 'ASG LIMPEZA I', ch: 90, station: 'GRU' }]]);
+        const c = escalaCasarVagasComPessoas(vagas, gente, 2026, 11, 30);
+        return { n: c.atribuicoes.length, trocas: c.trocasDeFuncao };
+      });
+      eq(r.n, 1, 'sem gente da família, o grupo cobre a posição');
+      eq(r.trocas.length, 1, 'e a cobertura por outra função é registrada');
+      eq(r.trocas[0].funcaoVaga, 'ENC. LIMPEZA II', 'dizendo de que função era a posição');
+      eq(r.trocas[0].funcaoPessoa, 'ASG LIMPEZA I', 'e qual a da pessoa que entrou nela');
+    }
+
     sec('9. Nenhum erro de script');
     ok(erros.length === 0, 'a página rodou sem exceção' + (erros.length ? ': ' + erros.join(' | ') : ''));
   } finally {
