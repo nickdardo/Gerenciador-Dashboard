@@ -1171,6 +1171,81 @@ function paginaDeTeste() {
         'sem a classe própria antiga, que não se alinhava com nada');
     }
 
+    sec('8v. Limpar o dimensionamento apaga a malha, não a gente');
+    {
+      /* A terceira limpeza. As outras duas mexem em quem está na escala;
+         esta mexe na MALHA — apaga as posições do Gerador para esta base
+         e este mês, extras inclusive, e os horários que delas vieram.
+
+         Serve para recomeçar quando o arquivo subiu errado. Enquanto a
+         malha velha estiver no banco, a Capacity continua desenhando as
+         posições dela, e subir um arquivo novo por cima não deixa claro
+         o que ficou de qual. */
+      const r = await page.evaluate(async () => {
+        window._escalaBase = 'GRU'; window._escalaMes = '2026-11';
+        window._escalaCenario = 'dimensionada';
+        window._escalaDias = new Map([['1|5', { status: 'F' }]]);
+        window._escalaFeriados = new Map();
+        window.escalaFuncaoGrupoDoColab = () => ({ label: 'Limpeza' });
+        window.escalaCarregarMapaDim = () => ({ 'ASG LIMPEZA': 'Limpeza' });
+        window.escalaAplicarFiltroSituacao = (l) => l;
+        window.escalaEntradaEfetivaDoColab = (c) => c.entrada_manual || '';
+        window.escalaVerificarTravada = () => false;
+        window.escalaMostrarLoading = () => {}; window.escalaLoadingAtualiza = () => {};
+        window.escalaGradeAtualiza = () => {}; window.escalaMsg = (m) => { window.__msg = m; };
+        window.confirm = () => true;
+
+        window._escalaPosicoesDim = [
+          { funcao: 'ASG LIMPEZA', entrada: '07:00', saida: '13:00', carga: 6, qtd: 4 },
+          { funcao: 'ASG LIMPEZA', entrada: '16:00', saida: '22:00', carga: 6, qtd: 2, setor: '__extra__' },
+        ];
+        window._escalaColabs = [
+          { matricula: '1', nome: 'ANA', entrada_manual: '07:00', saida_manual: '13:00' },
+          { matricula: '2', nome: 'BIA', entrada_manual: null, saida_manual: null },
+        ];
+        window.eoColabs = new Map(window._escalaColabs.map((c) =>
+          [c.matricula, { nome: c.nome, funcao: 'ASG LIMPEZA I', ch: 180, station: 'GRU' }]));
+
+        const feito = { apagou: [], gravou: [] };
+        window.db = { from(t) { return {
+          delete() { const f = { filtros: {}, eq(c, v) { f.filtros[c] = v; return f; },
+            then(r) { feito.apagou.push({ tabela: t, ...f.filtros }); return Promise.resolve({ error: null }).then(r); } };
+            return f; },
+          upsert(linhas) { feito.gravou.push({ tabela: t, linhas }); return Promise.resolve({ error: null }); },
+        }; } };
+
+        await escalaLimparDimensionamento();
+        return {
+          feito,
+          posicoes: window._escalaPosicoesDim.length,
+          colabs: window._escalaColabs.length,
+          horarios: window._escalaColabs.map((c) => c.entrada_manual),
+          folgas: window._escalaDias.size,
+          msg: window.__msg,
+        };
+      });
+
+      ok(r.feito.apagou.some((a) => a.tabela === 'escala_dimensionamento'
+          && a.base === 'GRU' && a.mes === '2026-11'),
+        'apaga as posições da base e do mês abertos');
+      ok(!r.feito.apagou.some((a) => a.tabela === 'escala_colaborador'),
+        'e NÃO apaga colaborador nenhum — para isso existe a outra limpeza');
+      ok(r.colabs === 2, 'as duas pessoas continuam na escala  (veio ' + r.colabs + ')');
+      ok(r.horarios.every((h) => h === null), 'mas sem horário, porque o horário vinha da malha');
+      ok(r.folgas === 1, 'as folgas marcadas não são tocadas  (veio ' + r.folgas + ')');
+      ok(r.posicoes === 0, 'a malha fica vazia na memória também, sem precisar recarregar');
+
+      const grav = r.feito.gravou.find((g) => g.tabela === 'escala_colaborador');
+      ok(grav && grav.linhas.length === 1,
+        'só quem tinha horário é regravado — quem já estava sem não vira escrita à toa');
+      ok(grav && grav.linhas[0].entrada_manual === null && grav.linhas[0].saida_manual === null,
+        'com entrada e saída zeradas');
+      ok(grav && grav.linhas[0].cenario === 'dimensionada',
+        'e no cenário certo, sem alcançar a Escala Base');
+      ok(/Gerador/.test(r.msg || ''),
+        'a mensagem diz como montar a malha de novo: ' + r.msg);
+    }
+
     sec('9. Nenhum erro de script');
     ok(erros.length === 0, 'a página carregou sem exceção' + (erros.length ? ': ' + erros.join(' | ') : ''));
   } finally {

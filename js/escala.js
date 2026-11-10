@@ -1196,6 +1196,9 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
           escalaAcaoItem('sort', 'Ordenar automático', 'escalaLimparOrdemManual()', travada),
           escalaAcaoItem('trash', 'Limpar folgas e status', 'escalaLimparStatus()', travada, true),
           escalaAcaoItem('trash', 'Limpar colaboradores', 'escalaLimparColaboradores()', travada, true),
+          ...(escalaEhCapacity()
+            ? [escalaAcaoItem('trash', 'Limpar dimensionamento do mês', 'escalaLimparDimensionamento()', travada, true)]
+            : []),
         ])}
       </div>
       <div id="escala-status-msg" style="font-size:11px;color:var(--text-muted);margin-top:8px;min-height:14px"></div>
@@ -4410,6 +4413,79 @@ function escalaMarcarEsvaziada(base, mes, valor) {
     if (valor) localStorage.setItem(escalaChaveEsvaziada(base, mes), '1');
     else localStorage.removeItem(escalaChaveEsvaziada(base, mes));
   } catch (_) {}
+}
+
+/* ══════════════════════════════════════════════════════
+   Limpar o dimensionamento do mês
+
+   As outras duas limpezas mexem em quem está na escala. Esta mexe na
+   MALHA: apaga as posições que o Gerador gravou para esta base e este
+   mês, extras inclusive, e com elas os horários que delas vieram.
+
+   Serve para recomeçar quando o arquivo subiu errado — mês trocado, base
+   trocada, versão antiga. Enquanto a malha velha estiver no banco, a
+   Capacity continua desenhando as posições dela, e subir um arquivo novo
+   por cima nem sempre deixa claro o que ficou de qual.
+
+   Depois disto a Capacity fica em branco de verdade, e só volta a
+   desenhar quando um dimensionamento for lido de novo no Gerador.
+   ══════════════════════════════════════════════════════ */
+async function escalaLimparDimensionamento() {
+  if (!escalaEhCapacity()) {
+    escalaMsg('O dimensionamento pertence à Escala Capacity.', true);
+    return;
+  }
+  if (escalaVerificarTravada()) return;
+
+  const base = window._escalaBase, mes = window._escalaMes;
+  const posicoes = (window._escalaPosicoesDim || []).reduce((n, p) => n + (p.qtd || 1), 0);
+  const extras = (window._escalaPosicoesDim || [])
+    .filter((p) => p.setor === ESCALA_SETOR_EXTRA).reduce((n, p) => n + (p.qtd || 1), 0);
+  const comHorario = (window._escalaColabs || []).filter((c) => c.entrada_manual).length;
+
+  if (!posicoes && !comHorario) { escalaMsg('Não há dimensionamento carregado neste mês.'); return; }
+
+  if (!confirm(
+    `LIMPAR O DIMENSIONAMENTO — ${base} · ${mes}\n\n`
+    + `${posicoes} posição(ões) serão apagadas do banco`
+    + (extras ? `, ${extras} delas abertas à mão` : '')
+    + `\n${comHorario} colaborador(es) ficarão sem horário\n\n`
+    + `Os colaboradores PERMANECEM na escala — só perdem o horário.\n`
+    + `As folgas marcadas não são tocadas.\n\n`
+    + `A Capacity fica em branco até você subir um dimensionamento no Gerador.\n\n`
+    + `Não dá para desfazer. Continuar?`)) return;
+
+  escalaMostrarLoading('Limpando o dimensionamento...');
+  try {
+    /* A malha sai primeiro. Na ordem inversa, uma falha aqui deixaria os
+       horários zerados com as posições de pé — a escala pediria gente
+       para posições que acabaram de perder quem as ocupava. */
+    const { error } = await db.from('escala_dimensionamento').delete()
+      .eq('base', base).eq('mes', mes);
+    if (error) throw new Error(error.message);
+
+    const linhas = (window._escalaColabs || [])
+      .filter((c) => c.entrada_manual || c.saida_manual)
+      .map((c) => ({ base, mes, cenario: escalaCenario(), matricula: c.matricula, nome: c.nome,
+                     entrada_manual: null, saida_manual: null }));
+    for (let i = 0; i < linhas.length; i += 200) {
+      const r = await db.from('escala_colaborador')
+        .upsert(linhas.slice(i, i + 200), { onConflict: 'base,mes,cenario,matricula' });
+      if (r.error) throw new Error(r.error.message);
+      escalaLoadingAtualiza(Math.min(i + 200, linhas.length), linhas.length);
+    }
+
+    window._escalaPosicoesDim = [];
+    window._escalaLinhasEstaticas = [];
+    (window._escalaColabs || []).forEach((c) => { c.entrada_manual = null; c.saida_manual = null; });
+
+    escalaGradeAtualiza();
+    escalaMsg(`Dimensionamento apagado: ${posicoes} posição(ões) e ${linhas.length} horário(s). `
+      + `Suba um arquivo no Gerador para montar a malha de novo.`);
+  } catch (e) {
+    escalaGradeAtualiza();
+    escalaMsg('Erro ao limpar o dimensionamento: ' + e.message, true);
+  }
 }
 
 async function escalaLimparColaboradores() {
