@@ -199,7 +199,104 @@ const sec = (t) => console.log('\n\x1b[36m── ' + t + '\x1b[0m');
       eq(p2 && p2[1], 180, 'e o deslocamento exportado é o mesmo da tela, pelo caminho curto');
     }
 
-    sec('7. Nenhum erro de script');
+    sec('7. A régua não muda de valor a cada filtro');
+    {
+      /* Usar o próprio máximo como topo faz o eixo virar 387, depois
+         112, depois 1.204 — e duas telas lado a lado deixam de ser
+         comparáveis, porque a mesma altura significa coisas diferentes. */
+      const r = await page.evaluate(() => ({
+        a: cmpTeto(387, 4), b: cmpTeto(368, 4), c: cmpTeto(112, 4),
+        d: cmpTeto(14, 4), e: cmpTeto(0, 4), f: cmpTeto(400, 4),
+      }));
+      eq(r.a, 400, '387 e 368 caem no mesmo teto redondo');
+      eq(r.b, 400, 'o segundo deles também');
+      eq(r.c, 120, '112 não precisa de uma régua até 400');
+      eq(r.d, 16, 'a régua de voos acompanha a ordem de grandeza dos voos');
+      eq(r.e, 4, 'série zerada ainda tem régua, em vez de dividir por zero');
+      eq(r.f, 400, 'um máximo já redondo não é inflado para o degrau seguinte');
+    }
+
+    sec('8. Os voos têm eixo próprio — não entram na régua de pessoas');
+    {
+      /* Pessoas são centenas e voos são dezenas. Desenhar os dois na
+         mesma régua ou some com os voos (14 em 400 vira meio pixel) ou
+         os faz cruzar as curvas e disputar a leitura. */
+      const r = await page.evaluate(() => {
+        const base = [112,108,96,101,128,150,159,268,352,368,299,248,286,301,294,276,252,238,249,272,331,352,344,300];
+        const cap  = [95,92,86,89,106,132,165,206,229,185,176,151,191,206,201,186,171,161,171,186,206,211,201,151];
+        const voos = [4,2,1,1,2,5,9,12,14,11,8,7,9,10,9,8,7,8,10,12,13,11,8,6];
+        const com = cmpGraficoCobertura(base, cap, voos);
+        const sem = cmpGraficoCobertura(base, cap, new Array(24).fill(0));
+        const alturas = [...com.matchAll(/fill="var\(--cmp-voo-fill\)"[^>]*/g)].length;
+        const hs = [...com.matchAll(/height="([\d.]+)"\s+rx="2"\s+fill="var\(--cmp-voo-fill\)"/g)]
+          .map((m) => Number(m[1]));
+        return {
+          barras: alturas,
+          maiorBarra: Math.max(...hs),
+          temEixoVoos: />voos</.test(com),
+          semEixoVoos: />voos</.test(sem),
+          barrasSem: [...sem.matchAll(/fill="var\(--cmp-voo-fill\)"/g)].length,
+          dicaCom: /voo\(s\)/.test(com),
+          dicaSem: /voo\(s\)/.test(sem),
+        };
+      });
+
+      eq(r.barras, 24, 'uma barra por hora com voo');
+      /* Área útil do gráfico: 430 − 34 − 32 = 364px. Os voos ocupam 38%
+         dela, ou seja, no máximo ~138px. Se alguém colocar os voos na
+         régua de pessoas, 14 em 400 daria ~13px; se usar a altura cheia,
+         daria ~318. Os dois erros caem fora desta janela. */
+      ok(r.maiorBarra > 60 && r.maiorBarra < 146,
+        'a barra do pico ocupa a faixa de baixo, nem some nem toma o gráfico (veio ' + r.maiorBarra.toFixed(1) + 'px)');
+      ok(r.temEixoVoos, 'com malha, o eixo da direita é rotulado');
+      ok(!r.semEixoVoos, 'sem malha, o eixo da direita não aparece marcando zeros');
+      eq(r.barrasSem, 0, 'e nenhuma barra é desenhada');
+      ok(r.dicaCom && !r.dicaSem, 'a dica do mouse só cita voos quando há malha');
+    }
+
+    sec('9. A hora de maior diferença é escrita no gráfico');
+    {
+      const r = await page.evaluate(() => {
+        const base = new Array(24).fill(100); base[9] = 368;
+        const cap = new Array(24).fill(100); cap[9] = 185;
+        const svg = cmpGraficoCobertura(base, cap, new Array(24).fill(0));
+        return { txt: (/>(\d+) pessoa\(s\) (a menos|a mais)</.exec(svg) || []).slice(1).join(' '),
+                 hora: (/às (\d{2})h na Capacity/.exec(svg) || [])[1] };
+      });
+      eq(r.txt, '183 a menos', 'a chamada diz o tamanho e o sentido da diferença');
+      eq(r.hora, '09', 'e a hora em que ela acontece');
+    }
+
+    sec('10. A planilha leva a coluna de voos');
+    {
+      const r = await page.evaluate(() => {
+        const mk = (mat, e) => [mat, { matricula: mat, nome: 'P' + mat, grupo: 'Limpeza',
+          horario: { entrada: e, saida: (e + 360) % 1440 } }];
+        cmpDados = {
+          base: new Map([mk('1', 360)]), capacity: new Map([mk('1', 480)]),
+          ano: 2026, mesNum: 11, diasNoMes: 30, nomeBase: 'GRU', mes: '2026-11',
+          voos: Array.from({ length: 24 }, (_, h) => h), diasComVoo: 30,
+        };
+        cmpGrupo = null;
+        let cap = null;
+        window.XLSX = {
+          utils: {
+            book_new: () => ({ SheetNames: [], Sheets: {} }),
+            aoa_to_sheet: (a) => ({ __aoa: a }),
+            book_append_sheet: (wb, ws, nome) => { wb.SheetNames.push(nome); wb.Sheets[nome] = ws; },
+          },
+          writeFile: (wb) => { cap = wb; },
+        };
+        cmpExportar();
+        const aoa = cap.Sheets['Cobertura por hora'].__aoa;
+        return { cab: aoa[0], linha7: aoa[8] };
+      });
+      eq(r.cab.length, 5, 'a aba de cobertura ganhou uma coluna');
+      eq(r.cab[4], 'VOOS (PICO DO MÊS)', 'e ela diz que é pico, não média');
+      eq(r.linha7[4], 7, 'o valor da hora bate com a série da malha');
+    }
+
+    sec('11. Nenhum erro de script');
     ok(erros.length === 0, 'a página rodou sem exceção' + (erros.length ? ': ' + erros.join(' | ') : ''));
   } finally {
     await browser.close();

@@ -4584,6 +4584,58 @@ body.escala-modo-grade .escala-fill { margin-top: 0; }
 .cmp-carregando { color: var(--text-secondary); font-size: 12px; padding: 24px; }
 .cmp-vazio { color: var(--text-secondary); font-size: 12px; padding: 12px 2px; }
 
+/* As cores do gráfico são tokens, e não hexes escritos no JS, porque o
+   SVG é montado em JavaScript: assim o tema troca a cor sem o JS ter de
+   saber qual tema está ativo. Os valores daqui são os do tema claro; o
+   bloco seguinte troca para o escuro. */
+:root {
+  --cmp-base:       #a8700c;
+  --cmp-cap:        #0b7093;
+  --cmp-cap-area:   rgba(11,112,147,.14);
+  --cmp-voo:        #5b43ad;
+  --cmp-voo-fill:   rgba(91,67,173,.13);
+  --cmp-voo-stroke: rgba(91,67,173,.34);
+  --cmp-dif:        #b42318;
+  --cmp-dif-caixa:  rgba(180,35,24,.07);
+}
+[data-theme="dark"] {
+  --cmp-base:       #e8b24a;
+  --cmp-cap:        #3fb6dd;
+  --cmp-cap-area:   rgba(63,182,221,.20);
+  --cmp-voo:        #a78bfa;
+  --cmp-voo-fill:   rgba(167,139,250,.20);
+  --cmp-voo-stroke: rgba(167,139,250,.45);
+  --cmp-dif:        #fc8181;
+  --cmp-dif-caixa:  rgba(252,129,129,.10);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --cmp-base:       #e8b24a;
+    --cmp-cap:        #3fb6dd;
+    --cmp-cap-area:   rgba(63,182,221,.20);
+    --cmp-voo:        #a78bfa;
+    --cmp-voo-fill:   rgba(167,139,250,.20);
+    --cmp-voo-stroke: rgba(167,139,250,.45);
+    --cmp-dif:        #fc8181;
+    --cmp-dif-caixa:  rgba(252,129,129,.10);
+  }
+}
+
+/* O gráfico cresce com a tela: a malha tem 24 colunas e, espremidas, as
+   barras de voo encostam nas curvas — foi o risco levantado quando este
+   formato foi escolhido. */
+.cmp-grafico { width: 100%; }
+.cmp-grafico svg { display: block; width: 100%; height: auto; }
+
+/* Rodapé do gráfico: as três leituras que não cabem em cartão mas que
+   são a primeira pergunta de quem olha a curva. */
+.cmp-rodape {
+  display: flex; flex-wrap: wrap; gap: 8px 28px;
+  margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--border);
+  font-size: 11.5px; color: var(--text-secondary);
+}
+.cmp-rodape b { color: var(--text-primary); font-weight: 600; }
+
 .cmp-cartoes { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
 .cmp-cartao {
   background: var(--bg-surface);
@@ -4594,6 +4646,19 @@ body.escala-modo-grade .escala-fill { margin-top: 0; }
 }
 .cmp-cartao .n { font-size: 26px; font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; line-height: 1.1; }
 .cmp-cartao .r { font-size: 11px; color: var(--text-secondary); }
+/* A faixa colorida liga o cartão à sua curva no gráfico logo abaixo. Sem
+   ela, cinco números iguais obrigam a reler o rótulo de cada um. */
+.cmp-cartao { position: relative; overflow: hidden; }
+.cmp-cartao::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--border-strong);
+}
+.cmp-cartao.c-base::before { background: var(--cmp-base); }
+.cmp-cartao.c-cap::before  { background: var(--cmp-cap); }
+.cmp-cartao.c-dif::before  { background: var(--cmp-dif); }
+.cmp-cartao.c-voo::before  { background: var(--cmp-voo); }
+.cmp-cartao .rot { font-size: 10px; letter-spacing: .07em; text-transform: uppercase; color: var(--text-secondary); }
+.cmp-cartao .d { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 /* Quanta gente muda de horário é o número que decide a viabilidade da
    migração — e o único que não pode passar despercebido. */
 .cmp-cartao.alerta { border-color: #c08a2a; }
@@ -4612,6 +4677,9 @@ body.escala-modo-grade .escala-fill { margin-top: 0; }
 .cmp-tit .leg { font-size: 11px; font-weight: 400; color: var(--text-secondary); display: flex; gap: 14px; }
 .cmp-tit .chave { display: inline-flex; align-items: center; gap: 6px; }
 .cmp-tit .chave i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+/* Os voos são barras, não linha: a legenda tem de parecer uma barra,
+   senão o olho procura uma terceira curva que não existe. */
+.cmp-tit .chave i.caixa { height: 10px; border-radius: 2px; }
 /* O tracejado na legenda repete o do gráfico: sem isso, quem não
    distingue bem as duas cores fica sem saber qual curva é qual. */
 .cmp-tit .chave i.tracejado {
