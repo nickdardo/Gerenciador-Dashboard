@@ -226,6 +226,14 @@ function cmpTeto(valor, divisoes) {
 
 const cmpHh = (h) => `${String(h).padStart(2, '0')}h`;
 
+/* "2026-11" não diz nada a quem abre a tela. E a BASE menos ainda, se
+   não estiver escrita: duas escalas comparadas sem dizer de onde são é
+   um gráfico que não se pode levar para reunião nenhuma. */
+function cmpRotuloMes(mes) {
+  if (typeof adhMonthLabel === 'function') return adhMonthLabel(mes);
+  return String(mes || '');
+}
+
 /* COBERTURA POR HORA — o painel principal.
 
    Três séries no mesmo quadro, e isso é uma decisão com custo: pessoas
@@ -234,9 +242,21 @@ const cmpHh = (h) => `${String(h).padStart(2, '0')}h`;
    em escala cheia os faria cruzar as curvas e competir com elas; na
    faixa de baixo eles funcionam como o que são — o pano de fundo contra
    o qual as duas escalas são julgadas. */
-function cmpGraficoCobertura(base, cap, voos) {
-  const W = 1320, H = 430;
-  const ML = 56, MR = 56, MT = 34, MB = 32;
+function cmpGraficoCobertura(base, cap, voos, larguraPx) {
+  /* O gráfico é desenhado NO TAMANHO EM QUE VAI APARECER, e não como um
+     SVG elástico esticado pelo CSS.
+
+     A primeira versão usava viewBox com width:100%: num monitor de 2.000
+     pixels o desenho inteiro era ampliado junto — a fonte de 11px virava
+     17, a caixa da chamada ficava do tamanho de um cartão e as curvas se
+     achatavam numa faixa larga e baixa. Parecia um gráfico mal feito
+     porque era um gráfico de 1.320px esticado, não um gráfico de 2.000.
+
+     Agora a largura vem medida do painel e entra na conta; a altura é
+     fixa. Texto sai em pixel de verdade, em qualquer tela. */
+  const W = Math.round(Math.max(620, Math.min(larguraPx || 1120, 1600)));
+  const H = 340;
+  const ML = 50, MR = 48, MT = 26, MB = 28;
   const iw = W - ML - MR, ih = H - MT - MB;
   const largura = iw / 24;
 
@@ -260,9 +280,11 @@ function cmpGraficoCobertura(base, cap, voos) {
     const v = (maxP / 4) * i, yy = yP(v);
     eixoY += `<line x1="${ML}" y1="${yy.toFixed(1)}" x2="${ML + iw}" y2="${yy.toFixed(1)}"
       stroke="${i ? 'var(--border)' : 'var(--border-strong)'}" stroke-width="1"/>`
-      + `<text x="${ML - 10}" y="${(yy + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="var(--text-secondary)">${Math.round(v)}</text>`;
+      + `<text x="${ML - 10}" y="${(yy + 4).toFixed(1)}" text-anchor="end" font-size="10.5" fill="var(--text-secondary)">${Math.round(v)}</text>`;
   }
-  eixoY += `<text x="${ML - 10}" y="${MT - 14}" text-anchor="end" font-size="10.5" fill="var(--text-secondary)">pessoas</text>`;
+  // Ancorado à esquerda, e não ao fim da régua: alinhado pelo fim, a
+  // palavra começava fora do desenho e aparecia cortada.
+  eixoY += `<text x="0" y="${MT - 11}" font-size="10.5" fill="var(--text-secondary)">pessoas</text>`;
 
   // Régua de voos, à direita. Só aparece se houver malha carregada —
   // um eixo marcando 0, 0 e 0 só ocupa espaço e sugere que faltou dado.
@@ -270,7 +292,7 @@ function cmpGraficoCobertura(base, cap, voos) {
   if (temVoo) {
     for (let i = 0; i <= 2; i++) {
       const v = (maxV / 2) * i, yy = yV(v);
-      eixoVoo += `<text x="${ML + iw + 10}" y="${(yy + 4).toFixed(1)}" font-size="11" fill="${CMP_CORES.voos.traco}">${Math.round(v)}</text>`;
+      eixoVoo += `<text x="${ML + iw + 10}" y="${(yy + 4).toFixed(1)}" font-size="10.5" fill="${CMP_CORES.voos.traco}">${Math.round(v)}</text>`;
     }
     // A legenda do eixo fica junto dos números dele, e não lá em cima:
     // os voos ocupam só a faixa de baixo, e um rótulo no topo do quadro
@@ -280,7 +302,7 @@ function cmpGraficoCobertura(base, cap, voos) {
 
   let eixoX = '';
   for (let h = 0; h < 24; h += 2) {
-    eixoX += `<text x="${x(h).toFixed(1)}" y="${MT + ih + 20}" text-anchor="middle" font-size="11" fill="var(--text-secondary)">${cmpHh(h)}</text>`;
+    eixoX += `<text x="${x(h).toFixed(1)}" y="${MT + ih + 20}" text-anchor="middle" font-size="10.5" fill="var(--text-secondary)">${cmpHh(h)}</text>`;
   }
 
   // Barras de voo, atrás de tudo.
@@ -299,8 +321,8 @@ function cmpGraficoCobertura(base, cap, voos) {
   const iB = base.indexOf(Math.max(...base));
   const iC = cap.indexOf(Math.max(...cap));
   const pontos =
-    `<circle cx="${x(iB).toFixed(1)}" cy="${yP(base[iB]).toFixed(1)}" r="4.5" fill="var(--bg-surface)" stroke="${CMP_CORES.base.traco}" stroke-width="2.5"/>`
-    + `<circle cx="${x(iC).toFixed(1)}" cy="${yP(cap[iC]).toFixed(1)}" r="4.5" fill="var(--bg-surface)" stroke="${CMP_CORES.capacity.traco}" stroke-width="2.5"/>`;
+    `<circle cx="${x(iB).toFixed(1)}" cy="${yP(base[iB]).toFixed(1)}" r="3.8" fill="var(--bg-surface)" stroke="${CMP_CORES.base.traco}" stroke-width="2.2"/>`
+    + `<circle cx="${x(iC).toFixed(1)}" cy="${yP(cap[iC]).toFixed(1)}" r="3.8" fill="var(--bg-surface)" stroke="${CMP_CORES.capacity.traco}" stroke-width="2.2"/>`;
 
   /* A hora de maior diferença ganha uma chamada escrita. É o número que
      a operação leva para a reunião, e procurá-lo passando o mouse hora a
@@ -313,17 +335,18 @@ function cmpGraficoCobertura(base, cap, voos) {
     const yBaixo = Math.max(yP(base[iD]), yP(cap[iD]));
     const yMeio = (yAlto + yBaixo) / 2;
     const cx = x(iD);
-    const cabeLadoDireito = cx + 26 + 182 <= ML + iw;
-    const bx = cabeLadoDireito ? cx + 26 : cx - 26 - 182;
-    const guia = cabeLadoDireito ? cx + 16 : cx - 16;
+    const CX = 166, CY = 36;                      // tamanho da caixa
+    const cabeLadoDireito = cx + 22 + CX <= ML + iw;
+    const bx = cabeLadoDireito ? cx + 22 : cx - 22 - CX;
+    const guia = cabeLadoDireito ? cx + 13 : cx - 13;
     chamada =
-      `<line x1="${guia.toFixed(1)}" y1="${yAlto.toFixed(1)}" x2="${guia.toFixed(1)}" y2="${yBaixo.toFixed(1)}" stroke="var(--cmp-dif)" stroke-width="1.5"/>`
-      + `<line x1="${(guia - 4).toFixed(1)}" y1="${yAlto.toFixed(1)}" x2="${(guia + 4).toFixed(1)}" y2="${yAlto.toFixed(1)}" stroke="var(--cmp-dif)" stroke-width="1.5"/>`
-      + `<line x1="${(guia - 4).toFixed(1)}" y1="${yBaixo.toFixed(1)}" x2="${(guia + 4).toFixed(1)}" y2="${yBaixo.toFixed(1)}" stroke="var(--cmp-dif)" stroke-width="1.5"/>`
-      + `<rect x="${bx.toFixed(1)}" y="${(yMeio - 21).toFixed(1)}" width="182" height="42" rx="7" fill="var(--bg-card)" stroke="var(--cmp-dif)" stroke-opacity=".45"/>`
-      + `<rect x="${bx.toFixed(1)}" y="${(yMeio - 21).toFixed(1)}" width="182" height="42" rx="7" fill="var(--cmp-dif-caixa)"/>`
-      + `<text x="${(bx + 13).toFixed(1)}" y="${(yMeio - 3).toFixed(1)}" font-size="12" font-weight="700" fill="var(--cmp-dif)">${Math.abs(difs[iD])} pessoa(s) ${difs[iD] > 0 ? 'a menos' : 'a mais'}</text>`
-      + `<text x="${(bx + 13).toFixed(1)}" y="${(yMeio + 13).toFixed(1)}" font-size="11" fill="var(--text-secondary)">às ${cmpHh(iD)} na Capacity</text>`;
+      `<line x1="${guia.toFixed(1)}" y1="${yAlto.toFixed(1)}" x2="${guia.toFixed(1)}" y2="${yBaixo.toFixed(1)}" stroke="var(--cmp-dif)" stroke-width="1.3"/>`
+      + `<line x1="${(guia - 3.5).toFixed(1)}" y1="${yAlto.toFixed(1)}" x2="${(guia + 3.5).toFixed(1)}" y2="${yAlto.toFixed(1)}" stroke="var(--cmp-dif)" stroke-width="1.3"/>`
+      + `<line x1="${(guia - 3.5).toFixed(1)}" y1="${yBaixo.toFixed(1)}" x2="${(guia + 3.5).toFixed(1)}" y2="${yBaixo.toFixed(1)}" stroke="var(--cmp-dif)" stroke-width="1.3"/>`
+      + `<rect x="${bx.toFixed(1)}" y="${(yMeio - CY / 2).toFixed(1)}" width="${CX}" height="${CY}" rx="6" fill="var(--bg-card)" stroke="var(--cmp-dif)" stroke-opacity=".4"/>`
+      + `<rect x="${bx.toFixed(1)}" y="${(yMeio - CY / 2).toFixed(1)}" width="${CX}" height="${CY}" rx="6" fill="var(--cmp-dif-caixa)"/>`
+      + `<text x="${(bx + 11).toFixed(1)}" y="${(yMeio - 3).toFixed(1)}" font-size="11.5" font-weight="700" fill="var(--cmp-dif)">${Math.abs(difs[iD])} pessoa(s) ${difs[iD] > 0 ? 'a menos' : 'a mais'}</text>`
+      + `<text x="${(bx + 11).toFixed(1)}" y="${(yMeio + 11).toFixed(1)}" font-size="10.5" fill="var(--text-secondary)">às ${cmpHh(iD)} na Capacity</text>`;
   }
 
   /* Uma faixa invisível por hora, cobrindo o gráfico inteiro de cima a
@@ -334,12 +357,12 @@ function cmpGraficoCobertura(base, cap, voos) {
     + `<title>${cmpHh(h)} — Base ${v} · Capacity ${cap[h]} · diferença ${difs[h] > 0 ? '+' : ''}${difs[h]}`
     + `${temVoo ? ` · ${serieVoos[h]} voo(s)` : ''}</title></rect>`).join('');
 
-  return `<svg viewBox="0 0 ${W} ${H}" role="img"
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img"
     aria-label="Cobertura por hora do dia nas escalas Base e Capacity, com o volume de voos da malha ao fundo">
     ${eixoY}${eixoVoo}${eixoX}${barras}
     <path d="${area(cap)}" fill="${CMP_CORES.capacity.area}"/>
-    <path d="${linha(cap)}" fill="none" stroke="${CMP_CORES.capacity.traco}" stroke-width="2.6" stroke-linejoin="round"/>
-    <path d="${linha(base)}" fill="none" stroke="${CMP_CORES.base.traco}" stroke-width="2.6" stroke-dasharray="7 5" stroke-linejoin="round"/>
+    <path d="${linha(cap)}" fill="none" stroke="${CMP_CORES.capacity.traco}" stroke-width="2" stroke-linejoin="round"/>
+    <path d="${linha(base)}" fill="none" stroke="${CMP_CORES.base.traco}" stroke-width="2" stroke-dasharray="6 4" stroke-linejoin="round"/>
     ${pontos}${chamada}${alvos}
   </svg>`;
 }
@@ -367,10 +390,12 @@ async function pageComparador(el) {
   const base = window._escalaBase || (typeof escalaBasesPermitidas === 'function' ? escalaBasesPermitidas()[0] : null);
   const mes = window._escalaMes;
 
+  const onde = base ? `<span class="cmp-escopo">${base}${mes ? ` · ${cmpRotuloMes(mes)}` : ''}</span>` : '';
+
   el.innerHTML = `
     <div class="page-header">
       <div>
-        <h1 class="page-title">Comparador de Escalas</h1>
+        <h1 class="page-title">Comparador de Escalas ${onde}</h1>
         <p class="page-sub">Escala Base × Escala Capacity · diferença de cobertura e disrupção de horários</p>
       </div>
       <div id="cmp-controles"></div>
@@ -476,14 +501,15 @@ function cmpRender() {
     </div>
 
     <div class="hc-panel cmp-painel">
-      <div class="cmp-tit">Cobertura por hora do dia
+      <div class="cmp-tit">
+        <span>Cobertura por hora do dia <span class="ctx">${d.nomeBase} · ${cmpRotuloMes(d.mes)}${cmpGrupo ? ` · ${cmpGrupo}` : ''}</span></span>
         <span class="leg">
           <span class="chave"><i style="background:${CMP_CORES.capacity.traco}"></i>Capacity (o que a malha pede)</span>
           <span class="chave"><i class="tracejado" style="background:${CMP_CORES.base.traco}"></i>Base (o que se faz hoje)</span>
           ${temVoo ? `<span class="chave"><i class="caixa" style="background:${CMP_CORES.voos.area};border:1px solid var(--cmp-voo-stroke)"></i>Voos/hora</span>` : ''}
         </span>
       </div>
-      <div class="cmp-grafico">${cmpGraficoCobertura(cobBase, cobCap, voos)}</div>
+      <div class="cmp-grafico" id="cmp-grafico"></div>
       <div class="cmp-rodape">
         <span><b>Pior hora da Base:</b> ${hh(piorB)}, com ${cobBase[piorB]} pessoa(s)</span>
         <span><b>Pior hora da Capacity:</b> ${hh(piorC)}, com ${cobCap[piorC]} pessoa(s)</span>
@@ -528,9 +554,35 @@ function cmpRender() {
       ${linhas.filter((l) => l.tipo !== 'semHorario' && l.delta !== 0).length > 300
         ? '<p class="cmp-nota">Mostrando as 300 maiores diferenças. Baixe a comparação para a lista inteira.</p>' : ''}
     </div>`;
+
+  cmpDesenharGrafico();
 }
 
 function cmpSetGrupo(v) { cmpGrupo = v || null; cmpRender(); }
+
+/* O gráfico é desenhado DEPOIS que o painel já está na tela, porque só
+   então dá para medir a largura que ele tem disponível. Montá-lo junto
+   com o resto do HTML obrigaria a chutar um tamanho — foi o que deixou
+   o desenho esticado em monitor largo. */
+function cmpDesenharGrafico() {
+  const alvo = document.getElementById('cmp-grafico');
+  if (!alvo || !cmpDados) return;
+  const cobBase = cmpCoberturaPorHora(cmpDados.base, cmpGrupo);
+  const cobCap = cmpCoberturaPorHora(cmpDados.capacity, cmpGrupo);
+  alvo.innerHTML = cmpGraficoCobertura(
+    cobBase, cobCap, cmpDados.voos || new Array(24).fill(0), alvo.clientWidth);
+}
+
+/* Redimensionar a janela (ou recolher a barra lateral) muda a largura
+   útil. Sem redesenhar, o gráfico fica no tamanho da largura antiga. */
+if (typeof window !== 'undefined' && !window._cmpResizeLigado) {
+  window._cmpResizeLigado = true;
+  let timer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(timer);
+    timer = setTimeout(cmpDesenharGrafico, 160);
+  });
+}
 
 function cmpExportar() {
   if (typeof XLSX === 'undefined' || !cmpDados) return;

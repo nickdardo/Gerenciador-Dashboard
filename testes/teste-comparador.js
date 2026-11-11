@@ -242,16 +242,42 @@ const sec = (t) => console.log('\n\x1b[36m── ' + t + '\x1b[0m');
       });
 
       eq(r.barras, 24, 'uma barra por hora com voo');
-      /* Área útil do gráfico: 430 − 34 − 32 = 364px. Os voos ocupam 38%
-         dela, ou seja, no máximo ~138px. Se alguém colocar os voos na
-         régua de pessoas, 14 em 400 daria ~13px; se usar a altura cheia,
-         daria ~318. Os dois erros caem fora desta janela. */
-      ok(r.maiorBarra > 60 && r.maiorBarra < 146,
+      /* Área útil do gráfico: 340 − 26 − 28 = 286px. Os voos ocupam 38%
+         dela, ou seja, no máximo ~109px, e o pico de 14 em 16 dá ~95. Se
+         alguém puser os voos na régua de pessoas, 14 em 400 daria ~10px;
+         se usar a altura cheia, ~250. Os dois erros caem fora da janela. */
+      ok(r.maiorBarra > 60 && r.maiorBarra < 120,
         'a barra do pico ocupa a faixa de baixo, nem some nem toma o gráfico (veio ' + r.maiorBarra.toFixed(1) + 'px)');
       ok(r.temEixoVoos, 'com malha, o eixo da direita é rotulado');
       ok(!r.semEixoVoos, 'sem malha, o eixo da direita não aparece marcando zeros');
       eq(r.barrasSem, 0, 'e nenhuma barra é desenhada');
       ok(r.dicaCom && !r.dicaSem, 'a dica do mouse só cita voos quando há malha');
+    }
+
+    sec('8b. O desenho sai no tamanho medido, não esticado pelo CSS');
+    {
+      /* A primeira versão era um SVG elástico (viewBox + width:100%).
+         Num monitor de 2.000px o desenho inteiro era ampliado junto: a
+         fonte de 11px virava 17, a caixa da chamada ficava do tamanho de
+         um cartão e as curvas se achatavam. Agora a largura é medida e
+         entra na conta, e a altura não acompanha. */
+      const r = await page.evaluate(() => {
+        const b = new Array(24).fill(100), c = new Array(24).fill(80), v = new Array(24).fill(0);
+        const medir = (larg) => {
+          const s = cmpGraficoCobertura(b, c, v, larg);
+          const m = /^<svg width="(\d+)" height="(\d+)"/.exec(s.trim());
+          return { w: Number(m[1]), h: Number(m[2]), elastico: /width="100%"/.test(s) };
+        };
+        return { normal: medir(900), largo: medir(2400), estreito: medir(180), semArg: medir(undefined) };
+      });
+
+      eq(r.normal.w, 900, 'a largura pedida é a largura desenhada');
+      eq(r.normal.h, 340, 'e a altura é fixa');
+      eq(r.largo.h, 340, 'numa tela larga a altura continua a mesma — não estica junto');
+      ok(r.largo.w <= 1600, 'a largura tem teto, para o gráfico não virar uma faixa rasa: ' + r.largo.w);
+      ok(r.estreito.w >= 620, 'e piso, para as 24 horas não se esmagarem: ' + r.estreito.w);
+      ok(r.semArg.w > 0, 'sem medida informada, ainda sai um tamanho utilizável');
+      ok(!r.normal.elastico, 'nenhum width="100%" sobrou no SVG');
     }
 
     sec('9. A hora de maior diferença é escrita no gráfico');
@@ -294,6 +320,34 @@ const sec = (t) => console.log('\n\x1b[36m── ' + t + '\x1b[0m');
       eq(r.cab.length, 5, 'a aba de cobertura ganhou uma coluna');
       eq(r.cab[4], 'VOOS (PICO DO MÊS)', 'e ela diz que é pico, não média');
       eq(r.linha7[4], 7, 'o valor da hora bate com a série da malha');
+    }
+
+    sec('10b. A tela diz qual base e qual mês está comparando');
+    {
+      /* Um gráfico sem endereço não se leva para reunião: quem abre a
+         tela não tem como saber se aquilo é GRU ou CGH. */
+      const r = await page.evaluate(() => {
+        window.adhMonthLabel = (m) => (m === '2026-11' ? 'Novembro/2026' : m);
+        const mk = (mat, e) => [mat, { matricula: mat, nome: 'P' + mat, grupo: 'Limpeza',
+          horario: { entrada: e, saida: (e + 360) % 1440 } }];
+        cmpDados = {
+          base: new Map([mk('1', 360), mk('2', 420)]),
+          capacity: new Map([mk('1', 480), mk('2', 420)]),
+          ano: 2026, mesNum: 11, diasNoMes: 30, nomeBase: 'GRU', mes: '2026-11',
+          voos: new Array(24).fill(2), diasComVoo: 30,
+        };
+        cmpGrupo = null;
+        document.body.innerHTML = '<div id="cmp-controles"></div><div id="cmp-corpo"></div>';
+        cmpRender();
+        const tit = document.querySelector('.cmp-tit .ctx');
+        return {
+          ctx: tit ? tit.textContent.trim() : '',
+          desenhou: !!document.querySelector('#cmp-grafico svg'),
+        };
+      });
+      ok(/GRU/.test(r.ctx), 'o painel do gráfico nomeia a base: ' + r.ctx);
+      ok(/Novembro\/2026/.test(r.ctx), 'e o mês por extenso, não "2026-11"');
+      ok(r.desenhou, 'e o gráfico é desenhado depois de o painel entrar na tela');
     }
 
     sec('11. Nenhum erro de script');

@@ -4624,8 +4624,25 @@ body.escala-modo-grade .escala-fill { margin-top: 0; }
 /* O gráfico cresce com a tela: a malha tem 24 colunas e, espremidas, as
    barras de voo encostam nas curvas — foi o risco levantado quando este
    formato foi escolhido. */
-.cmp-grafico { width: 100%; }
-.cmp-grafico svg { display: block; width: 100%; height: auto; }
+/* O SVG vem com largura e altura em pixel, calculadas a partir da
+   largura medida deste contêiner. Nada de width:100% aqui: esticar o
+   desenho amplia junto a fonte, a espessura do traço e a caixa da
+   chamada, e o resultado em monitor largo não parece um gráfico maior,
+   parece um gráfico mal feito. */
+.cmp-grafico { width: 100%; display: flex; justify-content: center; }
+.cmp-grafico svg { display: block; }
+
+/* Qual base e qual mês. Sem isso, o painel é um gráfico sem endereço. */
+.cmp-escopo {
+  font-size: 12px; font-weight: 600; color: var(--text-secondary);
+  border: 1px solid var(--border-strong); border-radius: 999px;
+  padding: 3px 10px; margin-left: 10px; vertical-align: middle;
+  white-space: nowrap;
+}
+.cmp-tit .ctx {
+  font-size: 11.5px; font-weight: 500; color: var(--text-secondary);
+  margin-left: 8px;
+}
 
 /* Rodapé do gráfico: as três leituras que não cabem em cartão mas que
    são a primeira pergunta de quem olha a curva. */
@@ -4635,6 +4652,11 @@ body.escala-modo-grade .escala-fill { margin-top: 0; }
   font-size: 11.5px; color: var(--text-secondary);
 }
 .cmp-rodape b { color: var(--text-primary); font-weight: 600; }
+
+/* Em tela ultralarga, deixar tudo esticar dá cinco cartões de 400px com
+   um número pequeno no meio e um gráfico perdido no vazio. A coluna tem
+   largura máxima e fica centrada — o conteúdo não muda, a leitura sim. */
+.cmp-cartoes, .cmp-painel { max-width: 1700px; margin-left: auto; margin-right: auto; }
 
 .cmp-cartoes { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
 .cmp-cartao {
@@ -4685,7 +4707,9 @@ body.escala-modo-grade .escala-fill { margin-top: 0; }
 .cmp-tit .chave i.tracejado {
   background-image: repeating-linear-gradient(90deg, currentColor 0 4px, transparent 4px 7px) !important;
 }
-.cmp-nota { font-size: 11px; color: var(--text-secondary); margin: 10px 0 0; line-height: 1.5; }
+/* Em monitor largo, uma nota de linha única atravessava 2.000 pixels e
+   obrigava a varrer a tela com o olho para ler uma frase. */
+.cmp-nota { font-size: 11px; color: var(--text-secondary); margin: 10px 0 0; line-height: 1.5; max-width: 1100px; }
 
 .cmp-barras { display: flex; flex-direction: column; gap: 8px; }
 .cmp-barra { display: grid; grid-template-columns: 130px 1fr 48px; align-items: center; gap: 10px; }
