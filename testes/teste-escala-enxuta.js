@@ -1375,6 +1375,60 @@ function paginaDeTeste() {
         `com horário e folgas fechadas, a escala fica pronta (meta ${pronta.meta}, postas ${pronta.postas}, pendências: ${pronta.pend.join() || 'nenhuma'})`);
     }
 
+    sec('8y. Agrupar por setor, que vem do dimensionamento');
+    {
+      /* O cadastro não tem campo de setor — quem tem é o dimensionamento,
+         que traz a aba de origem de cada posição. Como na Capacity a
+         pessoa ocupa uma posição, o setor dela é o daquela posição.
+
+         Por isso o agrupamento só existe na Capacity: na Base não há
+         posição de onde tirá-lo, e deduzir setor por semelhança de função
+         seria apresentar palpite como dado. */
+      const r = await page.evaluate(() => {
+        window._escalaCenario = 'dimensionada';
+        window._escalaBase = 'GRU'; window._escalaMes = '2026-11';
+        window._escalaDias = new Map(); window._escalaFeriados = new Map();
+        window._escalaGruposVisiveis = null; window._escalaOrdemColuna = null;
+        window.escalaAplicarFiltroSituacao = (l) => l;
+        window.escalaEntradaEfetivaDoColab = (c) => c.entrada_manual || '';
+        window.escalaFuncaoGrupoDoColab = () => ({ label: 'Limpeza' });
+        window.escalaCarregarMapaDim = () => ({ 'ASG LIMPEZA': 'Limpeza', 'ASA TRIAGEM': 'Limpeza' });
+        window._escalaPosicoesDim = [
+          { setor: 'LIMPEZA', funcao: 'ASG LIMPEZA', entrada: '07:00', saida: '13:00', carga: 6, qtd: 1 },
+          { setor: 'TRIAGEM', funcao: 'ASA TRIAGEM', entrada: '07:00', saida: '13:00', carga: 6, qtd: 1 },
+        ];
+        window._escalaColabs = [
+          { matricula: '1', nome: 'DA LIMPEZA', ch_manual: 180, entrada_manual: '07:00' },
+          { matricula: '2', nome: 'DA TRIAGEM', ch_manual: 180, entrada_manual: '07:00' },
+          { matricula: '3', nome: 'SEM POSICAO', ch_manual: 180, entrada_manual: null },
+        ];
+        window.eoColabs = new Map([
+          ['1', { nome: 'DA LIMPEZA', funcao: 'ASG LIMPEZA I', ch: 180, station: 'GRU' }],
+          ['2', { nome: 'DA TRIAGEM', funcao: 'ASA TRIAGEM', ch: 180, station: 'GRU' }],
+          ['3', { nome: 'SEM POSICAO', funcao: 'ASG LIMPEZA I', ch: 180, station: 'GRU' }],
+        ]);
+        window._escalaAgrupamento = 'setor';
+        const cap = escalaGradeEnxutaHTML(2026, 11, 30);
+        const setores = window._escalaColabs.map((c) =>
+          escalaSetorDaPessoa(c, 2026, 11, 30));
+        window._escalaCenario = 'planejada';
+        const base = escalaGradeEnxutaHTML(2026, 11, 30);
+        window._escalaCenario = 'dimensionada';
+        return { cap, base, setores };
+      });
+
+      ok(r.setores[0] === 'LIMPEZA' && r.setores[1] === 'TRIAGEM',
+        'duas pessoas no mesmo horário, setores diferentes pela função · ' + r.setores.join('/'));
+      ok(r.setores[2] === 'Sem posição',
+        'quem não tem posição não ganha setor inventado');
+      ok(/LIMPEZA/.test(r.cap) && /TRIAGEM/.test(r.cap),
+        'as faixas da Capacity viram os setores do dimensionamento');
+
+      /* Na Base o agrupamento não se aplica: sem malha, não há setor. */
+      ok(!/>TRIAGEM</.test(r.base),
+        'na Base o agrupamento cai em função, porque lá não há posição de onde tirar setor');
+    }
+
     sec('9. Nenhum erro de script');
     ok(erros.length === 0, 'a página carregou sem exceção' + (erros.length ? ': ' + erros.join(' | ') : ''));
   } finally {

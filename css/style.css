@@ -4579,3 +4579,88 @@ body.escala-modo-grade .escala-fill { margin-top: 0; }
    deixa a pessoa procurando qual das trinta visíveis era. */
 @keyframes escalaAchou { from { background: color-mix(in srgb, var(--blue, #00a0d2) 38%, transparent); } }
 .escala-linha-achada > td { animation: escalaAchou 2.4s ease-out; }
+
+/* ── Comparador: Base × Capacity ─────────────────────────────────────── */
+.cmp-carregando { color: var(--text-secondary); font-size: 12px; padding: 24px; }
+.cmp-vazio { color: var(--text-secondary); font-size: 12px; padding: 12px 2px; }
+
+.cmp-cartoes { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.cmp-cartao {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.cmp-cartao .n { font-size: 26px; font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; line-height: 1.1; }
+.cmp-cartao .r { font-size: 11px; color: var(--text-secondary); }
+/* Quanta gente muda de horário é o número que decide a viabilidade da
+   migração — e o único que não pode passar despercebido. */
+.cmp-cartao.alerta { border-color: #c08a2a; }
+.cmp-cartao.alerta .n { color: #8a5f12; }
+[data-theme="dark"] .cmp-cartao.alerta .n { color: #f0c870; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .cmp-cartao.alerta .n { color: #f0c870; }
+}
+
+.cmp-painel { margin-bottom: 16px; padding: 16px 18px; }
+.cmp-tit {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  flex-wrap: wrap;
+  font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 12px;
+}
+.cmp-tit .leg { font-size: 11px; font-weight: 400; color: var(--text-secondary); display: flex; gap: 14px; }
+.cmp-tit .chave { display: inline-flex; align-items: center; gap: 6px; }
+.cmp-tit .chave i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+/* O tracejado na legenda repete o do gráfico: sem isso, quem não
+   distingue bem as duas cores fica sem saber qual curva é qual. */
+.cmp-tit .chave i.tracejado {
+  background-image: repeating-linear-gradient(90deg, currentColor 0 4px, transparent 4px 7px) !important;
+}
+.cmp-nota { font-size: 11px; color: var(--text-secondary); margin: 10px 0 0; line-height: 1.5; }
+
+.cmp-barras { display: flex; flex-direction: column; gap: 8px; }
+.cmp-barra { display: grid; grid-template-columns: 130px 1fr 48px; align-items: center; gap: 10px; }
+.cmp-barra .rot { font-size: 11.5px; color: var(--text-secondary); }
+.cmp-barra .trilho { height: 18px; background: var(--bg-hover); border-radius: 4px; overflow: hidden; }
+.cmp-barra .preenchida { height: 100%; border-radius: 4px; min-width: 2px; }
+.cmp-barra .val { font-size: 12px; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+
+.cmp-tabela-wrap { max-height: 420px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+.cmp-tabela { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+.cmp-tabela th {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--bg-surface);
+  text-align: left; padding: 8px 10px;
+  font-size: 10px; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-strong);
+}
+.cmp-tabela td { padding: 6px 10px; border-bottom: 1px solid var(--border); color: var(--text-primary); }
+.cmp-tabela tr:hover td { background: var(--bg-hover); }
+.cmp-tabela .mono { font-variant-numeric: tabular-nums; }
+.cmp-tabela .sec { color: var(--text-secondary); }
+.cmp-tabela .delta { font-weight: 700; color: #8a5f12; }
+[data-theme="dark"] .cmp-tabela .delta { color: #f0c870; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .cmp-tabela .delta { color: #f0c870; }
+}
+
+/* O convite para comparar. Único chip que não é filtro nem aviso: é um
+   caminho que acabou de abrir, e por isso tem peso de botão. */
+.escala-chip-comparar {
+  border-color: #0b7093;
+  color: #0b7093;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.escala-chip-comparar svg { width: 12px; height: 12px; }
+.escala-chip-comparar:hover { background: #0b7093; color: #fff; }
+[data-theme="dark"] .escala-chip-comparar { border-color: #4fc3e8; color: #4fc3e8; }
+[data-theme="dark"] .escala-chip-comparar:hover { background: #4fc3e8; color: #0b0f1a; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .escala-chip-comparar { border-color: #4fc3e8; color: #4fc3e8; }
+  :root:not([data-theme="light"]) .escala-chip-comparar:hover { background: #4fc3e8; color: #0b0f1a; }
+}

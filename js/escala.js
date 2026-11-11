@@ -1116,6 +1116,9 @@ function escalaGradeRenderShell(el, ano, mesNum, diasNoMes) {
             title="Por função responde 'tenho ASG suficiente?'. Por turno responde 'tenho gente bastante na madrugada do dia 14?'">
             <option value="funcao" ${escalaAgrupamento() === 'funcao' ? 'selected' : ''}>Função</option>
             <option value="turno" ${escalaAgrupamento() === 'turno' ? 'selected' : ''}>Turno (pelo horário)</option>
+            ${escalaEhCapacity()
+              ? `<option value="setor" ${escalaAgrupamento() === 'setor' ? 'selected' : ''}>Setor (do dimensionamento)</option>`
+              : ''}
           </select>
         </div>
         <div>
@@ -1815,7 +1818,55 @@ function escalaChipsHTML() {
     ? chips.map((c) => `<button type="button" class="escala-chip" onclick="escalaToggleFerramentas()"
         title="${escalaEscapeAttr(c.dica)} — clique para abrir as ferramentas">${escalaEscapeAttr(c.rot)}</button>`).join('')
     : `<span class="escala-chip-vazio">sem filtros</span>`;
-  return filtros + escalaChipSemHorario() + escalaChipForaDaMalha() + escalaChipSemRegra();
+  return filtros + escalaChipSemHorario() + escalaChipForaDaMalha() + escalaChipSemRegra()
+    + escalaChipComparar();
+}
+
+/* O convite para comparar, quando as duas escalas estão prontas.
+
+   Comparar uma escala pela metade com outra pronta produz um gráfico
+   que parece dizer algo e não diz — por isso o caminho não fica sempre
+   aberto. A escala aberta é conferida na hora; a outra é consultada uma
+   vez e o resultado fica guardado, porque reler 36 mil marcações a cada
+   repintura da faixa seria pagar caro por um botão. */
+function escalaChipComparar() {
+  const chave = `${window._escalaBase}|${window._escalaMes}`;
+  const outra = window._escalaOutraPronta;
+  if (!outra || outra.chave !== chave) { escalaConferirOutraEscala(chave); return ''; }
+  if (!outra.pronta) return '';
+  if (!escalaConferir().pronta) return '';
+  return `<button type="button" class="escala-chip escala-chip-comparar"
+    onclick="navigateTo('comparador')"
+    title="As duas escalas deste mês estão prontas — veja a diferença de cobertura e a disrupção de horários">
+    ${escalaIcone('barChart')}Agora você pode comparar as duas escalas</button>`;
+}
+
+async function escalaConferirOutraEscala(chave) {
+  if (window._escalaConferindoOutra === chave) return;
+  window._escalaConferindoOutra = chave;
+  const [base, mes] = chave.split('|');
+  const outroCen = escalaCenario() === 'planejada' ? 'dimensionada' : 'planejada';
+  try {
+    const colabs = await escalaFetchColaboradores(base, mes, 'created_at', outroCen);
+    /* A outra escala é avaliada pela mesma régua, mas sem as funções que
+       dependem do cenário aberto: aqui basta saber se tem gente com
+       horário. Quem está aberto passa pela conferência completa. */
+    const comHorario = colabs.filter((c) => c.entrada_manual).length;
+    window._escalaOutraPronta = { chave, pronta: comHorario > 0 && comHorario === colabs.length,
+                                  total: colabs.length, comHorario };
+  } catch (_) {
+    window._escalaOutraPronta = { chave, pronta: false, total: 0, comHorario: 0 };
+  } finally {
+    window._escalaConferindoOutra = null;
+    escalaAtualizarChips();
+  }
+}
+
+/* Repinta só a faixa de chips. Remontar a grade inteira por causa de um
+   botão que acabou de ficar disponível custaria 1.200 linhas. */
+function escalaAtualizarChips() {
+  const faixa = document.getElementById('escala-chips');
+  if (faixa) faixa.innerHTML = escalaChipsHTML();
 }
 
 /* Avisa quando uma função do dimensionamento foi classificada por
@@ -2466,11 +2517,38 @@ const ESCALA_MODOS_COLUNA = {
    "tenho ASG suficiente?". Por turno: "tenho gente bastante na
    madrugada do dia 14?". A segunda é a que decide se a operação roda, e
    até agora não havia como fazê-la sem contar linha a linha. */
+const ESCALA_AGRUPAMENTOS = ['funcao', 'turno', 'setor'];
 const escalaAgrupamento = () =>
-  (window._escalaAgrupamento === 'turno' ? 'turno' : 'funcao');
+  (ESCALA_AGRUPAMENTOS.includes(window._escalaAgrupamento) ? window._escalaAgrupamento : 'funcao');
 
 function escalaSetAgrupamento(valor) {
-  escalaPendente('agrupamento', valor === 'turno' ? 'turno' : 'funcao');
+  escalaPendente('agrupamento', ESCALA_AGRUPAMENTOS.includes(valor) ? valor : 'funcao');
+}
+
+/* O setor de uma pessoa sai da POSIÇÃO que ela ocupa.
+
+   O cadastro não tem campo de setor — quem tem é o dimensionamento, que
+   traz a aba de origem de cada posição (LIMPEZA, RAMPA, TRIAGEM,
+   OPERADOR, LIDER). Como na Capacity a pessoa está numa posição, o setor
+   dela é o daquela posição.
+
+   Por isso este agrupamento só existe na Capacity: na Base não há
+   posição de onde tirá-lo, e inventar um setor por semelhança de função
+   seria apresentar palpite como dado. */
+function escalaSetorDaPessoa(c, ano, mesNum, diasNoMes) {
+  const entrada = escalaEntradaEfetivaDoColab(c, ano, mesNum, diasNoMes);
+  if (!entrada) return 'Sem posição';
+  const grupo = escalaFuncaoGrupoDoColab(c).label;
+  const malha = escalaMalhaDoDimensionamento().get(grupo);
+  if (!malha) return 'Sem setor';
+  const fam = escalaFamiliaDaFuncao(window.eoColabs?.get(c.matricula)?.funcao || c.funcao_manual || '');
+  let semFuncao = null;
+  for (const [, h] of malha) {
+    if (h.entrada !== entrada) continue;
+    if (escalaFamiliaDaFuncao(h.funcao) === fam) return h.setor || 'Sem setor';
+    if (!semFuncao) semFuncao = h.setor || 'Sem setor';
+  }
+  return semFuncao || 'Sem setor';
 }
 
 const escalaModoColunas = () =>
@@ -2974,6 +3052,7 @@ function escalaMalhaDoDimensionamento() {
     const g = porGrupo.get(grupo);
     if (!g.has(chave)) {
       g.set(chave, { funcao: p.funcao || '', entrada: p.entrada || '', saida: p.saida || '',
+                     setor: p.setor && p.setor !== ESCALA_SETOR_EXTRA ? p.setor : '',
                      pedido: 0, extra: 0, jornada: escalaChDiariaDaPosicao(p.carga), funcoes: new Set() });
     }
     const h = g.get(chave);
@@ -3104,13 +3183,15 @@ function escalaGradeEnxutaHTML(ano, mesNum, diasNoMes) {
   /* O filtro de grupos continua sendo por FUNÇÃO mesmo quando a grade
      está agrupada por turno: "ver só a Limpeza, separada por turno" é um
      pedido legítimo, e seria impossível se o filtro mudasse junto. */
-  const porTurno = escalaAgrupamento() === 'turno';
+  const agrup = escalaAgrupamento();
+  const porTurno = agrup === 'turno';
+  const porSetor = agrup === 'setor' && escalaEhCapacity();
   const porGrupo = new Map();
   for (const c of colabs) {
     const gFuncao = escalaFuncaoGrupoDoColab(c).label || 'Sem função';
     if (visiveis && visiveis.size && !visiveis.has(gFuncao)) continue;
-    const g = porTurno
-      ? escalaSetorDoTurno(escalaEntradaEfetivaDoColab(c, ano, mesNum, diasNoMes))
+    const g = porTurno ? escalaSetorDoTurno(escalaEntradaEfetivaDoColab(c, ano, mesNum, diasNoMes))
+      : porSetor ? escalaSetorDaPessoa(c, ano, mesNum, diasNoMes)
       : gFuncao;
     if (!porGrupo.has(g)) porGrupo.set(g, []);
     porGrupo.get(g).push(c);
@@ -3128,11 +3209,13 @@ function escalaGradeEnxutaHTML(ano, mesNum, diasNoMes) {
 
   const ORDEM_TURNO = ['Turno Alpha', 'Turno Bravo', 'Turno Charlie', 'Turno Delta', '—'];
   const posGrupo = (g) => {
+    if (porSetor) return 0;            // setor sai em ordem alfabética, abaixo
     const lista = porTurno ? ORDEM_TURNO : ESCALA_GRUPOS;
     const i = lista.indexOf(g);
     return i < 0 ? lista.length : i;   // "Sem função" / sem horário vão para o fim
   };
-  const ordenados = [...porGrupo.entries()].sort((a, b) => posGrupo(a[0]) - posGrupo(b[0]));
+  const ordenados = [...porGrupo.entries()].sort((a, b) =>
+    (posGrupo(a[0]) - posGrupo(b[0])) || String(a[0]).localeCompare(String(b[0]), 'pt-BR'));
   porGrupo.clear();
   ordenados.forEach(([g, lista]) => porGrupo.set(g, lista));
 
