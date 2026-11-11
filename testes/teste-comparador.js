@@ -236,8 +236,9 @@ const sec = (t) => console.log('\n\x1b[36m── ' + t + '\x1b[0m');
           temEixoVoos: />voos</.test(com),
           semEixoVoos: />voos</.test(sem),
           barrasSem: [...sem.matchAll(/fill="var\(--cmp-voo-fill\)"/g)].length,
-          dicaCom: /voo\(s\)/.test(com),
-          dicaSem: /voo\(s\)/.test(sem),
+          // O estado do hover é montado pelo desenho; `sem` foi o último
+          // a rodar, então é o dele que está guardado agora.
+          malhaNoHover: window._cmpHover.temVoo,
         };
       });
 
@@ -251,10 +252,75 @@ const sec = (t) => console.log('\n\x1b[36m── ' + t + '\x1b[0m');
       ok(r.temEixoVoos, 'com malha, o eixo da direita é rotulado');
       ok(!r.semEixoVoos, 'sem malha, o eixo da direita não aparece marcando zeros');
       eq(r.barrasSem, 0, 'e nenhuma barra é desenhada');
-      ok(r.dicaCom && !r.dicaSem, 'a dica do mouse só cita voos quando há malha');
+      ok(r.malhaNoHover === false, 'e o hover sabe que não há malha, para não oferecer uma linha de voos vazia');
     }
 
-    sec('8b. O desenho sai no tamanho medido, não esticado pelo CSS');
+    sec('8b. Passar o mouse mostra a hora apontada, não o tooltip do sistema');
+    {
+      /* O <title> do SVG mostrava os mesmos números, mas é o tooltip do
+         sistema operacional: demora quase um segundo, some sozinho, não
+         acompanha o cursor e não tem como pôr as três séries lado a
+         lado com as cores delas. */
+      const r = await page.evaluate(() => {
+        const base = [112,108,96,101,128,150,159,268,352,368,299,248,286,301,294,276,252,238,249,272,331,352,344,300];
+        const cap  = [95,92,86,89,106,132,165,206,229,185,176,151,191,206,201,186,171,161,171,186,206,211,201,151];
+        const voos = [4,2,1,1,2,5,9,12,14,11,8,7,9,10,9,8,7,8,10,12,13,11,8,6];
+
+        document.body.innerHTML =
+          '<div id="cmp-grafico" style="position:relative;width:1200px"></div>';
+        const alvo = document.getElementById('cmp-grafico');
+        alvo.innerHTML = cmpGraficoCobertura(base, cap, voos, 1200)
+          + '<div class="cmp-tip" id="cmp-tip"></div>';
+
+        const svg = alvo.querySelector('svg');
+        const cx = svg.getBoundingClientRect();
+        const d = window._cmpHover;
+        const emCimaDe = (h) => ({ clientX: cx.left + (d.ML + h * d.largura + d.largura / 2) * cx.width / d.W });
+
+        cmpHover(emCimaDe(9), svg);
+        const tip = document.getElementById('cmp-tip');
+        const ligado = {
+          texto: tip.textContent.replace(/\s+/g, ' ').trim(),
+          visivel: tip.classList.contains('on'),
+          guia: Number(document.getElementById('cmp-guia').getAttribute('x1')),
+          pontoBase: Number(document.getElementById('cmp-foco-base').getAttribute('opacity')),
+          barra: Number(document.getElementById('cmp-foco-barra').getAttribute('opacity')),
+        };
+
+        // Segunda hora: a guia tem de ANDAR, não ficar presa na primeira.
+        cmpHover(emCimaDe(20), svg);
+        const andou = Number(document.getElementById('cmp-guia').getAttribute('x1'));
+        const texto20 = tip.textContent.replace(/\s+/g, ' ').trim();
+
+        // Fora da área das 24 horas, nada fica aceso.
+        cmpHover({ clientX: cx.left + 2 }, svg);
+        const foraDaArea = tip.classList.contains('on');
+
+        cmpHover(emCimaDe(9), svg);
+        cmpHoverFim();
+        const depois = {
+          visivel: tip.classList.contains('on'),
+          guia: Number(document.getElementById('cmp-guia').getAttribute('opacity')),
+        };
+        return { ligado, andou, texto20, foraDaArea, depois };
+      });
+
+      ok(r.ligado.visivel, 'o cartão aparece ao passar o mouse');
+      ok(/09h às 10h/.test(r.ligado.texto), 'e diz qual hora está sendo lida: ' + r.ligado.texto);
+      ok(/Escala Base368/.test(r.ligado.texto), 'com o valor da Base daquela hora');
+      ok(/Escala Capacity185/.test(r.ligado.texto), 'o da Capacity');
+      ok(/Diferença\+183/.test(r.ligado.texto), 'a diferença já calculada, com sinal');
+      ok(/Voos na hora11/.test(r.ligado.texto), 'e os voos da hora');
+      eq(r.ligado.pontoBase, 1, 'o ponto na curva da Base acende');
+      ok(r.ligado.barra > 0, 'e a barra de voo da hora é realçada');
+
+      ok(r.andou > r.ligado.guia, 'a guia acompanha o cursor em vez de ficar presa na primeira hora');
+      ok(/20h às 21h/.test(r.texto20), 'e o cartão troca de hora junto: ' + r.texto20.slice(0, 12));
+      ok(!r.foraDaArea, 'fora da área das 24 horas o cartão some');
+      ok(!r.depois.visivel && r.depois.guia === 0, 'e ao tirar o mouse some tudo, sem deixar guia acesa');
+    }
+
+    sec('8c. O desenho sai no tamanho medido, não esticado pelo CSS');
     {
       /* A primeira versão era um SVG elástico (viewBox + width:100%).
          Num monitor de 2.000px o desenho inteiro era ampliado junto: a

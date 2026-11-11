@@ -349,22 +349,111 @@ function cmpGraficoCobertura(base, cap, voos, larguraPx) {
       + `<text x="${(bx + 11).toFixed(1)}" y="${(yMeio + 11).toFixed(1)}" font-size="10.5" fill="var(--text-secondary)">às ${cmpHh(iD)} na Capacity</text>`;
   }
 
-  /* Uma faixa invisível por hora, cobrindo o gráfico inteiro de cima a
-     baixo: assim o número aparece ao passar o mouse em qualquer altura
-     da coluna, e não só se acertar em cima da curva. */
-  const alvos = base.map((v, h) =>
-    `<rect x="${(ML + h * largura).toFixed(1)}" y="${MT}" width="${largura.toFixed(1)}" height="${ih}" fill="transparent">`
-    + `<title>${cmpHh(h)} — Base ${v} · Capacity ${cap[h]} · diferença ${difs[h] > 0 ? '+' : ''}${difs[h]}`
-    + `${temVoo ? ` · ${serieVoos[h]} voo(s)` : ''}</title></rect>`).join('');
+  /* O estado de que o mouse precisa. O desenho é quem conhece as
+     escalas; sem guardá-las, o manipulador não teria como converter o
+     pixel onde o cursor está na hora que ele representa. */
+  window._cmpHover = {
+    W, H, ML, MT, ih, largura, maxP, maxV, zonaVoo, temVoo,
+    base: base.slice(), cap: cap.slice(), voos: serieVoos.slice(),
+  };
 
-  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img"
+  /* Realce da barra de voo da hora apontada: entra ANTES das curvas,
+     para não passar por cima delas. */
+  const focoBarra = `<rect id="cmp-foco-barra" x="0" y="0" width="0" height="0" rx="2"
+    fill="var(--cmp-voo)" opacity="0"/>`;
+
+  /* Guia e pontos entram DEPOIS de tudo, porque o ponto da curva
+     precisa ficar por cima da própria curva para ser visto. */
+  const foco = `<line id="cmp-guia" x1="0" y1="${MT}" x2="0" y2="${MT + ih}"
+      stroke="var(--border-strong)" stroke-width="1" stroke-dasharray="3 4" opacity="0"/>
+    <circle id="cmp-foco-base" r="4.2" fill="${CMP_CORES.base.traco}" stroke="var(--bg-card)" stroke-width="1.6" opacity="0"/>
+    <circle id="cmp-foco-cap" r="4.2" fill="${CMP_CORES.capacity.traco}" stroke="var(--bg-card)" stroke-width="1.6" opacity="0"/>`;
+
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" style="cursor:crosshair"
+    onmousemove="cmpHover(event, this)" onmouseleave="cmpHoverFim()"
     aria-label="Cobertura por hora do dia nas escalas Base e Capacity, com o volume de voos da malha ao fundo">
-    ${eixoY}${eixoVoo}${eixoX}${barras}
+    ${eixoY}${eixoVoo}${eixoX}${barras}${focoBarra}
     <path d="${area(cap)}" fill="${CMP_CORES.capacity.area}"/>
     <path d="${linha(cap)}" fill="none" stroke="${CMP_CORES.capacity.traco}" stroke-width="2" stroke-linejoin="round"/>
     <path d="${linha(base)}" fill="none" stroke="${CMP_CORES.base.traco}" stroke-width="2" stroke-dasharray="6 4" stroke-linejoin="round"/>
-    ${pontos}${chamada}${alvos}
+    ${pontos}${chamada}${foco}
   </svg>`;
+}
+
+/* ── Leitura hora a hora, com o mouse ──────────────────────────────────
+
+   O <title> do SVG até mostrava os números, mas é o tooltip do sistema
+   operacional: demora quase um segundo para aparecer, some sozinho,
+   não acompanha o cursor e não tem como mostrar as três séries lado a
+   lado com as cores delas. Quem está lendo a curva quer o número da
+   hora em que está o olho, na hora em que está olhando.
+
+   O que aparece: uma guia vertical na hora apontada, um ponto em cada
+   curva, a barra de voo daquela hora realçada e um cartão com Base,
+   Capacity, a diferença e os voos. */
+function cmpHover(ev, svg) {
+  const d = window._cmpHover;
+  const tip = document.getElementById('cmp-tip');
+  if (!d || !tip) return;
+
+  const r = svg.getBoundingClientRect();
+  if (!r.width) return;
+  // O SVG sai em tamanho real, mas o navegador ainda pode escaloná-lo
+  // (zoom da página). A conversão protege contra isso.
+  const px = (ev.clientX - r.left) * (d.W / r.width);
+  const h = Math.floor((px - d.ML) / d.largura);
+  if (h < 0 || h > 23) { cmpHoverFim(); return; }
+
+  const cx = d.ML + h * d.largura + d.largura / 2;
+  const yP = (v) => d.MT + d.ih - (v / d.maxP) * d.ih;
+  const yV = (v) => d.MT + d.ih - (v / d.maxV) * d.zonaVoo;
+
+  const guia = document.getElementById('cmp-guia');
+  if (guia) { guia.setAttribute('x1', cx); guia.setAttribute('x2', cx); guia.setAttribute('opacity', '1'); }
+
+  const marcar = (id, valor) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.setAttribute('cx', cx); el.setAttribute('cy', yP(valor)); el.setAttribute('opacity', '1');
+  };
+  marcar('cmp-foco-base', d.base[h]);
+  marcar('cmp-foco-cap', d.cap[h]);
+
+  const barra = document.getElementById('cmp-foco-barra');
+  if (barra) {
+    const alto = d.temVoo && d.voos[h] ? (d.MT + d.ih) - yV(d.voos[h]) : 0;
+    barra.setAttribute('x', cx - d.largura * 0.34);
+    barra.setAttribute('y', yV(d.voos[h] || 0));
+    barra.setAttribute('width', d.largura * 0.68);
+    barra.setAttribute('height', Math.max(alto, 0));
+    barra.setAttribute('opacity', alto ? '.34' : '0');
+  }
+
+  const dif = d.base[h] - d.cap[h];
+  tip.innerHTML =
+    `<div class="hora">${cmpHh(h)} às ${cmpHh((h + 1) % 24)}</div>`
+    + `<div class="l"><i style="background:${CMP_CORES.base.traco}"></i>Escala Base<b>${d.base[h]}</b></div>`
+    + `<div class="l"><i style="background:${CMP_CORES.capacity.traco}"></i>Escala Capacity<b>${d.cap[h]}</b></div>`
+    + `<div class="l dif"><i style="background:var(--cmp-dif)"></i>Diferença<b>${dif > 0 ? '+' : ''}${dif}</b></div>`
+    + (d.temVoo ? `<div class="l"><i style="background:${CMP_CORES.voos.traco}"></i>Voos na hora<b>${d.voos[h]}</b></div>` : '');
+  tip.classList.add('on');
+
+  /* O cartão segue o cursor, mas não sai do painel: perto da borda
+     direita ele passa para o outro lado em vez de vazar da tela. */
+  const caixa = tip.parentElement.getBoundingClientRect();
+  const larguraTip = tip.offsetWidth || 180;
+  let esq = (r.left - caixa.left) + (cx * r.width / d.W) + 16;
+  if (esq + larguraTip > caixa.width - 4) esq = esq - larguraTip - 32;
+  tip.style.left = Math.max(4, esq) + 'px';
+}
+
+function cmpHoverFim() {
+  const tip = document.getElementById('cmp-tip');
+  if (tip) tip.classList.remove('on');
+  ['cmp-guia', 'cmp-foco-base', 'cmp-foco-cap', 'cmp-foco-barra'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.setAttribute('opacity', '0');
+  });
 }
 
 function cmpGraficoDisrupcao(resumo) {
@@ -570,7 +659,8 @@ function cmpDesenharGrafico() {
   const cobBase = cmpCoberturaPorHora(cmpDados.base, cmpGrupo);
   const cobCap = cmpCoberturaPorHora(cmpDados.capacity, cmpGrupo);
   alvo.innerHTML = cmpGraficoCobertura(
-    cobBase, cobCap, cmpDados.voos || new Array(24).fill(0), alvo.clientWidth);
+    cobBase, cobCap, cmpDados.voos || new Array(24).fill(0), alvo.clientWidth)
+    + '<div class="cmp-tip" id="cmp-tip"></div>';
 }
 
 /* Redimensionar a janela (ou recolher a barra lateral) muda a largura
