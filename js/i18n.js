@@ -35,6 +35,7 @@ const I18N = {
     'auth.erroEmailNaoConfirmado': 'Confirme seu email antes de entrar.',
     'auth.erroJaCadastrado': 'Este email já está cadastrado.',
 
+    'nav.folgas': 'Gerenciador de Folgas',
     'nav.escala': 'Escala Base',
     'nav.capacity': 'Escala Capacity',
     'nav.aderencia': 'Aderência',
@@ -73,6 +74,7 @@ const I18N = {
     'auth.erroEmailNaoConfirmado': 'Confirm your email before signing in.',
     'auth.erroJaCadastrado': 'This email is already registered.',
 
+    'nav.folgas': 'Time-off Manager',
     'nav.escala': 'Base Schedule',
     'nav.capacity': 'Capacity Schedule',
     'nav.aderencia': 'Adherence',

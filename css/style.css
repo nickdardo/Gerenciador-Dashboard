@@ -4781,3 +4781,45 @@ body.escala-modo-grade .escala-fill { margin-top: 0; }
   :root:not([data-theme="light"]) .escala-chip-comparar { border-color: #4fc3e8; color: #4fc3e8; }
   :root:not([data-theme="light"]) .escala-chip-comparar:hover { background: #4fc3e8; color: #0b0f1a; }
 }
+
+/* ── Gerenciador de Folgas · modelos para download ──────────────────────
+   O bloco fica acima dos passos de upload porque é onde o mês começa
+   para quem ainda não tem planilha nenhuma. */
+.fgm-wrap {
+  max-width: 1500px; margin: 0 auto 18px; padding: 20px 22px 18px;
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: 14px;
+}
+.fgm-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; flex-wrap: wrap; }
+.fgm-sub { margin: 8px 0 0; max-width: 760px; font-size: 12.5px; line-height: 1.6; color: var(--text-secondary); }
+.fgm-filtros { display: flex; gap: 12px; flex: none; }
+.fgm-campo { display: flex; flex-direction: column; gap: 5px; }
+.fgm-campo span { font-size: 10px; letter-spacing: .07em; text-transform: uppercase; color: var(--text-secondary); }
+
+.fgm-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 14px; margin-top: 18px; }
+.fgm-card {
+  display: flex; flex-direction: column;
+  background: var(--bg-surface); border: 1px solid var(--border); border-radius: 12px;
+  padding: 15px 16px 14px;
+}
+.fgm-card-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.fgm-card-top h3 { margin: 0; font-size: 15px; font-weight: 650; color: var(--text-primary); }
+.fgm-tag {
+  font-size: 10px; letter-spacing: .05em; text-transform: uppercase; color: var(--text-secondary);
+  border: 1px solid var(--border-strong); border-radius: 999px; padding: 2px 8px; white-space: nowrap;
+}
+.fgm-resumo { margin: 9px 0 0; font-size: 12.5px; font-weight: 600; color: var(--text-primary); }
+.fgm-detalhe { margin: 6px 0 0; font-size: 12px; line-height: 1.6; color: var(--text-secondary); }
+.fgm-indicado { margin: 9px 0 0; font-size: 11.5px; line-height: 1.55; color: var(--text-muted); }
+.fgm-indicado b { color: var(--text-secondary); font-weight: 600; }
+/* As ações grudam no rodapé do cartão para que os três botões fiquem na
+   mesma linha, mesmo com textos de alturas diferentes. */
+.fgm-acoes { display: flex; gap: 8px; margin-top: auto; padding-top: 14px; flex-wrap: wrap; }
+.fgm-acoes .fg-btn { flex: 1 1 auto; justify-content: center; white-space: nowrap; }
+
+.fgm-nota {
+  margin: 16px 0 0; padding-top: 13px; border-top: 1px solid var(--border);
+  font-size: 11.5px; line-height: 1.65; color: var(--text-secondary); max-width: 1100px;
+}
+.fgm-nota b { color: var(--text-primary); font-weight: 600; }
+.fgm-ok { color: var(--text-primary); }
+.fgm-erro { color: var(--cmp-dif); }

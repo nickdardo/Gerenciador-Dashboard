@@ -311,30 +311,41 @@ function paginaDeTeste() {
         'as regras novas ficam todas sob table.escala-enx');
     }
 
-    sec('8. Cada escala é porta própria no menu lateral');
+    /* As duas escalas eram portas próprias no menu lateral. Saíram de lá
+       quando o trabalho do mês passou a começar pelo Gerenciador de
+       Folgas, que lê a planilha no navegador em vez de carregar o mês
+       inteiro do banco.
+
+       Saíram do MENU, não do app: o botão "Escala Capacity" do Gerador
+       continua abrindo a Capacity com o dimensionamento alocado. Por
+       isso a declaração continua em NAV_ITEMS — é de lá que navigateTo
+       tira o título da barra de cima, o papel que pode ver a página e a
+       chave de tradução. O que mudou é que o menu e o retorno do F5
+       passam a filtrar `oculto`. */
+    sec('8. As escalas saíram do menu, mas continuam roteáveis');
     {
       const app = fs.readFileSync(path.join(BASE, 'js', 'app.js'), 'utf8');
       const nav = app.match(/const NAV_ITEMS[\s\S]*?\n\];/);
       ok(!!nav, 'o menu lateral está declarado em NAV_ITEMS');
       if (nav) {
-        const linhas = nav[0].split('\n').filter((l) => /\bid:\s*'/.test(l));
-        const ids = linhas.map((l) => l.match(/id:\s*'([^']+)'/)[1]);
-        const iEscala = ids.indexOf('escala');
-        const iEspelho = ids.indexOf('capacity');
-        ok(iEspelho === iEscala + 1,
-          'a Capacity vem logo abaixo da Base, como foi pedido');
-        ok(/id:\s*'capacity'[^\n]*'Escala Capacity'/.test(nav[0]),
-          'com o nome Escala Capacity no menu');
-        ok(/id:\s*'escala'[^\n]*'Escala Base'/.test(nav[0]),
-          'e a outra chamada Escala Base');
+        ok(/id:\s*'capacity'[^\n]*'Escala Capacity'[^\n]*oculto:\s*true/.test(nav[0]),
+          'a Escala Capacity continua declarada, marcada como oculta');
+        ok(/id:\s*'escala'[^\n]*'Escala Base'[^\n]*oculto:\s*true/.test(nav[0]),
+          'e a Escala Base também');
+        ok(/id:\s*'folgas'[^\n]*'Gerenciador de Folgas'/.test(nav[0]),
+          'com o Gerenciador de Folgas no lugar delas');
       }
       ok(/case 'capacity':\s*pageCapacity\(/.test(app),
-        'a rota do menu chama pageCapacity');
+        'a rota da Capacity continua de pé, para o botão do Gerador');
       ok(/pageId === 'escala' \|\| pageId === 'capacity'/.test(app),
         'e o botão de ferramentas vale para as duas telas');
-      // Recarregar a tela precisa voltar onde o usuário estava.
-      ok(/paginasValidas = NAV_ITEMS\.map/.test(app),
-        'as páginas válidas saem do próprio menu, então F5 no Espelho continua no Espelho');
+      ok(/\.filter\(item => !item\.oculto\)/.test(app),
+        'o menu lateral filtra as ocultas');
+      /* F5 não pode devolver ninguém para uma tela que o menu já não
+         oferece — e que carrega o mês inteiro do banco antes de o
+         usuário pedir. */
+      ok(/paginasValidas = NAV_ITEMS\.filter\(n => !n\.oculto\)\.map/.test(app),
+        'e o retorno do F5 só considera as páginas que o menu mostra');
 
       const i18n = fs.readFileSync(path.join(BASE, 'js', 'i18n.js'), 'utf8');
       ok((i18n.match(/'nav\.capacity':/g) || []).length === 2,

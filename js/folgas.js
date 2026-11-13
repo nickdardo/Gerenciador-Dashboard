@@ -24,8 +24,42 @@ function adminFolgasTab(el) {
   folgasLauncherMontar();
 }
 
+/* ─────────────────────────────────────────────────────────────────────
+   PÁGINA DO MENU — Gerenciador de Folgas
+
+   A mesma ferramenta, agora como porta de entrada do mês em vez de aba
+   escondida no Admin. O que a página acrescenta ao cartão do Admin é o
+   que faltava para ela se bastar: os modelos de planilha. Sem eles, o
+   fluxo só servia para quem JÁ tinha uma escala no formato certo — quem
+   não tinha não tinha por onde começar.
+   ───────────────────────────────────────────────────────────────────── */
+function pageFolgas(el) {
+  el.innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Gerenciador de Folgas</h1>
+        <p class="page-sub">Baixe o modelo, preencha com a sua equipe e suba de volta — a distribuição das folgas é feita aqui, no seu navegador.</p>
+      </div>
+    </div>
+    <div id="fg-modelos"></div>
+    <div id="fg-launcher"></div>`;
+
+  document.getElementById('fg-modelos').innerHTML = fgmBlocoHTML();
+  document.getElementById('fg-launcher').innerHTML = folgasLauncherHTML({
+    eyebrow: 'Com a planilha preenchida · escala 6x1 e 5x2',
+    titulo: 'Suba o arquivo e gere as folgas',
+  });
+  folgasLauncherMontar();
+  fgmMontar();
+}
+
 /* ---------------------------------------------------------- cartão da aba */
-function folgasLauncherHTML() {
+/* `opts.titulo` / `opts.eyebrow` existem porque o mesmo cartão aparece em
+   dois lugares com pesos diferentes. Na aba do Admin ele É a ferramenta,
+   e leva o nome dela. Na página do menu ele é o passo seguinte ao
+   download do modelo, e repetir "Gerador de Folgas" logo abaixo de
+   "Gerenciador de Folgas" dava três títulos na mesma tela. */
+function folgasLauncherHTML(opts = {}) {
   // Três entradas, na ordem em que o trabalho acontece. Os passos 1 e 3 são
   // caminhos alternativos para a mesma coisa — os cursos do mês —, e por isso
   // os dois são opcionais: um serve para quando as datas ainda estão abertas,
@@ -51,8 +85,8 @@ function folgasLauncherHTML() {
   <div class="fg-scope fg-wrap fg-launcher">
     <div class="fg-top">
       <div>
-        <div class="fg-eyebrow">Escala 6x1 · distribuição automática</div>
-        <h2 class="fg-title">Gerador de Folgas</h2>
+        <div class="fg-eyebrow">${opts.eyebrow || 'Escala 6x1 · distribuição automática'}</div>
+        <h2 class="fg-title">${opts.titulo || 'Gerador de Folgas'}</h2>
       </div>
       <div class="fg-actions">
         <button class="fg-btn fg-primary" id="fgl-open" type="button">Abrir gerador</button>

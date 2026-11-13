@@ -7,9 +7,23 @@ let currentPage = 'escala';
 
 const ALL_ROLES = ['admin','gerente','coordenador','supervisor','lideranca','operador'];
 
+/* As duas escalas online saíram do menu, não do app.
+
+   Elas continuam roteáveis — o botão "Escala Capacity" do Gerador ainda
+   abre a Capacity com o dimensionamento alocado, e quem tiver o endereço
+   guardado continua chegando lá. O que mudou foi a porta de entrada: o
+   trabalho do mês passa a começar pelo Gerenciador de Folgas, que lê a
+   planilha no próprio navegador em vez de carregar 1.200 pessoas × 31
+   dias do banco a cada abertura.
+
+   `oculto` em vez de apagar a linha porque navigateTo tira daqui o
+   título da barra de cima, o papel que pode ver a página e a chave de
+   tradução. Removida a linha, a Capacity abriria com o título da página
+   anterior. */
 const NAV_ITEMS = [
-  { id: 'escala',     icon: 'calendar',   label: 'Escala Base',     i18nKey: 'nav.escala',     roles: ALL_ROLES },
-  { id: 'capacity',   icon: 'grid',       label: 'Escala Capacity', i18nKey: 'nav.capacity',   roles: ALL_ROLES },
+  { id: 'folgas',     icon: 'calendar',   label: 'Gerenciador de Folgas', i18nKey: 'nav.folgas', roles: ALL_ROLES },
+  { id: 'escala',     icon: 'calendar',   label: 'Escala Base',     i18nKey: 'nav.escala',     roles: ALL_ROLES, oculto: true },
+  { id: 'capacity',   icon: 'grid',       label: 'Escala Capacity', i18nKey: 'nav.capacity',   roles: ALL_ROLES, oculto: true },
   { id: 'aderencia',  icon: 'clock',      label: 'Aderência',      i18nKey: 'nav.aderencia',  roles: ['admin','gerente','coordenador','supervisor','lideranca'] },
   { id: 'headcount',  icon: 'users',      label: 'Staff',      i18nKey: 'nav.staff',      roles: ['admin','gerente','coordenador','supervisor','lideranca'] },
   { id: 'gerador',    icon: 'settings',   label: 'Gerador',        i18nKey: 'nav.gerador',    roles: ['admin','gerente','coordenador','supervisor','lideranca'] },
@@ -59,10 +73,15 @@ async function appInit(user) {
     _appInitialized = true;
     // Toda página do menu lateral entra aqui: sem isso, recarregar a tela
     // devolve o usuário para a Escala Online em vez de onde ele estava.
-    const paginasValidas = NAV_ITEMS.map(n => n.id);
+    /* Só páginas do menu voltam sozinhas. As escalas online continuam
+       roteáveis pelo botão do Gerador, mas quem estava nelas quando elas
+       saíram do menu não pode cair lá de novo a cada F5 — abriria uma
+       tela que o menu já não oferece e que carrega o mês inteiro do
+       banco antes de o usuário pedir. */
+    const paginasValidas = NAV_ITEMS.filter(n => !n.oculto).map(n => n.id);
     let ultimaPagina = null;
     try { ultimaPagina = localStorage.getItem('gde_ultima_pagina'); } catch(_) {}
-    navigateTo(paginasValidas.includes(ultimaPagina) ? ultimaPagina : 'escala');
+    navigateTo(paginasValidas.includes(ultimaPagina) ? ultimaPagina : 'folgas');
   }
 }
 
@@ -90,6 +109,7 @@ function renderSidebar() {
     <!-- Nav items — filtered by role -->
     <nav class="sb-nav">
       ${NAV_ITEMS
+        .filter(item => !item.oculto)
         .filter(item => !item.roles || item.roles.includes(currentUserProfile?.role || 'operador'))
         .map(item => `
           <button
@@ -183,6 +203,7 @@ function navigateTo(pageId) {
   content.innerHTML = '';
 
   switch (pageId) {
+    case 'folgas':     pageFolgas(content);     break;
     case 'escala':     pageEscala(content);     break;
     case 'capacity':   pageCapacity(content);   break;
     case 'gerador':    pageGerador(content);    break;
