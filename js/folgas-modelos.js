@@ -282,6 +282,181 @@
     },
   };
 
+  /* ------------------------------------- feriados e datas bloqueadas ----- */
+
+  /* Páscoa pelo algoritmo gregoriano anônimo. Serve para carnaval, sexta-feira
+     santa e Corpus Christi, que mudam de data todo ano — justamente os que
+     alguém esquece de bloquear à mão. */
+  function pascoa(ano) {
+    const a = ano % 19, b = Math.floor(ano / 100), c = ano % 100;
+    const d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25);
+    const g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
+    const i = Math.floor(c / 4), k = c % 4;
+    const l = (32 + 2 * e + 2 * i - h - k) % 7;
+    const m = Math.floor((a + 11 * h + 22 * l) / 451);
+    const mes = Math.floor((h + l - 7 * m + 114) / 31);
+    const dia = ((h + l - 7 * m + 114) % 31) + 1;
+    return Date.UTC(ano, mes - 1, dia);
+  }
+
+  const DIA = 86400000;
+
+  /* Só os NACIONAIS. Feriado municipal e ponto facultativo variam de base
+     para base e ninguém aqui tem essa lista; o modelo diz isso na própria
+     planilha, para o usuário acrescentar os dele em vez de supor que está
+     tudo coberto. */
+  function feriadosNacionais(ano) {
+    const p = pascoa(ano);
+    const fixos = [
+      [0, 1, 'Confraternização Universal'], [3, 21, 'Tiradentes'],
+      [4, 1, 'Dia do Trabalho'], [8, 7, 'Independência'],
+      [9, 12, 'Nossa Senhora Aparecida'], [10, 2, 'Finados'],
+      [10, 15, 'Proclamação da República'], [10, 20, 'Consciência Negra'],
+      [11, 25, 'Natal'],
+    ].map(([m, d, nome]) => ({ ts: Date.UTC(ano, m, d), nome }));
+    const moveis = [
+      { ts: p - 48 * DIA, nome: 'Carnaval' },
+      { ts: p - 47 * DIA, nome: 'Carnaval' },
+      { ts: p - 2 * DIA, nome: 'Sexta-feira Santa' },
+      { ts: p + 60 * DIA, nome: 'Corpus Christi' },
+    ];
+    return [...fixos, ...moveis].sort((a, b) => a.ts - b.ts);
+  }
+
+  function feriadosDoMes(ano, mes0) {
+    return feriadosNacionais(ano).filter((f) => {
+      const d = new Date(f.ts);
+      return d.getUTCFullYear() === ano && d.getUTCMonth() === mes0;
+    }).map((f) => ({ dia: new Date(f.ts).getUTCDate(), nome: f.nome, ts: f.ts }));
+  }
+
+  /* ---------------------------------------- Programação de Cursos -------- */
+
+  /* O arquivo oficial, com as abas que o planejador lê: CURSOS (quem faz o
+     quê), JANELAS (em que dias cada curso pode cair), BLOQUEIOS (dias em que
+     curso nenhum pode cair) e DB (o efetivo da base, para não redigitar nome
+     e função e para o painel conferir quem está de férias).
+
+     Sábado e domingo NÃO entram em BLOQUEIOS: o planejador já nunca marca
+     curso em fim de semana. Encher a aba com oito sábados esconderia os
+     feriados, que são a informação que ele não tem como adivinhar. */
+  function construirCursos({ ano, mes0, base, pessoas } = {}) {
+    const hoje = new Date();
+    if (ano == null || mes0 == null) {
+      const prox = new Date(Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth() + 1, 1));
+      ano = prox.getUTCFullYear(); mes0 = prox.getUTCMonth();
+    }
+    const lista = pessoas || [];
+    const wb = XLSX.utils.book_new();
+    const datas = [];                    // [aba, r, c] a formatar como data
+
+    // ── CURSOS ────────────────────────────────────────────────────────────
+    const cursos = [['MATRÍCULA', 'NOME', 'FUNÇÃO', 'CURSO', 'DATA', 'HORA INÍCIO',
+      'HORA FIM', 'SITUAÇÃO', 'OBSERVAÇÃO', 'NA BASE']];
+    /* O efetivo NÃO vem aqui — vem na aba DB. Pré-lançar todo mundo com o
+       curso em branco pareceria adiantar trabalho, mas uma linha sem curso
+       é um erro de leitura: uma base de 300 pessoas abriria o painel com
+       300 erros "matrícula sem curso informado", e o aviso que importa se
+       perderia no meio. Aqui ficam só duas linhas de exemplo; quem preenche
+       copia da aba DB as pessoas que realmente vão fazer curso. */
+    const quemExemplo = lista.slice(0, 2);
+    if (quemExemplo.length) {
+      quemExemplo.forEach((p, i) => cursos.push([p.mat, p.nome, p.funcao || '',
+        i ? 'AIRSIDE SAFETY' : 'RAMPA DNATA', '', '', '', 'painel distribui',
+        'EXEMPLO — apague ou troque', p.descricao || '']));
+    } else {
+      cursos.push([1001, 'EXEMPLO — APAGUE ESTA LINHA', 'AUX RAMPA I', 'RAMPA DNATA', '', '', '', 'painel distribui', '', 'Trabalhando']);
+    }
+    const wsCursos = XLSX.utils.aoa_to_sheet(cursos);
+    wsCursos['!cols'] = [{ wch: 11 }, { wch: 32 }, { wch: 26 }, { wch: 26 }, { wch: 11 },
+      { wch: 12 }, { wch: 11 }, { wch: 16 }, { wch: 22 }, { wch: 14 }];
+    wsCursos['!freeze'] = { xSplit: 0, ySplit: 1 };
+    XLSX.utils.book_append_sheet(wb, wsCursos, 'CURSOS');
+
+    // ── JANELAS ───────────────────────────────────────────────────────────
+    const janelas = [['CURSO', 'TIPO', 'DIAS PERMITIDOS', 'HORA INÍCIO', 'HORA FIM']];
+    const exemplos = [
+      ['RAMPA DNATA', 'INTERNO', '', '08:00', '17:00'],
+      ['AIRSIDE SAFETY', 'INTERNO', '', '08:00', '12:00'],
+      ['SAÚDE E SEGURANÇA/ SMS', 'INTERNO', '', '08:00', '12:00'],
+      ['AVSEC OPERAÇÃO DE SOLO', 'EXTERNO', '06 - 11', '08:00', '17:00'],
+      ['DG F5', 'EXTERNO', '03, 05, 17, 19, 26', '08:00', '17:00'],
+    ];
+    janelas.push(...exemplos);
+    const wsJan = XLSX.utils.aoa_to_sheet(janelas);
+    wsJan['!cols'] = [{ wch: 30 }, { wch: 11 }, { wch: 24 }, { wch: 12 }, { wch: 11 }];
+    wsJan['!freeze'] = { xSplit: 0, ySplit: 1 };
+    XLSX.utils.book_append_sheet(wb, wsJan, 'JANELAS');
+
+    // ── BLOQUEIOS ─────────────────────────────────────────────────────────
+    const blo = [['DATA', 'MOTIVO']];
+    for (const f of feriadosDoMes(ano, mes0)) {
+      blo.push([serialDe(ano, mes0, f.dia), f.nome + ' (feriado nacional)']);
+      datas.push(['BLOQUEIOS', blo.length, 1]);
+    }
+    const wsBlo = XLSX.utils.aoa_to_sheet(blo);
+    wsBlo['!cols'] = [{ wch: 13 }, { wch: 46 }];
+    wsBlo['!freeze'] = { xSplit: 0, ySplit: 1 };
+    XLSX.utils.book_append_sheet(wb, wsBlo, 'BLOQUEIOS');
+
+    // ── DB ────────────────────────────────────────────────────────────────
+    const bd = [['Base', 'Matrícula', 'Nome', 'Função', 'C.H.', 'Admissão', 'Situação', 'Descrição']];
+    for (const p of lista) {
+      bd.push([p.base || base || '', p.mat, p.nome, p.funcao || '', p.ch || '',
+        p.admissao || '', p.situacao || 'Ativo', p.descricao || '']);
+    }
+    const wsBd = XLSX.utils.aoa_to_sheet(bd);
+    wsBd['!cols'] = [{ wch: 8 }, { wch: 11 }, { wch: 32 }, { wch: 28 }, { wch: 7 },
+      { wch: 12 }, { wch: 11 }, { wch: 16 }];
+    wsBd['!freeze'] = { xSplit: 0, ySplit: 1 };
+    XLSX.utils.book_append_sheet(wb, wsBd, 'DB');
+
+    // ── INSTRUÇÕES ────────────────────────────────────────────────────────
+    const instr = [
+      ['PROGRAMAÇÃO DE CURSOS — COMO PREENCHER'],
+      [`Modelo gerado para ${MESES[mes0]} de ${ano}${base ? ' · base ' + base : ''}.`],
+      [],
+      ['ABA CURSOS — quem faz o quê'],
+      ['   Uma linha por pessoa e por curso. Deixe a DATA em branco para o painel escolher;'],
+      ['   preencha a DATA só quando ela já estiver fechada com o fornecedor — o painel respeita.'],
+      ['   Apague as linhas de quem não vai fazer curso neste mês.'],
+      [],
+      ['ABA JANELAS — quando cada curso pode acontecer'],
+      ['   TIPO: INTERNO (a dnata marca quando quiser) ou EXTERNO (data imposta pelo fornecedor).'],
+      ['   DIAS PERMITIDOS: deixe vazio para o mês inteiro, ou escreva os dias — 06 - 11, ou 03, 05, 17.'],
+      ['   ATENÇÃO: digite um apóstrofo antes (\'06 - 11), senão o Excel transforma em data e o painel reclama.'],
+      [],
+      ['ABA BLOQUEIOS — dias em que não se marca curso'],
+      ['   Os feriados NACIONAIS do mês já vêm preenchidos. Acrescente os municipais, os pontos'],
+      ['   facultativos e qualquer data de parada programada: uma linha por data, com o motivo.'],
+      ['   Sábados e domingos NÃO precisam ser listados — o painel já não marca curso em fim de semana.'],
+      ['   Dia bloqueado sai da escolha do painel, e não volta nem quando falta data: feriado não cede.'],
+      [],
+      ['ABA DB — o efetivo da base'],
+      ['   Vem preenchida com quem está ativo na base escolhida. O painel usa para completar nome e'],
+      ['   função e para avisar quando alguém inscrito está de férias ou afastado. Não precisa mexer.'],
+      [],
+      ['DEPOIS DE PREENCHER'],
+      ['   Suba este arquivo no Gerenciador de Folgas, junto com a escala do mês. O painel escolhe as'],
+      ['   datas que menos derrubam a cobertura e devolve a planilha com a coluna DATA preenchida.'],
+    ];
+    const wsIns = XLSX.utils.aoa_to_sheet(instr);
+    wsIns['!cols'] = [{ wch: 104 }];
+    XLSX.utils.book_append_sheet(wb, wsIns, 'INSTRUÇÕES');
+
+    for (const [aba, r, c] of datas) {
+      const cel = wb.Sheets[aba][ref(r, c)];
+      if (cel) cel.z = 'dd/mm/yyyy';
+    }
+    return wb;
+  }
+
+  function baixarCursos(opts = {}) {
+    const wb = construirCursos(opts);
+    const mm = String((opts.mes0 ?? 0) + 1).padStart(2, '0');
+    XLSX.writeFile(wb, `Programacao-de-Cursos${opts.base ? '_' + opts.base : ''}_${opts.ano}-${mm}.xlsx`);
+  }
+
   /* ------------------------------------------------------- construção ---- */
 
   function matrizDe(aba) {
@@ -361,7 +536,8 @@
   }
 
   const api = { MODELOS, CH_REGRAS, MESES, construir, baixar, montarAba, nomeArquivo,
-    diasNoMes, serialDe, fracao, saidaFracao, DIAS_PREV, COL_CH };
+    diasNoMes, serialDe, fracao, saidaFracao, DIAS_PREV, COL_CH,
+    construirCursos, baixarCursos, feriadosNacionais, feriadosDoMes, pascoa };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.FolgaModelos = api;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -371,12 +547,96 @@
 
    Fica fora do módulo acima de propósito: ali está só a construção da
    planilha, que o teste roda sem DOM nenhum. Aqui embaixo está o que
-   depende de tela e de banco.
+   depende de tela, de perfil de usuário e de banco.
    ═══════════════════════════════════════════════════════════════════════ */
 
-/* O modelo é gerado para um mês: a linha de datas, a tabela de CH e o
-   rabicho do mês anterior mudam com ele. Por isso a escolha vem antes do
-   download, e não depois. */
+/* Quais bases este usuário pode ver.
+
+   O filtro antigo era `(bases || []).filter(b => b !== '*')`, o que para um
+   admin — cujo perfil é exatamente ['*'] — devolvia lista vazia e escrevia
+   "sem base atribuída" na tela de quem pode ver tudo. O curinga precisa ser
+   TROCADO pela lista real, não removido.
+
+   A lista real sai do cadastro já carregado em memória (window.eoColabs),
+   que é o mesmo lugar de onde o Admin tira a dele. Base sem ninguém
+   cadastrado não aparece: não haveria efetivo para pôr no Excel. */
+function fgmBasesDisponiveis() {
+  const perfil = window.currentUserProfile?.bases || [];
+  const todas = new Set();
+  if (window.eoColabs?.size) {
+    for (const [, r] of window.eoColabs) {
+      const st = String(r.station || '').trim().toUpperCase();
+      if (st) todas.add(st);
+    }
+  }
+  const doCadastro = [...todas].sort();
+  if (perfil.includes('*')) return doCadastro;
+  const autorizadas = perfil.map((b) => String(b).trim().toUpperCase());
+  /* Base autorizada que ainda não tem cadastro continua na lista: o usuário
+     pode baixar o modelo em branco para ela. Some só a que ninguém
+     autorizou. */
+  return [...new Set([...autorizadas])].filter(Boolean).sort();
+}
+
+/* Efetivo ativo de uma base, com a data do cadastro.
+
+   Prefere a memória: o painel já carrega o cadastro inteiro na abertura,
+   então filtrar por base ali é instantâneo e não gasta uma ida ao banco a
+   cada download. A consulta fica como reserva para quando a página for
+   aberta antes de o cadastro terminar de carregar. */
+function fgmEfetivoEmMemoria(base) {
+  if (!window.eoColabs?.size) return null;
+  const alvo = String(base || '').trim().toUpperCase();
+  const out = [];
+  let maisRecente = null;
+  for (const [, r] of window.eoColabs) {
+    if (String(r.station || '').trim().toUpperCase() !== alvo) continue;
+    out.push({
+      mat: r.matricula, nome: r.nome, funcao: r.funcao,
+      ch: Number(String(r.ch || '').replace(/\D/g, '')) || null,
+      situacao: r.situacao, descricao: r.situacao, admissao: r.admissao, base: alvo,
+    });
+    if (r.updated_at && (!maisRecente || r.updated_at > maisRecente)) maisRecente = r.updated_at;
+  }
+  return { pessoas: out, atualizadoEm: maisRecente };
+}
+
+async function fgmEfetivoDaBase(base) {
+  const memoria = fgmEfetivoEmMemoria(base);
+  if (memoria && memoria.pessoas.length) return memoria;
+
+  /* Sem o teto de mil linhas do PostgREST: o cadastro de uma base grande
+     passa de mil, e a consulta simples volta calada com exatamente mil — o
+     modelo sairia com 1.000 das 1.200 pessoas e ninguém notaria até a
+     escala do mês vir faltando gente. */
+  const PAGE = 1000;
+  const todas = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await db.from('colaboradores')
+      .select('matricula,nome,funcao,ch,situacao,admissao,updated_at')
+      .eq('station', base).eq('ativo', true)
+      .order('funcao', { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(error.message);
+    if (data && data.length) todas.push(...data);
+    if (!data || data.length < PAGE) break;
+  }
+  let maisRecente = null;
+  for (const r of todas) if (r.updated_at && (!maisRecente || r.updated_at > maisRecente)) maisRecente = r.updated_at;
+  return {
+    pessoas: todas.map((r) => ({
+      mat: r.matricula, nome: r.nome, funcao: r.funcao,
+      ch: Number(String(r.ch || '').replace(/\D/g, '')) || null,
+      situacao: r.situacao, descricao: r.situacao, admissao: r.admissao,
+      base: String(base).toUpperCase(),
+    })),
+    atualizadoEm: maisRecente,
+  };
+}
+
+/* O modelo é gerado para um mês: a linha de datas, a tabela de CH, o
+   rabicho do mês anterior e os feriados mudam com ele. Por isso a escolha
+   vem antes do download, e não depois. */
 function fgmMesesOpcoes() {
   const hoje = new Date();
   const out = [];
@@ -390,7 +650,7 @@ function fgmMesesOpcoes() {
 }
 
 function fgmBlocoHTML() {
-  const bases = (window.currentUserProfile?.bases || []).filter((b) => b !== '*');
+  const bases = fgmBasesDisponiveis();
   const meses = fgmMesesOpcoes();
 
   const cartao = (m) => `
@@ -414,16 +674,16 @@ function fgmBlocoHTML() {
       <div>
         <div class="fg-eyebrow">Passo zero · modelos</div>
         <h2 class="fg-title">Comece pela planilha</h2>
-        <p class="fgm-sub">O arquivo sai pronto para o mês escolhido: linha de datas, tabela de carga horária,
+        <p class="fgm-sub">O arquivo sai pronto para a base e o mês escolhidos: linha de datas, tabela de carga horária,
           legenda dos códigos e os últimos dias do mês anterior já no lugar — é deles que o painel tira
           quantos dias seguidos cada um já vinha trabalhando na virada.</p>
       </div>
       <div class="fgm-filtros">
         <label class="fgm-campo"><span>Base</span>
-          <select class="adh-month-select" id="fgm-base">
+          <select class="adh-month-select" id="fgm-base" onchange="fgmTrocarBase()">
             ${bases.length
               ? bases.map((b) => `<option value="${b}">${b}</option>`).join('')
-              : '<option value="">sem base atribuída</option>'}
+              : '<option value="">cadastro ainda carregando</option>'}
           </select>
         </label>
         <label class="fgm-campo"><span>Mês</span>
@@ -434,15 +694,75 @@ function fgmBlocoHTML() {
       </div>
     </div>
 
-    <div class="fgm-cards">${Object.values(FolgaModelos.MODELOS).map(cartao).join('')}</div>
+    <div class="fgm-efetivo" id="fgm-efetivo"></div>
+
+    <div class="fgm-cards">
+      ${Object.values(FolgaModelos.MODELOS).map(cartao).join('')}
+
+      <div class="fgm-card fgm-card-cursos">
+        <div class="fgm-card-top">
+          <h3>Programação de Cursos</h3>
+          <span class="fgm-tag">padrão</span>
+        </div>
+        <p class="fgm-resumo">O arquivo oficial de cursos do mês.</p>
+        <p class="fgm-detalhe">Abas CURSOS, JANELAS, BLOQUEIOS e DB. A aba DB já vem com o efetivo ativo da base,
+          e a BLOQUEIOS com os feriados nacionais do mês — acrescente os municipais.</p>
+        <p class="fgm-indicado"><b>Indicado para</b> Planejar as datas dos cursos junto com a escala.</p>
+        <div class="fgm-acoes">
+          <button class="fg-btn fg-primary" type="button" onclick="fgmBaixarCursos(true)">Com o efetivo da base</button>
+          <button class="fg-btn" type="button" onclick="fgmBaixarCursos(false)">Em branco</button>
+        </div>
+      </div>
+    </div>
 
     <p class="fgm-nota" id="fgm-nota">
-      <b>Com o efetivo da base</b> traz matrícula, nome e carga horária de todo mundo que está cadastrado
-      naquela base, agrupado por função — apague quem não entra nesta escala e preencha os horários.
-      <b>Em branco</b> traz só a estrutura, com três linhas de exemplo para apagar.
+      <b>Com o efetivo da base</b> traz só quem está cadastrado na base escolhida — nenhuma outra —,
+      o que mantém o arquivo leve. <b>Em branco</b> traz só a estrutura, com linhas de exemplo para apagar.
       Nos dois casos os dias do mês saem vazios: é o painel que os preenche.
     </p>
   </div>`;
+}
+
+/* Quem o usuário vai baixar, e de quando é esse dado. Sem isso o download é
+   uma caixa preta: o arquivo vem com 280 pessoas e não há como saber se o
+   cadastro é de ontem ou de abril. */
+function fgmTrocarBase() {
+  const alvo = document.getElementById('fgm-efetivo');
+  const base = document.getElementById('fgm-base')?.value || '';
+  if (!alvo) return;
+  try { localStorage.setItem('gde_escala_ultima_base', base); } catch (_) {}
+
+  if (!base) {
+    alvo.innerHTML = '<span class="fgm-efetivo-vazio">Nenhuma base disponível — '
+      + 'o cadastro ainda pode estar carregando, ou o seu acesso não tem base atribuída.</span>';
+    return;
+  }
+
+  const m = fgmEfetivoEmMemoria(base);
+  if (!m) {
+    alvo.innerHTML = `<span class="fgm-efetivo-vazio">Base <b>${base}</b> · o cadastro ainda está carregando; `
+      + 'o efetivo será buscado no banco na hora do download.</span>';
+    return;
+  }
+  if (!m.pessoas.length) {
+    alvo.innerHTML = `<span class="fgm-efetivo-vazio">Base <b>${base}</b> · ninguém cadastrado. `
+      + 'Baixe o modelo em branco e monte a lista à mão.</span>';
+    return;
+  }
+
+  const porFuncao = new Set(m.pessoas.map((p) => p.funcao || 'SEM FUNÇÃO'));
+  const semCH = m.pessoas.filter((p) => !p.ch).length;
+  const quando = m.atualizadoEm
+    ? new Date(m.atualizadoEm).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    : null;
+
+  alvo.innerHTML = `
+    <span class="fgm-efetivo-chip"><b>${m.pessoas.length.toLocaleString('pt-BR')}</b> pessoa(s) em ${base}</span>
+    <span class="fgm-efetivo-chip">${porFuncao.size} função(ões)</span>
+    ${quando
+      ? `<span class="fgm-efetivo-chip">cadastro atualizado em <b>${quando}</b></span>`
+      : '<span class="fgm-efetivo-chip fgm-efetivo-alerta">sem data de atualização no cadastro</span>'}
+    ${semCH ? `<span class="fgm-efetivo-chip fgm-efetivo-alerta">${semCH} sem carga horária</span>` : ''}`;
 }
 
 function fgmMontar() {
@@ -453,6 +773,21 @@ function fgmMontar() {
     const ultima = localStorage.getItem('gde_escala_ultima_base');
     if (ultima && [...sel.options].some((o) => o.value === ultima)) sel.value = ultima;
   } catch (_) {}
+  fgmTrocarBase();
+
+  /* O cadastro carrega em paralelo com a página. Se ele chegar depois, a
+     lista de bases fica vazia para sempre — e o admin vê "sem base" numa
+     tela em que pode ver todas. */
+  if (!window.eoColabs?.size) {
+    let tentativas = 0;
+    const espera = setInterval(() => {
+      if (window.eoColabs?.size) {
+        clearInterval(espera);
+        const bloco = document.getElementById('fgm-base')?.closest('.fgm-wrap');
+        if (bloco) { bloco.outerHTML = fgmBlocoHTML(); fgmMontar(); }
+      } else if (++tentativas > 40) clearInterval(espera);   // ~20s e desiste
+    }, 500);
+  }
 }
 
 function fgmAviso(texto, erro) {
@@ -461,25 +796,10 @@ function fgmAviso(texto, erro) {
   box.innerHTML = `<span class="${erro ? 'fgm-erro' : 'fgm-ok'}">${texto}</span>`;
 }
 
-/* Todo o efetivo da base, sem o teto de mil linhas do PostgREST.
-
-   O cadastro de uma base grande passa de mil, e a consulta simples volta
-   calada com exatamente mil — o modelo sairia com 1.000 das 1.200
-   pessoas e ninguém notaria até a escala do mês vir faltando gente. */
-async function fgmEfetivoDaBase(base) {
-  const PAGE = 1000;
-  const todas = [];
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await db.from('colaboradores')
-      .select('matricula,nome,funcao,ch,situacao')
-      .eq('station', base)
-      .order('funcao', { ascending: true })
-      .range(from, from + PAGE - 1);
-    if (error) throw new Error(error.message);
-    if (data && data.length) todas.push(...data);
-    if (!data || data.length < PAGE) break;
-  }
-  return todas;
+function fgmEscolha() {
+  const base = document.getElementById('fgm-base')?.value || '';
+  const [ano, mes] = String(document.getElementById('fgm-mes')?.value || '').split('-');
+  return { base, ano: Number(ano), mes0: Number(mes) - 1 };
 }
 
 /* Agrupa por função, que é como a escala é lida e conferida. Sem grupo,
@@ -489,11 +809,7 @@ function fgmAgrupar(pessoas) {
   for (const p of pessoas) {
     const f = String(p.funcao || 'SEM FUNÇÃO').trim().toUpperCase();
     if (!porFuncao.has(f)) porFuncao.set(f, []);
-    porFuncao.get(f).push({
-      mat: p.matricula, nome: p.nome,
-      ch: Number(String(p.ch || '').replace(/\D/g, '')) || null,
-      equipe: '',
-    });
+    porFuncao.get(f).push({ mat: p.mat, nome: p.nome, ch: p.ch, equipe: '' });
   }
   return [...porFuncao.entries()]
     .sort((a, b) => a[0].localeCompare(b[0], 'pt-BR'))
@@ -501,21 +817,19 @@ function fgmAgrupar(pessoas) {
 }
 
 async function fgmBaixar(id, comEfetivo) {
-  const base = document.getElementById('fgm-base')?.value || '';
-  const [ano, mes] = String(document.getElementById('fgm-mes')?.value || '').split('-');
-  const opts = { ano: Number(ano), mes0: Number(mes) - 1, base: base || null };
+  const { base, ano, mes0 } = fgmEscolha();
+  const opts = { ano, mes0, base: base || null };
 
   if (!comEfetivo) {
     FolgaModelos.baixar(id, opts);
     fgmAviso(`Modelo ${FolgaModelos.MODELOS[id].nome} baixado em branco. Preencha e volte pelo passo 2.`);
     return;
   }
-
   if (!base) { fgmAviso('Escolha uma base para trazer o efetivo — ou baixe o modelo em branco.', true); return; }
 
-  fgmAviso('Buscando o efetivo da base...');
+  fgmAviso('Montando o arquivo com o efetivo da base...');
   try {
-    const pessoas = await fgmEfetivoDaBase(base);
+    const { pessoas } = await fgmEfetivoDaBase(base);
     if (!pessoas.length) {
       fgmAviso(`Não há ninguém cadastrado na base ${base}. Baixe o modelo em branco e monte a lista à mão.`, true);
       return;
@@ -526,14 +840,42 @@ async function fgmBaixar(id, comEfetivo) {
        Dividir por conta própria seria chutar a que setor cada função
        pertence — e um chute errado some com gente da escala. */
     const abas = FolgaModelos.MODELOS[id].abas;
-    const pessoasPorAba = { [abas[0]]: grupos };
+    FolgaModelos.baixar(id, { ...opts, pessoasPorAba: { [abas[0]]: grupos } });
 
-    FolgaModelos.baixar(id, { ...opts, pessoasPorAba });
     const semCH = pessoas.filter((p) => !p.ch).length;
     fgmAviso(`Modelo ${FolgaModelos.MODELOS[id].nome} baixado com ${pessoas.length.toLocaleString('pt-BR')} pessoa(s) de ${base}, em ${grupos.length} função(ões).`
       + (semCH ? ` ${semCH} sem carga horária no cadastro — preencha na planilha, é ela que define a meta de folgas.` : '')
       + (abas.length > 1 ? ` O efetivo foi para a aba ${abas[0]}; distribua entre as outras conforme o seu setor.` : ''));
   } catch (e) {
     fgmAviso('Não consegui buscar o efetivo: ' + (e.message || e) + '. O modelo em branco continua disponível.', true);
+  }
+}
+
+async function fgmBaixarCursos(comEfetivo) {
+  const { base, ano, mes0 } = fgmEscolha();
+  const feriados = FolgaModelos.feriadosDoMes(ano, mes0);
+  const sobreFeriados = feriados.length
+    ? ` A aba BLOQUEIOS já veio com ${feriados.length} feriado(s) nacional(is): ${feriados.map((f) => `dia ${f.dia}`).join(', ')}. Acrescente os municipais.`
+    : ' Este mês não tem feriado nacional — acrescente os municipais na aba BLOQUEIOS, se houver.';
+
+  if (!comEfetivo) {
+    FolgaModelos.baixarCursos({ ano, mes0, base: base || null });
+    fgmAviso('Programação de Cursos baixada em branco.' + sobreFeriados);
+    return;
+  }
+  if (!base) { fgmAviso('Escolha uma base para trazer o efetivo — ou baixe o arquivo em branco.', true); return; }
+
+  fgmAviso('Montando a Programação de Cursos com o efetivo da base...');
+  try {
+    const { pessoas } = await fgmEfetivoDaBase(base);
+    if (!pessoas.length) {
+      fgmAviso(`Não há ninguém cadastrado na base ${base}. Baixe o arquivo em branco.`, true);
+      return;
+    }
+    FolgaModelos.baixarCursos({ ano, mes0, base, pessoas });
+    fgmAviso(`Programação de Cursos baixada com ${pessoas.length.toLocaleString('pt-BR')} pessoa(s) de ${base} na aba DB.`
+      + ' Copie de lá para a aba CURSOS quem vai fazer curso.' + sobreFeriados);
+  } catch (e) {
+    fgmAviso('Não consegui buscar o efetivo: ' + (e.message || e) + '. O arquivo em branco continua disponível.', true);
   }
 }

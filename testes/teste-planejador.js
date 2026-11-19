@@ -48,9 +48,9 @@ function mkModel(Y, M, emps) {
       blocks: [{ title: 'B', headerRow: 1, dateRow: 2, cur: Array.from({ length: m.days }, (_, i) => 10 + i),
         prevCols: [], prevDates: [], groups: [{ label: 'g', name: 'G', emps }] }] }] };
 }
-const mkProg = (linhas, janelas = [], avisos = []) => ({
+const mkProg = (linhas, janelas = [], avisos = [], bloqueios = []) => ({
   linhas: linhas.map((l, i) => Object.assign({ nome: 'N', func: '', data: null, horaIni: '', horaFim: '', linha: i + 4, aba: 'A' }, l)),
-  janelas: new Map(janelas.map((j) => [j.curso, j])), avisos,
+  janelas: new Map(janelas.map((j) => [j.curso, j])), avisos, bloqueios,
 });
 const todosItens = (rel) => rel.itens.filter((i) => i.dia !== null);
 
@@ -691,6 +691,82 @@ sec('30. Data travada em fim de semana é mantida, mas acusada');
   ok(it && it.travado, 'e segue marcada como travada');
   const aviso = (rel.avisos || []).find((a) => /2700/.test(a.t) && /s[áa]bado/.test(a.t));
   ok(!!aviso, 'com aviso de que caiu em sábado: "' + (aviso ? aviso.t.slice(0, 80) : 'nenhum') + '"');
+}
+
+/* ============================================== 31. datas bloqueadas */
+sec('31. Feriado não é dia caro: é dia em que o curso não acontece');
+{
+  /* Fim de semana o painel já evitava sozinho. Feriado ele não tem como
+     adivinhar — muda de ano para ano e tem os municipais. Por isso a aba
+     BLOQUEIOS existe, e o que ela marca sai dos candidatos pela mesma
+     porta do sábado: não vira mais um degrau, porque degrau é regra que
+     cede quando aperta, e feriado não cede. */
+  const mm = mkMonth(2026, 10);                      // novembro/2026
+  const uteis = [];
+  for (let d = 0; d < mm.days; d++) if (mm.dow[d] !== 0 && mm.dow[d] !== 6) uteis.push(d);
+
+  // Bloqueia TODOS os dias úteis menos um: a data tem de cair nesse um.
+  const sobra = uteis[10];
+  const bloq = uteis.filter((d) => d !== sobra)
+    .map((d) => ({ data: new Date(Date.UTC(2026, 10, d + 1)), motivo: 'parada programada' }));
+
+  const e = mkEmp(mm.days, 3100, { nome: 'QUEM FAZ O CURSO' });
+  const model = mkModel(2026, 10, [e]);
+  const rel = P.planejar(model, mkProg(
+    [{ mat: 3100, curso: 'Z' }], [{ curso: 'Z', tipo: 'INTERNO', dias: null }], [], bloq), { tentativas: 3 });
+
+  const it = rel.itens[0];
+  eq(it.dia, sobra, 'o curso cai no único dia útil não bloqueado (dia ' + (sobra + 1) + ')');
+  ok(!it.cands.some((d) => bloq.some((b) => b.data.getUTCDate() - 1 === d)),
+    'e nenhum dia bloqueado sequer entrou na lista de candidatos');
+
+  // Com TUDO bloqueado, o item fica sem data e o painel diz o porquê.
+  const todos = uteis.map((d) => ({ data: new Date(Date.UTC(2026, 10, d + 1)), motivo: 'feriado' }));
+  const rel2 = P.planejar(model, mkProg(
+    [{ mat: 3100, curso: 'Z' }], [{ curso: 'Z', tipo: 'INTERNO', dias: null }], [], todos), { tentativas: 3 });
+  eq(rel2.itens[0].dia, null, 'bloqueando todo dia útil, o curso volta sem data');
+  ok((rel2.avisos || []).some((a) => a.lv === 'erro' && /dias úteis do mês estão bloqueados/.test(a.t)),
+    'com erro dizendo que o mês inteiro foi bloqueado, em vez de "sem data" sem explicação');
+  ok((rel2.avisos || []).some((a) => a.lv === 'erro' && /aba de bloqueios/.test(a.t) && /3100/.test(a.t)),
+    'e, por pessoa, apontando a aba de bloqueios como a causa');
+}
+
+sec('32. Bloqueio de outro mês é ignorado, não aplicado pelo número do dia');
+{
+  /* A planilha do mês passado reaproveitada é o caso comum. Aplicar
+     "dia 2" de outubro em novembro bloquearia o dia errado — e em
+     silêncio, que é o pior jeito de errar. */
+  const mm = mkMonth(2026, 10);
+  const e = mkEmp(mm.days, 3200);
+  const model = mkModel(2026, 10, [e]);
+  const util = mm.dow.findIndex((d) => d !== 0 && d !== 6);
+  const rel = P.planejar(model, mkProg(
+    [{ mat: 3200, curso: 'Z', data: new Date(Date.UTC(2026, 10, util + 1)) }],
+    [{ curso: 'Z', tipo: 'INTERNO', dias: null }], [],
+    [{ data: new Date(Date.UTC(2026, 9, util + 1)), motivo: 'feriado de outubro' }]), { tentativas: 3 });
+
+  eq(rel.itens[0].dia, util, 'o dia equivalente de novembro continua livre');
+  ok((rel.avisos || []).some((a) => /de outro mês/.test(a.t)),
+    'e o painel avisa que havia bloqueio de outro mês na planilha');
+}
+
+sec('33. Data travada num dia bloqueado é mantida, mas acusada');
+{
+  // Mesma regra do sábado: decisão de gente o painel não move, mas também
+  // não finge que está certo.
+  const mm = mkMonth(2026, 10);
+  const util = mm.dow.findIndex((d) => d !== 0 && d !== 6);
+  const e = mkEmp(mm.days, 3300, { nome: 'TRAVADO NO FERIADO' });
+  const model = mkModel(2026, 10, [e]);
+  const rel = P.planejar(model, mkProg(
+    [{ mat: 3300, curso: 'W', data: new Date(Date.UTC(2026, 10, util + 1)) }],
+    [{ curso: 'W', tipo: 'EXTERNO', dias: null }], [],
+    [{ data: new Date(Date.UTC(2026, 10, util + 1)), motivo: 'Finados' }]), { tentativas: 3 });
+
+  eq(rel.itens[0].dia, util, 'a data travada fica onde estava');
+  const aviso = (rel.avisos || []).find((a) => /3300/.test(a.t) && /bloqueada/.test(a.t));
+  ok(!!aviso, 'com aviso nomeando o motivo do bloqueio: "' + (aviso ? aviso.t.slice(0, 90) : 'nenhum') + '"');
+  ok(aviso && /Finados/.test(aviso.t), 'o motivo escrito na planilha aparece no aviso');
 }
 
 /* ============================================== resumo */

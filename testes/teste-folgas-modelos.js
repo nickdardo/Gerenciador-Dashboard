@@ -41,6 +41,7 @@ const sec = (t) => console.log('\n\x1b[36m── ' + t + '\x1b[0m');
   fs.writeFileSync(tmp, `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"></head><body>
 <script src="file://${SHEETJS}"><\/script>
 <script src="file://${path.join(BASE, 'js', 'folgas-engine.js')}"><\/script>
+<script src="file://${path.join(BASE, 'js', 'planejador.js')}"><\/script>
 <script src="file://${path.join(BASE, 'js', 'folgas-modelos.js')}"><\/script>
 </body></html>`);
 
@@ -299,7 +300,105 @@ const sec = (t) => console.log('\n\x1b[36m── ' + t + '\x1b[0m');
       fs.unlinkSync(htmlMenu);
     }
 
-    sec('10. Nenhum erro de script');
+    sec('10. A lista de bases: admin vê todas, usuário vê as suas');
+    {
+      /* O bug que a tela mostrava: o filtro antigo era
+         `(bases || []).filter(b => b !== '*')`, e o perfil de um admin é
+         exatamente ['*'] — a lista saía vazia e a tela escrevia "sem base
+         atribuída" justamente para quem pode ver tudo. O curinga tem de
+         ser TROCADO pela lista real, não removido. */
+      const r = await page.evaluate(() => {
+        window.eoColabs = new Map([
+          [1, { matricula: 1, station: 'SLZ', nome: 'A', funcao: 'ASG', ch: 180, updated_at: '2026-11-10T12:00:00Z' }],
+          [2, { matricula: 2, station: 'slz', nome: 'B', funcao: 'ASG', ch: 180, updated_at: '2026-11-17T12:00:00Z' }],
+          [3, { matricula: 3, station: 'BEL', nome: 'C', funcao: 'RAMPA', ch: 210, updated_at: '2026-10-01T12:00:00Z' }],
+          [4, { matricula: 4, station: 'GRU', nome: 'D', funcao: 'RAMPA', ch: null, updated_at: null }],
+        ]);
+        const com = (bases) => { window.currentUserProfile = { bases }; return fgmBasesDisponiveis(); };
+        return {
+          admin: com(['*']),
+          umaBase: com(['SLZ']),
+          duas: com(['SLZ', 'BEL']),
+          semPerfil: com([]),
+          efetivoSLZ: fgmEfetivoEmMemoria('SLZ'),
+        };
+      });
+
+      eq(r.admin.join(','), 'BEL,GRU,SLZ', 'admin com curinga vê todas as bases do cadastro, em ordem');
+      eq(r.umaBase.join(','), 'SLZ', 'usuário de uma base vê só a dele');
+      eq(r.duas.join(','), 'BEL,SLZ', 'e de duas, as duas');
+      eq(r.semPerfil.length, 0, 'sem base autorizada, nenhuma — e a tela diz isso em vez de mentir');
+
+      eq(r.efetivoSLZ.pessoas.length, 2,
+        'o efetivo sai da memória já filtrado pela base, sem ida ao banco');
+      /* "slz" minúsculo no cadastro é a mesma base que "SLZ". Comparar
+         cru deixaria metade do efetivo de fora do arquivo. */
+      ok(r.efetivoSLZ.pessoas.every((p) => p.base === 'SLZ'), 'ignorando maiúscula/minúscula no cadastro');
+      eq(r.efetivoSLZ.atualizadoEm, '2026-11-17T12:00:00Z',
+        'e traz a data mais recente do cadastro daquela base, não a do painel inteiro');
+    }
+
+    sec('11. A Programação de Cursos gerada volta pelo planejador');
+    {
+      const r = await page.evaluate(async () => {
+        const pessoas = [
+          { mat: 160892, nome: 'FABIO DINIZ', funcao: 'OPERADOR DE EQUIPAMENTOS I', ch: 180, situacao: 'Ativo', descricao: 'Trabalhando', base: 'BEL' },
+          { mat: 160914, nome: 'LUANA GOMES', funcao: 'AGENTE SERV A PASSAGEIRO I', ch: 180, situacao: 'Ativo', descricao: 'Férias', base: 'BEL' },
+          { mat: 160905, nome: 'ERICK DOUGLAS', funcao: 'AUX.LIDER DE RAMPA I', ch: 210, situacao: 'Ativo', descricao: 'Trabalhando', base: 'BEL' },
+        ];
+        const wb = FolgaModelos.construirCursos({ ano: 2026, mes0: 10, base: 'BEL', pessoas });
+        const bytes = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+        const prog = await PlanejadorCursos.lerProgramacao(bytes, 30);
+        return {
+          abas: wb.SheetNames,
+          inscricoes: prog.linhas.length,
+          db: prog.db ? prog.db.size : 0,
+          janelas: [...prog.janelas.keys()].length,
+          bloqueios: (prog.bloqueios || []).map((b) => b.data.toISOString().slice(0, 10)),
+          motivos: (prog.bloqueios || []).map((b) => b.motivo),
+          erros: prog.avisos.filter((a) => a.lv === 'erro').map((a) => a.t),
+          avisos: prog.avisos.filter((a) => a.lv === 'aviso').map((a) => a.t),
+        };
+      });
+
+      eq(r.abas.join(', '), 'CURSOS, JANELAS, BLOQUEIOS, DB, INSTRUÇÕES',
+        'as quatro abas do arquivo oficial, mais as instruções');
+      eq(r.db, 3, 'a aba DB voltou com o efetivo inteiro da base');
+      /* O efetivo NÃO vai para a aba CURSOS: uma linha com matrícula e sem
+         curso é erro de leitura, e uma base de 300 pessoas abriria o painel
+         com 300 erros, afogando o aviso que importa. */
+      eq(r.inscricoes, 2, 'e a aba CURSOS só com as linhas de exemplo');
+      eq(r.erros.length, 0, 'nenhum erro de leitura: ' + r.erros.join(' | '));
+      ok(r.avisos.some((a) => /Férias/.test(a)),
+        'mas o aviso que importa aparece — alguém inscrito está de férias');
+
+      eq(r.bloqueios.join(', '), '2026-11-02, 2026-11-15, 2026-11-20',
+        'os feriados nacionais de novembro já vêm bloqueados');
+      ok(r.motivos.every((m) => /feriado nacional/.test(m)), 'cada um com o motivo escrito');
+      ok(r.janelas >= 5, 'com exemplos de janela para o usuário copiar');
+    }
+
+    sec('12. Feriado móvel sai do cálculo da Páscoa, não de uma lista fixa');
+    {
+      /* Carnaval, Sexta-feira Santa e Corpus Christi mudam de data todo
+         ano — são justamente os que alguém esquece de bloquear à mão. */
+      const r = await page.evaluate(() => ({
+        pascoa26: new Date(FolgaModelos.pascoa(2026)).toISOString().slice(0, 10),
+        pascoa27: new Date(FolgaModelos.pascoa(2027)).toISOString().slice(0, 10),
+        carnaval26: FolgaModelos.feriadosDoMes(2026, 1).map((f) => f.dia + ' ' + f.nome),
+        abril26: FolgaModelos.feriadosDoMes(2026, 3).map((f) => f.dia + ' ' + f.nome),
+        junho26: FolgaModelos.feriadosDoMes(2026, 5).map((f) => f.nome),
+        agosto26: FolgaModelos.feriadosDoMes(2026, 7).length,
+      }));
+      eq(r.pascoa26, '2026-04-05', 'Páscoa de 2026');
+      eq(r.pascoa27, '2027-03-28', 'e a de 2027, que cai em outro mês');
+      eq(r.carnaval26.join(' · '), '16 Carnaval · 17 Carnaval', 'carnaval de 2026 nos dois dias');
+      eq(r.abril26.join(' · '), '3 Sexta-feira Santa · 21 Tiradentes', 'sexta-feira santa e Tiradentes');
+      eq(r.junho26.join(''), 'Corpus Christi', 'Corpus Christi em junho');
+      eq(r.agosto26, 0, 'e agosto, que não tem feriado nacional, volta vazio em vez de inventar um');
+    }
+
+    sec('13. Nenhum erro de script');
     ok(erros.length === 0, 'a página rodou sem exceção' + (erros.length ? ': ' + erros.join(' | ') : ''));
   } finally {
     await browser.close();

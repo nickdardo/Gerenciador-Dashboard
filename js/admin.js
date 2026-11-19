@@ -2758,7 +2758,11 @@ async function adminAutoLoadFiles() {
       const PAGE = 1000;
       for (let from = 0; from < totalColabs; from += PAGE) {
         const { data: page } = await db.from('colaboradores')
-          .select('matricula,nome,station,funcao,ch,situacao,admissao')
+          // updated_at vem junto para o Gerenciador de Folgas poder dizer,
+          // por base, de quando é o efetivo que ele vai colocar no Excel.
+          // Um só "última atualização" global esconde a base que ficou
+          // para trás na importação.
+          .select('matricula,nome,station,funcao,ch,situacao,admissao,updated_at')
           .eq('ativo', true)
           .range(from, from + PAGE - 1);
         if (page) allColabs.push(...page);

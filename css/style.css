@@ -4823,3 +4823,23 @@ body.escala-modo-grade .escala-fill { margin-top: 0; }
 .fgm-nota b { color: var(--text-primary); font-weight: 600; }
 .fgm-ok { color: var(--text-primary); }
 .fgm-erro { color: var(--cmp-dif); }
+
+/* Quem vai entrar no arquivo, e de quando é esse dado. Sem esta linha o
+   download é caixa preta: vêm 280 pessoas e não há como saber se o
+   cadastro é de ontem ou de abril. */
+.fgm-efetivo { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.fgm-efetivo-chip {
+  font-size: 11.5px; color: var(--text-secondary);
+  background: var(--bg-surface); border: 1px solid var(--border);
+  border-radius: 999px; padding: 4px 11px;
+}
+.fgm-efetivo-chip b { color: var(--text-primary); font-weight: 650; }
+.fgm-efetivo-alerta { border-color: var(--cmp-dif); color: var(--cmp-dif); }
+.fgm-efetivo-alerta b { color: var(--cmp-dif); }
+.fgm-efetivo-vazio { font-size: 11.5px; color: var(--text-secondary); }
+.fgm-efetivo-vazio b { color: var(--text-primary); }
+
+/* O cartão de cursos fecha a fileira: é outro arquivo, não um quarto
+   formato de escala. */
+.fgm-card-cursos { border-color: var(--border-strong); }
+.fgm-card-cursos .fgm-tag { border-color: var(--cmp-voo); color: var(--cmp-voo); }

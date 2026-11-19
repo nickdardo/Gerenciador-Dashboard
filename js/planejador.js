@@ -99,8 +99,12 @@
         else if (h === 'HORAFIM') achou.hf = c;
         else if (h === 'SITUACAO') achou.sit = c;
         else if (h === 'DESCRICAO') achou.desc = c;
+        else if (h === 'MOTIVO') achou.motivo = c;
       }
-      if (achou.mat || achou.curso) return { hdr: r, col: achou };
+      /* A aba de bloqueios não tem matrícula nem curso — só data e motivo.
+         Sem esta terceira condição ela nunca chegava a ter cabeçalho
+         reconhecido e era descartada em silêncio. */
+      if (achou.mat || achou.curso || (achou.data && achou.motivo)) return { hdr: r, col: achou };
     }
     return { hdr: 0, col: {} };
   }
@@ -108,10 +112,12 @@
   function papelDaAba(nome, col) {
     const n = norm(nome);
     if (col.mat && col.curso) return 'CURSOS';
+    if (col.data && col.motivo && !col.mat && !col.curso) return 'BLOQUEIOS';
     if (col.curso && !col.mat) return 'JANELAS';
     if (col.mat && !col.curso) return 'DB';
     if (n === 'CURSOS') return 'CURSOS';
     if (n === 'JANELAS') return 'JANELAS';
+    if (n === 'BLOQUEIOS' || n === 'DATASBLOQUEADAS') return 'BLOQUEIOS';
     return '';
   }
 
@@ -144,6 +150,7 @@
     const wb = await E.loadWorkbook(buf);
     const avisos = [];
     let linhas = null, janelas = null, destino = null, db = null;
+    const bloqueios = [];
     const repetidos = new Set();
 
     for (const sh of wb.sheets) {
@@ -167,6 +174,26 @@
             situacao: col.sit ? String(get(r, col.sit) ?? '').trim() : '',
             descricao: col.desc ? String(get(r, col.desc) ?? '').trim() : '',
           });
+        }
+        continue;
+      }
+
+      /* Datas em que não se marca curso: feriado, parada programada, o que
+         for. Guardo a data crua porque aqui ainda não se sabe de que mês é
+         a escala — quem converte para dia do mês é o planejar(), que tem o
+         model. Assim um bloqueio de outro mês pode ser avisado em vez de
+         virar um índice errado. */
+      if (papel === 'BLOQUEIOS') {
+        for (let r = hdr + 1; r <= maxRow; r++) {
+          const bruto = get(r, col.data);
+          if (bruto === undefined || bruto === null || bruto === '') continue;
+          const data = E.dataCurso(bruto, wb.date1904);
+          const motivo = String(get(r, col.motivo) ?? '').trim();
+          if (!data) {
+            avisos.push({ lv: 'aviso', t: `Aba de bloqueios, linha ${r}: "${String(bruto).slice(0, 20)}" não é uma data — ignorei` });
+            continue;
+          }
+          bloqueios.push({ data, motivo, linha: r });
         }
         continue;
       }
@@ -238,7 +265,7 @@
         avisos.push({ lv: 'erro', t: `Curso "${l.curso}" é EXTERNO e está sem datas — confirme com o fornecedor antes de planejar` });
       }
     }
-    return { linhas, janelas, avisos, destino, wb, db };
+    return { linhas, janelas, avisos, destino, wb, db, bloqueios };
   }
 
   /* Devolve a mesma planilha que entrou, com a coluna DATA preenchida.
@@ -316,6 +343,35 @@
     const avisos = prog.avisos.slice();
     const itens = [], naoEncontrados = new Map(), semHorarioUsado = new Map();
 
+    /* Datas bloqueadas viram dia do mês aqui, onde finalmente se sabe de
+       que mês é a escala. Bloqueio de outro mês não é erro de quem
+       preencheu — é a planilha do mês passado reaproveitada —, mas
+       aplicá-lo pelo número do dia bloquearia o dia errado. */
+    const bloqueado = new Map();
+    let bloqueiosDeOutroMes = 0;
+    for (const b of (prog.bloqueios || [])) {
+      if (b.data.getUTCFullYear() !== model.month.year || b.data.getUTCMonth() !== model.month.month) {
+        bloqueiosDeOutroMes++; continue;
+      }
+      const d = b.data.getUTCDate() - 1;
+      if (d >= 0 && d < D) bloqueado.set(d, b.motivo || 'data bloqueada');
+    }
+    if (bloqueiosDeOutroMes) {
+      avisos.push({ lv: 'aviso', t: `${bloqueiosDeOutroMes} data(s) bloqueada(s) são de outro mês — ignorei. `
+        + 'Confira se a aba de bloqueios é a deste mês.' });
+    }
+    /* Bloquear o mês inteiro é quase sempre engano de preenchimento, e o
+       sintoma seria "nenhum curso conseguiu data" sem dizer por quê. */
+    const uteis = [];
+    for (let d = 0; d < D; d++) if (dow[d] !== 0 && dow[d] !== 6) uteis.push(d);
+    if (uteis.length && uteis.every((d) => bloqueado.has(d))) {
+      avisos.push({ lv: 'erro', t: 'Todos os dias úteis do mês estão bloqueados — nenhum curso terá data. '
+        + 'Revise a aba de bloqueios.' });
+    } else if (bloqueado.size) {
+      const lista = [...bloqueado.keys()].sort((a, b) => a - b).map((d) => d + 1).join(', ');
+      avisos.push({ lv: 'info', t: `${bloqueado.size} data(s) bloqueada(s) para cursos: dia(s) ${lista}.` });
+    }
+
     /* Pessoa que a escala não conhece ainda precisa de data: o curso existe
        e vai acontecer. Este é um colaborador de mentira, só para o item ter
        onde se apoiar — sem turno, e por isso sem medição de impacto.
@@ -356,6 +412,12 @@
           if (dow[item.dia] === 0 || dow[item.dia] === 6) {
             avisos.push({ lv: 'aviso', t: `${l.mat} ${l.nome} · ${l.curso}: a data ${item.dia + 1} cai num `
               + `${dow[item.dia] === 0 ? 'domingo' : 'sábado'} e veio travada na planilha — mantive, mas curso não deveria ser em fim de semana` });
+          } else if (bloqueado.has(item.dia)) {
+            /* Mesma lógica do fim de semana: data travada é decisão de
+               gente e o painel não a move — mas quem digitou pode não ter
+               reparado que o dia está bloqueado. */
+            avisos.push({ lv: 'aviso', t: `${l.mat} ${l.nome} · ${l.curso}: a data ${item.dia + 1} está bloqueada `
+              + `(${bloqueado.get(item.dia)}) e veio travada na planilha — mantive, mas confira` });
           }
         } else {
           avisos.push({ lv: 'aviso', t: `${l.mat} · ${l.curso}: data ${l.data.toLocaleDateString('pt-BR', { timeZone: 'UTC' })} é de outro mês — ignorada` });
@@ -368,7 +430,11 @@
            vez, da menos custosa para a mais, e o painel diz qual cedeu.
            Férias nunca cedem: quem está de férias não vai ao curso, e isso é
            decisão de gente, não de algoritmo. */
-        const util = (d) => dow[d] !== 0 && dow[d] !== 6;
+        /* Dia bloqueado sai junto com sábado e domingo, e pelo mesmo
+           motivo: não é um dia caro, é um dia em que o curso não pode
+           acontecer. Por isso entra em `util` e não vira mais um degrau —
+           degrau é regra que cede, e feriado não cede. */
+        const util = (d) => dow[d] !== 0 && dow[d] !== 6 && !bloqueado.has(d);
         const naJanela = (d) => !j.dias || j.dias.has(d);
         const monta = (filtro) => {
           const out = [];
@@ -393,13 +459,20 @@
         }
         if (!item.cands.length) {
           item.semSaida = true;
-          // Duas causas, duas saídas diferentes — e a pessoa precisa saber qual é.
-          const soFimDeSemana = monta(() => true).length > 0;
-          avisos.push(soFimDeSemana
-            ? { lv: 'erro', t: `${l.mat} ${l.nome} · ${l.curso}: sem data — os únicos dias livres desta pessoa no mês `
-                + 'caem em sábado ou domingo, e curso não é marcado em fim de semana. Remarque o curso ou reveja as férias dela.' }
-            : { lv: 'erro', t: `${l.mat} ${l.nome} · ${l.curso}: sem data — está de férias em todos os dias do mês. `
-                + 'Tire esta pessoa da lista ou reveja as férias dela.' });
+          /* Três causas, três saídas diferentes — e a pessoa precisa saber
+             qual é. Dizer só "sem data" manda ela procurar no escuro. */
+          const livres = monta(() => true);                       // livres, ignorando fim de semana e bloqueio
+          const soBloqueado = livres.length > 0
+            && livres.every((d) => dow[d] === 0 || dow[d] === 6 || bloqueado.has(d))
+            && livres.some((d) => bloqueado.has(d) && dow[d] !== 0 && dow[d] !== 6);
+          avisos.push(soBloqueado
+            ? { lv: 'erro', t: `${l.mat} ${l.nome} · ${l.curso}: sem data — os dias úteis livres desta pessoa `
+                + 'estão bloqueados na aba de bloqueios. Libere uma data ou remarque o curso.' }
+            : livres.length > 0
+              ? { lv: 'erro', t: `${l.mat} ${l.nome} · ${l.curso}: sem data — os únicos dias livres desta pessoa no mês `
+                  + 'caem em sábado ou domingo, e curso não é marcado em fim de semana. Remarque o curso ou reveja as férias dela.' }
+              : { lv: 'erro', t: `${l.mat} ${l.nome} · ${l.curso}: sem data — está de férias em todos os dias do mês. `
+                  + 'Tire esta pessoa da lista ou reveja as férias dela.' });
         }
       }
       item._mes = model.month;
