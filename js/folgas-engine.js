@@ -656,6 +656,30 @@
   // aceita e a validação acusa, em vez de estragar o resto da escala.
   const BIG = 1e6, SHORT = 1e5, SUNPEN = 5e4, SUN2PEN = 4e4, FAPEN = 2e4, EXTRA = 300, ADJ = 60, GAP1 = 8;
 
+  /* A segunda folga da semana que atravessa a virada do mês.
+
+     Ela NÃO pode entrar na meta dura. Meta dura vale SHORT (100.000) por
+     folga faltando, contra 10 a 40 do custo de cobertura de um dia — o
+     solver então coloca as duas custe o que custar, e foi o que
+     aconteceu: dezembro fechou com os dias 28 a 31 abaixo do efetivo em
+     todos os turnos, porque todo mundo tirou duas folgas num toco de
+     quatro dias. A folga cabia no calendário e não cabia na operação.
+
+     Aqui ela vale um pouco mais que o custo MÉDIO de cobertura daquele
+     grupo no mês. Não pode ser constante: o custo de um dia cresce com
+     1/tamanho do grupo, então um número fixo que equilibra um grupo de
+     seis ganha sempre num grupo de trinta, e todo mundo tira as duas de
+     novo. Sendo relativo, a conta é a mesma em qualquer grupo — vale a
+     pena folgar num dia mais vazio que a média, e não vale num dia mais
+     cheio.
+
+     O efeito é o que a operação pede: os primeiros pegam a segunda folga
+     nos dias leves; quando a última semana começa a esvaziar, ela passa
+     a custar mais que a média e os seguintes ficam com uma, com a
+     segunda caindo no mês que vem — que é o direito deles, e lá a semana
+     inteira está disponível para acomodá-la. */
+  const ABERTA_FATOR = 1.1;
+
   function solveEmp(emp, ctx, costDay) {
     const { D, dow, st } = ctx;
     const maxRun = st.maxRun;
@@ -671,7 +695,18 @@
       if (code === 'FA') hasFA = true;
       if (dow[d] === 0 && k === 'free') sunAvail = true;
     }
-    const need = Math.max(0, emp.req.required - counted);
+    /* A meta dura é o PISO; o ideal é só o topo de uma faixa.
+
+       Entre um e outro está a segunda folga da semana da virada, que é
+       direito mas não é obrigação deste mês. Dentro da faixa o solver
+       não paga nada — nem SHORT por faltar, nem EXTRA por sobrar —, e
+       quem decide é o custo de cobertura do dia contra ABERTA. */
+    /* O preço da segunda folga da virada, medido contra o custo médio de
+       cobertura DESTE grupo neste mês — ver ABERTA_FATOR. */
+    const ABERTA = (costDay.reduce((a, b) => a + b, 0) / Math.max(1, D)) * ABERTA_FATOR;
+    const piso = emp.req.requiredMin != null ? emp.req.requiredMin : emp.req.required;
+    const need = Math.max(0, piso - counted);
+    const needMax = Math.max(need, emp.req.required - counted);
     const pr = prevRun(emp, st);
     const r0 = Math.min(pr.run, maxRun);
     const prevOff = pr.found && pr.run === 0 && !pr.unknown;
@@ -688,11 +723,14 @@
     const temCota = !!(emp.req.semanas && emp.req.alvos);
     const semIdx = new Int8Array(D), semFecha = new Int8Array(D);
     const semAlvo = temCota ? emp.req.alvos : [];
+    const semPiso = temCota && emp.req.minimos ? emp.req.minimos : semAlvo;
     if (temCota) {
       emp.req.semanas.forEach((s, i) => {
         for (let d = s.ini; d <= s.fim; d++) semIdx[d] = i;
-        // A semana aberta não é cobrada: quem fecha é o mês seguinte.
-        semFecha[s.fim] = s.aberta ? 0 : 1;
+        /* 1 = fecha duro (semana inteira dentro do mês: faltar é erro).
+           2 = fecha brando (semana da virada: o piso é duro, o que passa
+           dele é preferência que perde para a cobertura). */
+        semFecha[s.fim] = s.aberta ? 2 : 1;
       });
     }
     /* Estados da cota semanal: 0, 1, 2 e 3 folgas.
@@ -757,7 +795,21 @@
           // Cota da semana: `folgou` diz se o dia gastou uma. No dia que
           // fecha, o estado sai zerado e a diferença para o alvo custa BIG.
           const proxW = (folgou) => (fecha ? 0 : (folgou ? Math.min(w + 1, COTA - 1) : w));
-          const fechaCota = (folgou) => (fecha && ((folgou ? w + 1 : w) !== alvoSem) ? BIG : 0);
+          /* Fechamento duro: bater o alvo ou pagar BIG. Fechamento brando
+             (semana da virada): abaixo do PISO ainda é BIG — ficar sem
+             folga nenhuma não se justifica —, e entre o piso e o alvo
+             custa ABERTA por folga faltando, que é da ordem do custo de
+             cobertura e perde dele quando o dia está cheio. Passar do
+             alvo continua proibido em qualquer semana. */
+          const fechaCota = (folgou) => {
+            if (!fecha) return 0;
+            const n = folgou ? w + 1 : w;
+            if (fecha === 1) return n !== alvoSem ? BIG : 0;
+            if (n > alvoSem) return BIG;
+            const pisoSem = semPiso[semIdx[d]];
+            if (n < pisoSem) return BIG;
+            return (alvoSem - n) * ABERTA;
+          };
           // Folga gerada não passa do alvo da semana. Dia travado na
           // planilha passa — o solver não pode mudá-lo, e o validador acusa.
           const cotaCheia = temCota && w >= alvoSem;
@@ -806,7 +858,12 @@
         const i = idx(run, k, s, fr, w); if (cur[i] === Infinity) continue;
         // Exatamente 1 domingo: a falta é punida aqui, o excedente já foi
         // cobrado dia a dia por domExtra().
-        let c = cur[i] + (k < need ? (need - k) * SHORT : (k - need) * EXTRA) + (!s && sunAvail ? SUNPEN : 0);
+        // Faixa livre entre o piso e o ideal: abaixo do piso é falta de
+        // verdade, acima do ideal é folga a mais, e no meio é a segunda
+        // folga da virada, que não se cobra nem se proíbe.
+        const faltou = k < need ? (need - k) * SHORT : 0;
+        const sobrou = k > needMax ? (k - needMax) * EXTRA : 0;
+        let c = cur[i] + faltou + sobrou + (!s && sunAvail ? SUNPEN : 0);
         if (c < best) { best = c; bi = i; }
       }
       const gen = new Array(D).fill('');

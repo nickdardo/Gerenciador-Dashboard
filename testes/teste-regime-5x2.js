@@ -418,6 +418,54 @@ sec('10b. Uma folga a menos na virada é dívida, não falta');
     'e não trata isso como erro');
 }
 
+sec('10c. A última semana não pode ficar abaixo do efetivo do mês');
+{
+  /* O defeito que isto tranca: a segunda folga da semana da virada
+     entrou como META DURA, e meta dura vale 100.000 pontos contra 10 a
+     40 do custo de cobertura. O solver então colocava as duas custasse o
+     que custasse, e dezembro fechou com os dias 28 a 31 abaixo do
+     efetivo em todos os turnos — num grupo de 30, 15 pessoas em posto na
+     última semana contra 20 no resto do mês.
+
+     Agora a segunda folga vale um pouco mais que o custo MÉDIO de
+     cobertura do grupo, então ela é tirada nos dias leves e abandonada
+     nos cheios. O que se mede aqui não é quantas folgas saíram: é se a
+     operação do fim do mês continua de pé. */
+  for (const n of [6, 12, 30]) {
+    const m = mkMonth(2026, 11);                     // dezembro: última semana = 28 a 31
+    const emps = Array.from({ length: n }, (_, i) => mkEmp(m.days, 170000 + i, { ch: 180 }));
+    const mo = mkModel(2026, 11, emps);
+    E.generate(mo, cfg('5x2'), { passes: 5 });
+
+    const trab = Array.from({ length: m.days }, (_, d) => emps.filter((e) => !E.eff(e, d)).length);
+    const media = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+    const mesInteiro = media(trab), ultima = media(trab.slice(27));
+
+    ok(ultima >= mesInteiro * 0.9,
+      `grupo de ${n}: a última semana mantém o efetivo (${ultima.toFixed(1)} em posto `
+      + `contra ${mesInteiro.toFixed(1)} no mês)`);
+
+    /* E o outro lado: ninguém pode ficar sem folga nenhuma na semana da
+       virada. Proteger a cobertura não pode virar desculpa para furar o
+       descanso. */
+    const naUltima = emps.map((e) => [27, 28, 29, 30].filter((d) => E.eff(e, d)).length);
+    eq(naUltima.filter((x) => x === 0).length, 0, `grupo de ${n}: ninguém fica sem folga na última semana`);
+    ok(Math.max(...naUltima) <= 2, `grupo de ${n}: e ninguém passa de duas`);
+  }
+
+  /* A mistura é o sinal de que a decisão é por pessoa e por dia, e não
+     uma regra fixa: alguns pegam as duas (onde cabe), a maioria pega uma
+     e leva a outra para o mês seguinte. Se TODOS pegassem o mesmo
+     número, o solver estaria ignorando a cobertura de novo. */
+  const m = mkMonth(2026, 11);
+  const emps = Array.from({ length: 30 }, (_, i) => mkEmp(m.days, 171000 + i, { ch: 180 }));
+  E.generate(mkModel(2026, 11, emps), cfg('5x2'), { passes: 5 });
+  const naUltima = emps.map((e) => [27, 28, 29, 30].filter((d) => E.eff(e, d)).length);
+  const comDuas = naUltima.filter((x) => x === 2).length;
+  ok(comDuas > 0 && comDuas < emps.length,
+    `a segunda folga é decidida caso a caso: ${comDuas} de ${emps.length} pegaram duas`);
+}
+
 console.log('\n' + '─'.repeat(58));
 if (!fail) console.log('\x1b[32m✓ ' + pass + ' verificações passaram\x1b[0m');
 else { console.log('\x1b[31m✗ ' + fail + ' falha(s) de ' + (pass + fail) + '\x1b[0m'); falhas.forEach((f, i) => console.log('  ' + (i + 1) + '. ' + f)); }
