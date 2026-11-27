@@ -342,6 +342,82 @@ sec('9. O que a mudança NÃO podia mexer');
   }
 }
 
+/* ===================================== 10. a semana que atravessa a virada */
+sec('10. A semana da virada mira as duas folgas e aceita uma');
+{
+  /* A regra é por semana de segunda a domingo, e a última semana do mês
+     quase nunca termina no dia 31. Antes o painel pedia ali só a parte
+     proporcional — num toco de quatro dias, round(2 × 4/7) = 1 — e parava.
+     Mas quatro dias comportam as duas folgas, e deixá-las para o mês
+     seguinte empurra para lá um problema que este mês resolvia.
+
+     Agora `alvo` é o que o solver persegue e `minimo` o que o validador
+     cobra: ficar com uma só não é falta, é a segunda folga caindo nos
+     primeiros dias do mês seguinte. */
+  const req = (Y, M) => {
+    const m = mkMonth(Y, M);
+    const e = mkEmp(m.days, 9001, { ch: 180 });
+    const mo = mkModel(Y, M, [e]);
+    return E.requirement(e, mo.sheets[0], m.days, cfg('5x2'), m.dow);
+  };
+
+  // Dezembro/2026 fecha numa segunda: a última semana é 28 a 31, quatro dias.
+  const dez = req(2026, 11);
+  const ultima = dez.semanas[dez.semanas.length - 1];
+  eq(ultima.ini + 1, 28, 'dezembro/2026: a última semana começa no dia 28');
+  ok(ultima.aberta, 'e fica aberta — o resto dela é janeiro');
+  eq(dez.alvos[dez.alvos.length - 1], 2, 'com quatro dias visíveis, mira as duas folgas');
+  eq(dez.minimos[dez.minimos.length - 1], 1, 'mas cobra uma: a outra pode cair em janeiro');
+  eq(dez.required, 10, 'o ideal do mês sobe junto');
+  eq(dez.requiredMin, 9, 'e o piso fica onde estava');
+
+  /* Novembro/2026 termina numa SEGUNDA: o toco tem um dia só. Mirar duas
+     folgas ali faria o mês inteiro acabar com todo mundo de folga — e o
+     mês seguinte tem os outros seis dias daquela mesma semana para
+     acomodá-las sem aperto. */
+  const nov = req(2026, 10);
+  eq(nov.alvos[nov.alvos.length - 1], 0, 'novembro/2026: o toco de um dia não pede folga nenhuma');
+  eq(nov.required, nov.requiredMin, 'e não há dívida para o mês seguinte');
+
+  // Fevereiro/2027 cai certinho em semanas fechadas: nada é negociável.
+  const fev = req(2027, 1);
+  ok(!fev.semanas.some((s) => s.aberta), 'fevereiro/2027 fecha em semanas inteiras');
+  eq(fev.required, fev.requiredMin, 'sem semana aberta, ideal e piso são o mesmo número');
+  eq(fev.required, 8, 'quatro semanas de duas folgas');
+}
+
+sec('10b. Uma folga a menos na virada é dívida, não falta');
+{
+  /* O jeito errado de implementar isso é cobrar o ideal no validador: a
+     pessoa fecharia dezembro com 9 folgas corretas e o painel diria
+     "falta 1". O teste trava as duas pontas — a mensagem que deve
+     aparecer e a que não pode. */
+  const m = mkMonth(2026, 11);                       // dezembro/2026
+  const e = mkEmp(m.days, 9002, { ch: 180 });
+  const mo = mkModel(2026, 11, [e]);
+  E.generate(mo, cfg('5x2'), { passes: 4 });
+
+  const cods = codigos(mo, e);
+  const naUltima = cods.slice(27).filter((c) => c === 'F' || c === 'FA' || c === 'AF').length;
+  ok(naUltima >= 1, 'a semana da virada recebe pelo menos uma folga (veio ' + naUltima + ')');
+
+  const txt = (e.issues || []).map((i) => i.lv + ': ' + i.t);
+  ok(!txt.some((t) => /^erro/.test(t) && /Faltam \d+ folga/.test(t)),
+    'e o mês não é acusado de faltar folga: ' + (txt.join(' | ') || 'sem avisos'));
+
+  /* Com a segunda folga da virada travada fora do alcance, sobra uma só —
+     e aí o painel precisa DIZER que ela cai no mês seguinte. */
+  const e2 = mkEmp(m.days, 9003, { ch: 180 });
+  for (let d = 27; d < m.days; d++) e2.fixed[d] = d === 27 ? 'F' : '·';   // 29, 30 e 31 travados como trabalho
+  const mo2 = mkModel(2026, 11, [e2]);
+  E.generate(mo2, cfg('5x2'), { passes: 4 });
+  const t2 = (e2.issues || []).map((i) => i.lv + ': ' + i.t);
+  ok(t2.some((t) => /^info/.test(t) && /virada/.test(t) && /m[êe]s seguinte/.test(t)),
+    'o painel registra a dívida da virada: ' + (t2.find((t) => /virada/.test(t)) || t2.join(' | ') || 'nada'));
+  ok(!t2.some((t) => /^erro/.test(t) && /virada/.test(t)),
+    'e não trata isso como erro');
+}
+
 console.log('\n' + '─'.repeat(58));
 if (!fail) console.log('\x1b[32m✓ ' + pass + ' verificações passaram\x1b[0m');
 else { console.log('\x1b[31m✗ ' + fail + ' falha(s) de ' + (pass + fail) + '\x1b[0m'); falhas.forEach((f, i) => console.log('  ' + (i + 1) + '. ' + f)); }

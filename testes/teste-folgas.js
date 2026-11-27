@@ -824,6 +824,171 @@ sec('28. Integração com a aba do Admin');
 }
 
 /* ================================================= resumo */
+/* ===================================== pessoa em mais de um grupo */
+sec('29. A mesma pessoa lançada em dois turnos');
+{
+  /* Alguém no Rampa-A e também no Rampa-C recebe duas escalas
+     independentes: duas metas, duas sequências, dois domingos. Cada uma
+     fecha certinho sozinha, então nenhuma validação por pessoa acusa
+     nada — e na soma a pessoa trabalha em dois turnos no mesmo dia. É um
+     defeito que só existe olhando o arquivo inteiro. */
+  const D = 30;
+  const mk = (mat, name) => ({ mat, name, ch: 180, prev: new Array(7).fill(''),
+    fixed: new Array(D).fill(''), manual: new Array(D).fill(''), gen: new Array(D).fill('') });
+  const aba = (nome, gnome, emps) => ({ name: nome, chTable: [], blocks: [{ title: 'B', groups: [{ label: gnome, name: gnome, emps }] }] });
+  const modelo = () => ({
+    month: { days: D, dow: Array.from({ length: D }, (_, i) => new Date(Date.UTC(2026, 10, i + 1)).getUTCDay()) },
+    sheets: [
+      aba('RAMPA-A', 'TURNO A', [mk(160101, 'EDUARDO RIBEIRO OLIVEIRA'), mk(160102, 'MARIA DAS GRAÇAS')]),
+      aba('RAMPA-C', 'TURNO C', [mk(160101, 'EDUARDO RIBEIRO OLIVEIRA'), mk(160103, 'JOAO PEREIRA')]),
+    ],
+  });
+
+  const m = modelo();
+  E.marcarRepetidos(m);
+  eq(m.repetidos.length, 1, 'uma pessoa repetida encontrada');
+  eq(m.repetidos[0].tipo, 'matricula', 'pela matrícula, que é o caso comum');
+  eq(m.repetidos[0].onde.map((o) => o.aba).join(' + '), 'RAMPA-A + RAMPA-C',
+    'dizendo as duas abas em que ela aparece');
+
+  const eduA = m.sheets[0].blocks[0].groups[0].emps[0];
+  const eduC = m.sheets[1].blocks[0].groups[0].emps[0];
+  ok(eduA.issues && eduA.issues.some((i) => i.lv === 'erro' && /RAMPA-C/.test(i.t)),
+    'o aviso fica na linha dela nos DOIS lugares, porque é ali que se procura');
+  ok(eduC.issues && eduC.issues.some((i) => i.lv === 'erro' && /RAMPA-A/.test(i.t)), 'inclusive no segundo');
+  ok(!m.sheets[0].blocks[0].groups[0].emps[1].issues, 'e quem não repete não é marcado');
+
+  /* Mesma pessoa com matrículas diferentes: uma das duas está errada, e
+     cruzar só por matrícula não enxerga. A comparação por nome ignora
+     acento, pontuação e espaço dobrado. */
+  const m2 = modelo();
+  m2.sheets[1].blocks[0].groups[0].emps[0].mat = 160999;
+  m2.sheets[1].blocks[0].groups[0].emps[0].name = 'EDUARDO  RIBEIRO OLIVEIRÁ';
+  E.marcarRepetidos(m2);
+  eq(m2.repetidos.length, 1, 'ainda encontra, agora pelo nome');
+  eq(m2.repetidos[0].tipo, 'nome', 'marcado como divergência de matrícula');
+  ok(m2.sheets[0].blocks[0].groups[0].emps[0].issues.some((i) => /160101, 160999|160999, 160101/.test(i.t)),
+    'listando as duas matrículas, para a pessoa descobrir qual está errada');
+
+  /* Repetida dentro da MESMA aba, em grupos diferentes — é o caso do
+     turno que foi copiado e colado. */
+  const m3 = modelo();
+  m3.sheets = [m3.sheets[0]];
+  m3.sheets[0].blocks[0].groups.push({ label: 'TURNO B', name: 'TURNO B', emps: [mk(160101, 'EDUARDO RIBEIRO OLIVEIRA')] });
+  E.marcarRepetidos(m3);
+  eq(m3.repetidos.length, 1, 'duas vezes na mesma aba também conta');
+  eq(m3.repetidos[0].onde.map((o) => o.grupo).join(' + '), 'TURNO A + TURNO B', 'nomeando os dois grupos');
+
+  // Vaga em aberto repete de propósito: C16 é um posto, não uma pessoa.
+  const m4 = modelo();
+  for (const s of m4.sheets) { const e = s.blocks[0].groups[0].emps[0]; e.vaga = true; e.mat = 'C16'; e.name = 'VAGA EM ABERTO'; }
+  E.marcarRepetidos(m4);
+  eq(m4.repetidos.length, 0, 'vaga em aberto repetida não é acusada');
+}
+
+/* ===================================== aniversariante */
+sec('30. AF do aniversariante');
+{
+  const D = 31, MES = 11;                       // dezembro
+  const dow = Array.from({ length: D }, (_, i) => new Date(Date.UTC(2026, MES, i + 1)).getUTCDay());
+  const mk = (mat, name, aniv, fixed) => ({ mat, name, ch: 180, aniv,
+    prev: new Array(7).fill(''), fixed: fixed || new Array(D).fill(''),
+    manual: new Array(D).fill(''), gen: new Array(D).fill('') });
+  const modelo = (emps) => ({
+    month: { days: D, dow, year: 2026, month: MES },
+    sheets: [{ name: 'RAMPA-A', path: 'x.xml', chTable: CH_TABLE,
+      blocks: [{ title: 'B', headerRow: 1, dateRow: 2, cur: [], prevCols: [], prevDates: [],
+        groups: [{ label: 'G', name: 'TURNO A', emps }] }] }],
+  });
+  const st = E.defaultSettings();
+
+  /* 1. O caso simples: aniversário em dezembro, dia livre. */
+  const comFerias = new Array(D).fill(''); comFerias[8] = 'L';
+  const comCurso = new Array(D).fill(''); comCurso[11] = 'K';
+  const comFolga = new Array(D).fill(''); comFolga[14] = 'F';
+  const emps = [
+    mk(1, 'ANIVERSARIO NO DIA 5', { dia: 5, mes: 12 }),
+    mk(2, 'ANIVERSARIO EM OUTRO MES', { dia: 5, mes: 7 }),
+    mk(3, 'SEM DATA NA PLANILHA', null),
+    mk(4, 'DE FERIAS NO ANIVERSARIO', { dia: 9, mes: 12 }, comFerias),
+    mk(5, 'EM CURSO NO ANIVERSARIO', { dia: 12, mes: 12 }, comCurso),
+    mk(6, 'JA ERA FOLGA', { dia: 15, mes: 12 }, comFolga),
+  ];
+  const m = modelo(emps);
+  const rel = E.aplicarAniversarios(m, st);
+
+  eq(emps[0].fixed[4], 'AF', 'dia 5 de dezembro recebe AF');
+  eq(emps[0].aniversario, 4, 'e o dia fica registrado para a escrita no Excel');
+  eq(emps[1].fixed[4], '', 'aniversário de julho não mexe na escala de dezembro');
+  eq(emps[1].aniversario, null, 'nem marca nada');
+  eq(emps[2].aniversario, null, 'quem não tem data na planilha passa batido');
+
+  eq(emps[3].fixed[8], 'L', 'férias vencem: o L continua lá');
+  eq(emps[3].aniversario, null, 'e nenhum AF é lançado por cima');
+  eq(rel.emFerias.length, 1, 'o caso é listado, não engolido');
+
+  eq(emps[4].fixed[11], 'K', 'curso vence: a data está fechada com o fornecedor');
+  eq(rel.emCurso.length, 1, 'e também aparece na lista, para remarcar à mão');
+
+  eq(emps[5].fixed[14], 'AF', 'dia que já era folga vira AF — mesmo dia livre, nome certo');
+  eq(rel.eraFolga.length, 1, 'com o caso registrado');
+  eq(rel.lancados.length, 2, 'dois AF lançados no total');
+
+  /* 2. Rodar de novo não empilha nem estraga: a decisão sai sempre do que
+     veio na planilha, não do que a rodada anterior deixou. */
+  E.aplicarAniversarios(m, st);
+  const rel2 = E.aplicarAniversarios(m, st);
+  eq(rel2.lancados.length, 2, 'reaplicar não duplica');
+  eq(emps[5].fixed[14], 'AF', 'e não desfaz o que estava certo');
+
+  /* 3. O AF conta como uma das duas folgas da semana, mesmo com a opção
+     "AF conta na meta" desligada — foi a decisão da operação, e vale só
+     para o AF que o painel lançou. */
+  const m3 = modelo([mk(7, 'QUEM FAZ ANIVERSARIO', { dia: 5, mes: 12 })]);
+  E.generate(m3, { ...E.defaultSettings(), regime: '5x2' }, { passes: 4 });
+  const e7 = m3.sheets[0].blocks[0].groups[0].emps[0];
+  const cods = Array.from({ length: D }, (_, d) => E.eff(e7, d));
+  eq(cods[4], 'AF', 'o AF sobreviveu à distribuição');
+  const naSemana = cods.slice(0, 6).filter((c) => c === 'F' || c === 'FA' || c === 'AF').length;
+  eq(naSemana, 2, 'a semana do aniversário fecha com duas folgas contando o AF, não três');
+  ok(!(e7.issues || []).some((i) => i.lv === 'erro' && /Faltam/.test(i.t)),
+    'e o mês não é acusado de faltar folga: ' + ((e7.issues || []).map((i) => i.t).join(' | ') || 'sem avisos'));
+}
+
+sec('31. Achar a coluna de aniversário sem cabeçalho');
+{
+  /* Nas escalas em uso a coluna não tem cabeçalho — na BEL é a BI, com
+     dd/mm, e a linha de cabeçalho ali está vazia. Achar por posição fixa
+     acerta no arquivo de hoje e erra calado no de janeiro, então a busca
+     é pelo conteúdo: maioria das linhas parecendo dia/mês E variedade. */
+  const linhas = [
+    ['20/06', 180, 45000], ['27/04', 180, 45000], ['01/12', 210, 45000],
+    ['09/12', 180, 45000], ['15/07', 210, 45000], ['30/03', 180, 45000],
+  ];
+  const get = (r, c) => (linhas[r - 1] ? linhas[r - 1][c - 1] : undefined);
+  eq(E.acharColunaAniversario(get, 1, 6, 1, 3), 1, 'acha a coluna de dd/mm');
+
+  /* A coluna 3 é uma data só, repetida — vigência, competência, o que
+     for. Não é aniversário, e confundir as duas encheria a escala de AF
+     no mesmo dia. */
+  const soRepete = (r, c) => (c === 1 ? 45000 : undefined);
+  eq(E.acharColunaAniversario(soRepete, 1, 8, 1, 2), 0, 'data única repetida não é aniversário');
+
+  // Amostra pequena demais não autoriza palpite.
+  const poucas = (r, c) => (r <= 2 && c === 1 ? '10/05' : undefined);
+  eq(E.acharColunaAniversario(poucas, 1, 2, 1, 2), 0, 'com duas linhas não arrisca');
+
+  // Os três formatos que aparecem no mesmo arquivo.
+  eq(JSON.stringify(E.diaMes('20/06')), '{"dia":20,"mes":6}', 'texto dd/mm');
+  eq(JSON.stringify(E.diaMes('20/06/1989')), '{"dia":20,"mes":6}', 'texto com ano: o ano não interessa');
+  const serial = Math.round((Date.UTC(1989, 5, 20) - Date.UTC(1899, 11, 30)) / 86400000);
+  eq(JSON.stringify(E.diaMes(serial)), '{"dia":20,"mes":6}', 'serial do Excel (20/06/1989)');
+  eq(E.diaMes('#REF!'), null, 'fórmula quebrada não vira data');
+  eq(E.diaMes(180), null, 'carga horária não vira data');
+  eq(E.diaMes(''), null, 'célula vazia');
+  eq(E.diaMes('32/01'), null, 'dia impossível');
+}
+
 console.log('\n' + '─'.repeat(58));
 if (fail === 0) {
   console.log('\x1b[32m✓ ' + pass + ' verificações passaram\x1b[0m');

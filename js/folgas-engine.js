@@ -359,7 +359,42 @@
         const teamCol = find((s) => s === 'EQUIPE');
         let entCol = 0;
         for (let c = lastCur + 1; c <= maxCol; c++) if (norm(get(dr.r + 1, c)) === 'ENTRADA' || norm(get(dr.r, c)) === 'ENTRADA') { entCol = c; break; }
+
+        /* A coluna de aniversário.
+
+           Nas escalas de verdade ela não tem cabeçalho: na BEL é a BI, com
+           dd/mm, entre a coluna de equipe e as colunas "Data" dos cursos, e
+           a linha de cabeçalho ali está em branco. Então procurar por texto
+           não acha, e procurar só por posição acerta no arquivo de hoje e
+           erra calado no de janeiro.
+
+           Por isso as duas vias: cabeçalho quando existe (é o que os
+           modelos gerados pelo painel passam a trazer), e, não existindo,
+           uma coluna cujo conteúdo PAREÇA aniversário na maioria das
+           linhas — dia/mês válidos, variando de pessoa para pessoa. A
+           segunda via exige maioria justamente para não confundir com uma
+           coluna de data única repetida, que é data de outra coisa. */
         const endRow = bi + 1 < dateRows.length ? dateRows[bi + 1].r - 2 : maxRow;
+        let anivCol = find((s) => /^(ANIVERSARIO|DATADEANIVERSARIO|ANIV|NASCIMENTO|DATADENASCIMENTO|DTNASC)$/.test(s));
+        if (!anivCol) {
+          /* A busca por conteúdo para na primeira coluna "Data" ou
+             "ch max". Depois delas vêm as datas dos cursos — que são
+             datas de verdade, variadas e uma por pessoa, exatamente o
+             perfil do que se procura. Sem este limite o painel marcaria
+             AF no dia do curso de quem tem curso, que é o pior erro
+             possível aqui: plausível e calado. */
+          let limite = maxCol;
+          for (let c = lastCur + 1; c <= maxCol; c++) {
+            const h = norm(get(hdr, c));
+            if (h === 'DATA' || h === 'CHMAX' || /^F\d$/.test(h)) { limite = c - 1; break; }
+          }
+          let gente = 0;
+          for (let r = dr.r + 1; r <= endRow; r++) {
+            const A = get(r, 1), B = get(r, 2);
+            if (typeof B === 'string' && B.trim() && (typeof A === 'number' ? A >= 1000 : !!String(A ?? '').trim())) gente++;
+          }
+          anivCol = acharColunaAniversario(get, dr.r + 1, endRow, lastCur + 1, limite, d1904, gente);
+        }
         const title = String(get(hdr, 2) ?? get(hdr, 1) ?? sh.name).trim() || sh.name;
         const block = { title, headerRow: hdr, dateRow: dr.r, cur, prevCols, prevDates, groups: [] };
         let label = null, run = null, labelUse = {};
@@ -406,6 +441,7 @@
             gold: gv === 1 || gv === true || gv === '1',
             team: teamCol ? String(get(r, teamCol) ?? '') : '',
             entrada: entCol ? fmtTime(get(r, entCol)) : '', saida: entCol ? fmtTime(get(r, entCol + 1)) : '',
+            aniv: anivCol ? diaMes(get(r, anivCol), d1904) : null,
             gen: new Array(D).fill(''), manual: new Array(D).fill(''),
           };
           for (const code of [...fixed, ...prevCodes]) if (code && !KNOWN.has(code)) out.unknownCodes.add(code);
@@ -486,13 +522,29 @@
   /* Quantas folgas cada semana precisa receber DENTRO deste mês.
 
      Semana fechada pede 2, menos o que o mês anterior já entregou nela.
-     Semana aberta no fim do mês recebe a parte proporcional — o resto é
-     problema (e direito) do mês seguinte. */
+
+     Semana aberta no fim do mês é o caso que mudou. Ela pedia a parte
+     proporcional — num toco de quatro dias, round(2 × 4/7) = 1 — e o
+     painel parava por aí. Só que quatro dias úteis comportam as duas
+     folgas, e deixá-las para o mês seguinte empurra para lá um problema
+     que este mês resolvia sozinho.
+
+     Agora, com METADE DA SEMANA OU MAIS visível, ela mira as duas; com
+     menos que isso, segue na parte proporcional. O corte existe porque um
+     toco de um ou dois dias não comporta a regra: mirar duas folgas num
+     único dia faria o mês inteiro terminar com todo mundo de folga, e o
+     mês seguinte tem cinco ou seis dias daquela mesma semana para
+     acomodá-las com folga.
+
+     `alvo` é o que o solver persegue; `minimo`, o que o validador cobra.
+     A diferença entre os dois é dívida legítima — a segunda folga cai nos
+     primeiros dias do mês seguinte, que é o que a semana de segunda a
+     domingo permite. O validador escreve isso em vez de acusar falta. */
   function alvosDaSemana(semanas, porSemana, folgasNoPrev) {
     return semanas.map((s) => {
       const dias = s.fim - s.ini + 1;
       let alvo;
-      if (s.aberta) alvo = Math.round(porSemana * dias / 7);
+      if (s.aberta) alvo = dias >= 4 ? Math.min(porSemana, dias) : Math.round(porSemana * dias / 7);
       else if (s.antes) alvo = porSemana - (folgasNoPrev || 0);
       else alvo = porSemana;
       /* Nunca mais folgas do que a semana tem dia DENTRO deste mês.
@@ -502,6 +554,21 @@
          o mês insolúvel por um acidente de calendário. O que não coube é
          dívida do mês anterior, e o validador diz isso. */
       return Math.max(0, Math.min(alvo, porSemana, dias));
+    });
+  }
+
+  /* O piso de cada semana: abaixo disto é erro, não dívida.
+
+     Só a semana aberta tem piso menor que o alvo, e o piso dela é a parte
+     proporcional — o que o painel cobrava antes desta mudança. O que
+     passar disso o solver tenta, e não conseguindo não é falta: é a
+     segunda folga da semana caindo no mês seguinte, como a regra de
+     segunda a domingo permite. */
+  function minimosDaSemana(semanas, alvos, porSemana) {
+    return semanas.map((s, i) => {
+      if (!s.aberta) return alvos[i];
+      const dias = s.fim - s.ini + 1;
+      return Math.min(alvos[i], Math.round(porSemana * dias / 7));
     });
   }
 
@@ -542,9 +609,14 @@
       const semanas = semanasDoMes(D, dow);
       const noPrev = folgasNoRabicho(emp.prev, semanas[0] ? semanas[0].antes : 0, st);
       const alvos = alvosDaSemana(semanas, porSemana, noPrev);
+      const minimos = minimosDaSemana(semanas, alvos, porSemana);
       const required = alvos.reduce((a, b) => a + b, 0);
-      return { required: Math.min(required, D), maxH: row ? row.maxH : null, jorn, known: !!row,
-        semanas, alvos, porSemana };
+      const requiredMin = minimos.reduce((a, b) => a + b, 0);
+      /* `required` é o que o solver persegue; `requiredMin`, o que o
+         validador cobra. Cobrar o ideal faria a semana da virada com uma
+         folga só — que a regra permite — aparecer como "falta 1 folga". */
+      return { required: Math.min(required, D), requiredMin: Math.min(requiredMin, D),
+        maxH: row ? row.maxH : null, jorn, known: !!row, semanas, alvos, minimos, porSemana };
     }
     if (row) {
       const maxWork = Math.floor(row.maxH / row.jorn + 1e-9);
@@ -623,7 +695,16 @@
         semFecha[s.fim] = s.aberta ? 0 : 1;
       });
     }
-    const COTA = temCota ? 3 : 1;             // 0, 1, 2 folgas na semana
+    /* Estados da cota semanal: 0, 1, 2 e 3 folgas.
+
+       Eram três (0, 1, 2) e o 2 saturava, o que escondia a folga a mais:
+       uma semana com duas folgas geradas MAIS um dia travado na planilha
+       — o AF do aniversariante é o caso que trouxe isso à tona — fechava
+       com três e o estado continuava dizendo 2, então `fechaCota` não
+       cobrava nada. Com o quarto estado o excedente aparece e custa BIG,
+       e o solver gera uma folga a menos naquela semana, que é o certo:
+       o AF é uma das duas, não um terceiro dia. */
+    const COTA = temCota ? 4 : 1;
     const teto = (w) => Math.min(w, COTA - 1);
 
     /* Folgas seguidas que o mês anterior já deixou abertas. Sem isso, um mês
@@ -762,6 +843,11 @@
   function generate(model, st, opts = {}) {
     const D = model.month.days, dow = model.month.dow;
     const ctx = { D, dow, st, faOn: true };
+    /* O AF do aniversariante entra antes da distribuição: a data é fixa e
+       o solver precisa enxergá-la como ponto travado, não escolher em
+       cima dela. É idempotente — decide sempre a partir de `_fixed0`, o
+       que veio na planilha —, então rodar de novo não empilha nada. */
+    aplicarAniversarios(model, st);
     for (const sheet of model.sheets) for (const block of sheet.blocks) {
       const all = block.groups.flatMap((g) => g.emps);
       for (const g of block.groups) for (const e of g.emps) {
@@ -812,7 +898,13 @@
         const codes = Array.from({ length: D }, (_, d) => eff(e, d));
         const list = [];
         const allL = codes.every((c) => c === 'L');
-        const counted = codes.filter((c) => kind(c, st) === 'offC').length;
+        /* O AF que o painel lançou pela coluna de aniversário conta como
+           uma das folgas da semana — foi decisão da operação. A opção
+           "AF conta na meta" continua valendo para os AF que já vinham
+           digitados na planilha, que são outra coisa: ali o painel não
+           sabe de onde vieram nem por quê. */
+        const afAniv = e.aniversario != null && kind('AF', st) !== 'offC' ? 1 : 0;
+        const counted = codes.filter((c) => kind(c, st) === 'offC').length + afAniv;
         const offs = codes.filter((c) => { const k = kind(c, st); return k === 'offC' || k === 'offX'; }).length;
         // sequência (inclui mês anterior)
         const pr = prevRun(e, st);
@@ -832,14 +924,18 @@
           const porFA = temFAnaSeq ? ' — a folga agrupada no meio não quebra a sequência' : '';
           list.push({ lv: 'erro', t: `${maxSeen} dias seguidos sem folga (${a} até o dia ${worst[1] + 1})${porFA}` });
         }
-        if (!allL && counted < e.req.required) list.push({ lv: 'erro', t: `Faltam ${e.req.required - counted} folga(s): tem ${counted} de ${e.req.required}` });
+        /* O piso, e não o ideal. No 5x2 a semana que atravessa a virada
+           pode fechar com uma folga só, com a outra caindo no mês
+           seguinte; cobrar o ideal aqui acusaria falta onde a regra
+           permite. Fora do 5x2 os dois números são o mesmo. */
+        const piso = e.req.requiredMin != null ? e.req.requiredMin : e.req.required;
+        if (!allL && counted < piso) list.push({ lv: 'erro', t: `Faltam ${piso - counted} folga(s): tem ${counted} de ${piso}` });
 
         /* Cota semanal do 5x2: 2 folgas em cada semana de segunda a
            domingo. O total do mês não diz nada sobre isso — 4 numa semana e
            0 na seguinte somam os mesmos 8 de 2+2+2+2. */
         if (!allL && e.req.semanas && e.req.alvos) {
           e.req.semanas.forEach((sm, i) => {
-            if (sm.aberta) return;            // fecha no mês seguinte
             let n = 0;
             for (let d = sm.ini; d <= sm.fim; d++) {
               const k = kind(codes[d], st);
@@ -848,6 +944,22 @@
             const alvo = e.req.alvos[i];
             if (n === alvo) return;
             const faixa = `dias ${sm.ini + 1} a ${sm.fim + 1}`;
+
+            /* A semana que atravessa a virada do mês. Ela não fecha aqui:
+               os dias que faltam estão no mês seguinte, e a regra de
+               segunda a domingo permite que a segunda folga caia lá. O
+               que não se pode é ela ficar sem nenhuma. */
+            if (sm.aberta) {
+              const falta = alvo - n;
+              if (n < (e.req.minimos ? e.req.minimos[i] : 1)) {
+                list.push({ lv: 'erro', t: `Semana da virada (${faixa}) sem folga nenhuma — `
+                  + 'ela precisa de pelo menos uma dentro deste mês' });
+              } else if (falta > 0) {
+                list.push({ lv: 'info', t: `Semana da virada (${faixa}) com ${n} folga(s) de ${alvo}: `
+                  + `${falta} precisa(m) cair nos primeiros dias do mês seguinte, para fechar a semana de segunda a domingo` });
+              }
+              return;
+            }
             if (sm.antes && alvo < e.req.porSemana) {
               // A semana da virada já entrou devendo: o mês anterior é que
               // não entregou a parte dele, e aqui não cabe mais.
@@ -914,8 +1026,188 @@
       }
       g.work = Array.from({ length: D }, (_, d) => g.emps.filter((e) => !eff(e, d)).length);
     }
+    issues += marcarRepetidos(model);
     model.errorCount = issues;
     return model;
+  }
+
+  /* ---------- Aniversário ----------
+
+     O ano não interessa: o que a escala precisa é do dia e do mês. A
+     célula pode vir de três jeitos, e os três acontecem no mesmo arquivo:
+     data de verdade (serial do Excel), texto "20/06", ou texto com ano
+     "20/06/1989". Fórmula quebrada (#REF!, #N/D) e célula vazia voltam
+     nulo em silêncio — é ausência de dado, não erro de leitura. */
+  function diaMes(v, d1904) {
+    if (v == null || v === '') return null;
+    if (typeof v === 'number') {
+      if (!(v > 20000 && v < 80000)) return null;        // não é data: é CH, matrícula, contador
+      const d = serialToDate(v, d1904);
+      return { dia: d.getUTCDate(), mes: d.getUTCMonth() + 1 };
+    }
+    const m = /^\s*(\d{1,2})\s*[\/\-.]\s*(\d{1,2})(?:\s*[\/\-.]\s*\d{2,4})?\s*$/.exec(String(v));
+    if (!m) return null;
+    const dia = +m[1], mes = +m[2];
+    if (dia < 1 || dia > 31 || mes < 1 || mes > 12) return null;
+    return { dia, mes };
+  }
+
+  /* Acha a coluna de aniversário pelo conteúdo, quando ela não tem
+     cabeçalho — que é o caso das escalas em uso.
+
+     Exige que a maioria das linhas pareça dia/mês E que haja variedade: a
+     mesma data repetida em todo mundo é data de outra coisa (vigência,
+     competência), não aniversário. Varre da direita das colunas de dia
+     até o fim, e devolve a primeira que passa nos dois crivos. */
+  function acharColunaAniversario(get, r0, r1, c0, c1, d1904, linhasComGente) {
+    const total = linhasComGente || (r1 - r0 + 1);
+    let melhor = 0, melhorScore = 0;
+    for (let c = c0; c <= c1; c++) {
+      let lidas = 0, validas = 0;
+      const vistas = new Set();
+      for (let r = r0; r <= r1; r++) {
+        const v = get(r, c);
+        if (v == null || v === '') continue;
+        lidas++;
+        const dm = diaMes(v, d1904);
+        if (dm) { validas++; vistas.add(dm.dia + '/' + dm.mes); }
+      }
+      if (lidas < 4) continue;                       // pouca amostra: não dá para afirmar
+      if (validas / lidas < 0.7) continue;           // maioria tem de parecer data
+      if (vistas.size < Math.max(3, validas * 0.4)) continue;   // variedade: aniversário não se repete
+      /* Densidade. É o crivo que separa aniversário de data de curso: as
+         colunas "Data" das escalas guardam datas de verdade, variadas e
+         uma por pessoa — mas só para quem tem curso no mês, que é um
+         punhado. Aniversário todo mundo tem. */
+      if (validas < total * 0.6) continue;
+      const score = validas * (vistas.size / validas);
+      if (score > melhorScore) { melhorScore = score; melhor = c; }
+    }
+    return melhor;
+  }
+
+  /* Lança o AF de quem faz aniversário no mês da escala.
+
+     Roda ANTES do solver, e não depois, porque a data é fixa: não é uma
+     folga que o painel escolhe, é um ponto travado em volta do qual ele
+     tem de distribuir o resto. Lançar depois obrigaria a desfazer o que
+     já tivesse sido decidido naquela semana.
+
+     Precedência, decidida com a operação:
+       férias e afastamento vencem  — a pessoa já está fora, não há folga
+                                      a conceder, e sobrescrever L apagaria
+                                      férias da planilha;
+       curso vence, com aviso       — curso tem data fechada com
+                                      fornecedor e não se remarca por isso;
+       folga vira AF                — é o mesmo dia livre, com o nome certo;
+       dia vazio recebe AF.
+
+     O AF conta como uma das duas folgas da semana — foi a decisão da
+     operação —, e é por isso que ele entra em `fixed`: dali o solver o
+     enxerga na cota semanal e procura só a segunda folga. */
+  function aplicarAniversarios(model, st) {
+    const D = model.month.days;
+    const mesEscala = model.month.month + 1;
+    const rel = { lancados: [], emFerias: [], emCurso: [], eraFolga: [], foraDoMes: 0, semData: 0, total: 0 };
+
+    for (const sheet of model.sheets) for (const b of sheet.blocks) for (const g of b.groups) for (const e of g.emps) {
+      if (!e._fixed0) e._fixed0 = e.fixed.slice();
+      e.aniversario = null;
+      if (e.vaga) continue;                       // vaga não faz aniversário
+      if (!e.aniv) { rel.semData++; continue; }
+      rel.total++;
+      if (e.aniv.mes !== mesEscala) { rel.foraDoMes++; continue; }
+
+      const d = e.aniv.dia - 1;
+      if (d < 0 || d >= D) continue;              // 31 num mês de 30: data inválida, ignora
+
+      const onde = { e, d, aba: sheet.name, grupo: g.name || g.label };
+      const atual = e._fixed0[d];
+      const k = kind(atual, st);
+
+      if (atual === 'L' || (atual && k !== 'free' && atual !== 'F' && atual !== 'FA' && atual !== 'AF' && atual !== 'K')) {
+        rel.emFerias.push({ ...onde, atual }); continue;
+      }
+      if (atual === 'K' || (e.curso && e.curso.has(d))) { rel.emCurso.push({ ...onde }); continue; }
+      if (atual === 'F' || atual === 'FA') rel.eraFolga.push({ ...onde, atual });
+
+      e.fixed[d] = 'AF';
+      e.aniversario = d;
+      rel.lancados.push(onde);
+    }
+
+    model.aniversarios = rel;
+    return rel;
+  }
+
+  /* ---------- A mesma pessoa em dois lugares ----------
+
+     Alguém lançado no Rampa-A e também no Rampa-C recebe duas escalas
+     independentes: duas metas de folga, duas sequências, dois domingos.
+     Cada uma fecha certinho sozinha, então nenhuma validação por pessoa
+     acusa nada — e na soma a pessoa aparece trabalhando em dois turnos no
+     mesmo dia. É um defeito que só existe olhando o arquivo inteiro, e é
+     por isso que esta conferência mora fora do laço por aba.
+
+     Cruza por matrícula e por nome, separadamente, porque os dois erros
+     acontecem: a mesma matrícula repetida em dois grupos, e a mesma
+     pessoa lançada duas vezes com matrículas diferentes (uma delas
+     errada). Nome vira comparável tirando acento, pontuação e espaço
+     dobrado — "JOSÉ DA SILVA" e "JOSE DA  SILVA" são a mesma pessoa.
+
+     Só sinaliza. Resolver é decidir quem fica em qual turno, e isso não
+     é decisão de software. */
+  const chaveNome = (s) => String(s || '')
+    .toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^A-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+
+  function marcarRepetidos(model) {
+    const porMat = new Map(), porNome = new Map();
+    for (const sheet of model.sheets) for (const block of sheet.blocks) for (const g of block.groups) {
+      for (const e of g.emps) {
+        if (e.vaga) continue;                 // vaga em aberto repete de propósito
+        const onde = { e, aba: sheet.name, grupo: g.name || g.label || block.title };
+        const mat = e.mat != null && e.mat !== '' ? String(e.mat) : null;
+        if (mat) { if (!porMat.has(mat)) porMat.set(mat, []); porMat.get(mat).push(onde); }
+        const nm = chaveNome(e.name);
+        if (nm) { if (!porNome.has(nm)) porNome.set(nm, []); porNome.get(nm).push(onde); }
+      }
+    }
+
+    // Aba e grupo com o mesmo nome viram um só: "RAMPA-A · RAMPA-A"
+    // faz o leitor procurar a diferença que não existe.
+    const local = (o) => (o.aba && o.grupo && o.grupo !== o.aba ? `${o.aba} · ${o.grupo}` : (o.aba || o.grupo));
+    const lugares = (lista) => lista.map(local).join(', ');
+    const repetidos = [];
+    let erros = 0;
+
+    const anota = (lista, texto) => {
+      for (const o of lista) {
+        o.e.issues = o.e.issues || [];
+        o.e.issues.push({ lv: 'erro', t: texto });
+      }
+      erros += lista.length;
+    };
+
+    for (const [mat, lista] of porMat) {
+      if (lista.length < 2) continue;
+      repetidos.push({ tipo: 'matricula', chave: mat, nome: lista[0].e.name, onde: lista.map((o) => ({ aba: o.aba, grupo: o.grupo })) });
+      anota(lista, `Matrícula ${mat} aparece ${lista.length}× na escala: ${lugares(lista)} — a pessoa recebe duas escalas e pode acabar em dois turnos no mesmo dia`);
+    }
+
+    for (const [, lista] of porNome) {
+      if (lista.length < 2) continue;
+      // Já acusado pela matrícula: não repetir o mesmo defeito duas vezes.
+      const mats = new Set(lista.map((o) => String(o.e.mat ?? '')));
+      if (mats.size <= 1) continue;
+      repetidos.push({ tipo: 'nome', chave: lista[0].e.name, nome: lista[0].e.name,
+        onde: lista.map((o) => ({ aba: o.aba, grupo: o.grupo, mat: o.e.mat })) });
+      anota(lista, `${lista[0].e.name} aparece ${lista.length}× na escala, com matrículas diferentes `
+        + `(${[...mats].join(', ')}): ${lugares(lista)} — confira se não é a mesma pessoa lançada duas vezes`);
+    }
+
+    model.repetidos = repetidos;
+    return erros;
   }
 
   /* ---------- Saída ---------- */
@@ -1102,8 +1394,12 @@
         // tendo conteúdo original — é justamente a folga que saiu de lá.
         const orig = e._fixed0 ? e._fixed0[d] : e.fixed[d];
         const temCurso = e.curso && e.curso.has(d);
-        if (orig && !temCurso) continue;
-        const v = temCurso ? 'K' : (e.manual[d] || e.gen[d]);
+        /* O AF do aniversariante é escrito mesmo quando o dia já tinha
+           conteúdo: o caso de a folga F virar AF é exatamente esse — o
+           dia continua livre, muda o nome do código. */
+        const temAniv = e.aniversario === d;
+        if (orig && !temCurso && !temAniv) continue;
+        const v = temCurso ? 'K' : (temAniv ? 'AF' : (e.manual[d] || e.gen[d]));
         if (!v || v === '·') continue;
         if (!upd.has(e.row)) upd.set(e.row, new Map());
         upd.get(e.row).set(block.cur[d], v);
@@ -1155,6 +1451,7 @@
 
   const api = { loadWorkbook, buildModel, generate, validate, groupTSV, buildXlsx, defaultSettings, kind, quebraSequencia, eff, colName, DOW, MESES,
     loadCursos, indexarCursos, aplicarCursos, limparCursos, matNum, dataCurso, patchWorkbook,
-    REGIMES, REGIME_PADRAO, regimeDe, requirement, serialToDate };
+    REGIMES, REGIME_PADRAO, regimeDe, requirement, serialToDate, marcarRepetidos, chaveNome,
+    aplicarAniversarios, diaMes, acharColunaAniversario };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.FolgaEngine = api;
 })(typeof window !== 'undefined' ? window : globalThis);

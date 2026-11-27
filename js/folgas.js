@@ -326,6 +326,14 @@ function folgasOverlayHTML() {
             <h4>Cursos do mês</h4>
             <div id="fg-cursos"></div>
           </div>
+          <!-- A coluna de aniversário não tem cabeçalho nas escalas em
+               uso, então ela é achada pelo conteúdo. Quem acha por
+               conteúdo precisa mostrar o que achou: é a diferença entre
+               conferir e confiar. -->
+          <div class="fg-panel" id="fg-panel-aniv" hidden>
+            <h4>Aniversariantes do mês</h4>
+            <div id="fg-aniv"></div>
+          </div>
           <div class="fg-panel">
             <h4>Legenda</h4>
             <div class="fg-legend">
@@ -567,6 +575,9 @@ function folgasMontar() {
     $('#fg-sheet').innerHTML = html;
   }
 
+  /* Aba e grupo com o mesmo nome viram um só. */
+  const fgLocal = (o) => (o.aba && o.grupo && o.grupo !== o.aba ? `${o.aba} · ${o.grupo}` : (o.aba || o.grupo || ''));
+
   function renderIssues() {
     const m = S.model; if (!m) { $('#fg-issues').innerHTML = ''; return; }
     const items = [];
@@ -574,9 +585,69 @@ function folgasMontar() {
       for (const i of e.issues) if (i.lv !== 'info') items.push({ si, key: `${si}|${bi}|${gi}|${ei}`, sheet: s.name, e, i });
     }))));
     items.sort((a, b) => (a.i.lv === 'erro' ? 0 : 1) - (b.i.lv === 'erro' ? 0 : 1));
-    if (!items.length) { $('#fg-issues').innerHTML = `<p class="empty-ok">Tudo dentro das regras em todas as abas.</p>`; return; }
-    $('#fg-issues').innerHTML = `<div class="issues">${items.slice(0, 200).map((x) =>
+
+    /* Pessoa repetida vem antes de tudo, e uma vez só.
+
+       Ela já aparece na lista comum — com o aviso colado em cada uma das
+       cópias, porque é na linha dela que o usuário vai procurar. Mas
+       quem abre a tela precisa ver primeiro QUANTAS são e QUEM são: é um
+       defeito do arquivo, não da distribuição, e nenhuma folga que o
+       painel gere está certa enquanto a pessoa estiver em dois turnos. */
+    const rep = (m.repetidos || []);
+    const faixa = rep.length ? `
+      <div class="fg-repetidos">
+        <h4>${rep.length} pessoa(s) lançada(s) em mais de um lugar</h4>
+        <ul>${rep.slice(0, 30).map((r) => `<li>
+          <b>${esc(r.nome || r.chave)}</b>
+          ${r.tipo === 'matricula' ? `<span class="mat">mat. ${esc(r.chave)}</span>` : '<span class="mat alerta">matrículas diferentes</span>'}
+          <span class="onde">${r.onde.map((o) => esc(fgLocal(o))).join(' &nbsp;·&nbsp; ')}</span>
+        </li>`).join('')}${rep.length > 30 ? `<li class="mais">… e mais ${rep.length - 30}</li>` : ''}</ul>
+        <p>Cada cópia recebe uma escala própria — duas metas de folga, dois domingos — e a pessoa pode
+          acabar trabalhando em dois turnos no mesmo dia. Decida em qual grupo ela fica e apague a outra linha.</p>
+      </div>` : '';
+
+    if (!items.length && !rep.length) { $('#fg-issues').innerHTML = `<p class="empty-ok">Tudo dentro das regras em todas as abas.</p>`; return; }
+    $('#fg-issues').innerHTML = faixa + `<div class="issues">${items.slice(0, 200).map((x) =>
       `<button type="button" class="${x.i.lv === 'erro' ? 'e' : 'w'}" data-jump="${x.key}"><span class="who">${esc(x.e.name)}</span><span class="what">${esc(x.sheet)} · ${esc(x.i.t)}</span></button>`).join('')}</div>`;
+  }
+
+  /* Aniversariantes: quem o painel achou, e o que ele NÃO lançou.
+
+     A coluna é descoberta pelo conteúdo quando não tem cabeçalho, então
+     esta lista é a conferência: se aparecerem 200 aniversariantes num mês
+     ou nomes com datas que não batem, o painel pegou a coluna errada e dá
+     para ver antes de baixar o arquivo. */
+  function renderAniv() {
+    const box = $('#fg-aniv'), painel = $('#fg-panel-aniv');
+    const rel = S.model && S.model.aniversarios;
+    if (!rel || (!rel.lancados.length && !rel.emFerias.length && !rel.emCurso.length)) {
+      painel.hidden = true; box.innerHTML = ''; return;
+    }
+    painel.hidden = false;
+
+    const lista = (titulo, itens, cls, linha) => itens.length
+      ? `<details class="fg-cur-bloco ${cls || ''}"${itens === rel.lancados ? ' open' : ''}>
+           <summary>${esc(titulo)} <b>${itens.length}</b></summary>
+           <ul>${itens.slice(0, 60).map(linha).join('')}
+           ${itens.length > 60 ? `<li class="mais">… e mais ${itens.length - 60}</li>` : ''}</ul></details>`
+      : '';
+
+    const quem = (x) => `<li><b>${esc(x.e.name)}</b> <span class="dia">dia ${x.d + 1}</span>
+      <span class="onde">${esc(fgLocal(x))}</span></li>`;
+
+    box.innerHTML = [
+      lista('AF lançado', rel.lancados, 'ok', quem),
+      lista('Já era folga — virou AF', rel.eraFolga, '', quem),
+      lista('Em curso no dia — não lancei', rel.emCurso, 'alerta',
+        (x) => `<li><b>${esc(x.e.name)}</b> <span class="dia">dia ${x.d + 1}</span>
+          <span class="onde">curso tem data fechada; remarque o curso ou conceda o AF em outro dia</span></li>`),
+      lista('De férias ou afastado no dia — não lancei', rel.emFerias, '',
+        (x) => `<li><b>${esc(x.e.name)}</b> <span class="dia">dia ${x.d + 1}</span>
+          <span class="onde">${esc(x.atual || '')}</span></li>`),
+    ].join('')
+      + `<p class="fg-aniv-nota">${rel.total} pessoa(s) com data de nascimento na planilha.
+         ${rel.semData ? `<b>${rel.semData}</b> sem data — para essas o painel não tem como saber.` : ''}
+         O AF conta como uma das duas folgas da semana.</p>`;
   }
 
   // Relatório dos cursos. A parte que mais importa não é o que entrou, e sim
@@ -633,7 +704,7 @@ function folgasMontar() {
     $('#fg-btn-regen').disabled = !has; $('#fg-btn-clear').disabled = !has || !allEmps(S.model).some(({ e }) => e.manual.some(Boolean));
     $('#fg-btn-dl').hidden = !S.wb;
     renderSummary(); if (!has) return;
-    renderTabs(); renderSheet(); renderIssues(); renderUnknown(); renderCursos(); renderPlano();
+    renderTabs(); renderSheet(); renderIssues(); renderUnknown(); renderCursos(); renderAniv(); renderPlano();
   }
 
   // Editar um dia mexe em: a célula, as 5 colunas de conferência da linha e o
